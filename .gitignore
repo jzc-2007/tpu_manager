@@ -1,4 +1,4 @@
 .xiboconfig
 data.json
 lock.json
-*.sh
+test*

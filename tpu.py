@@ -9,6 +9,7 @@ import utils.users as users
 import utils.jobs as jobs
 import utils.logger as logger
 from utils.helpers import is_integer, is_boolean, to_boolean, DATA_PATH
+import utils.error_handler as handler
 
 def find_user(data, args):
     for arg in args:
@@ -38,18 +39,20 @@ def input_user(data):
 
 if __name__ == '__main__':
     args = sys.argv
+    cmd = args[1]
 
     ############### JOBS that don't require a user ###############
-    if args[1] == 'tldr': desc.tldr()
-    elif args[1] == 'upd-logdir': jobs.upd_logdir(args[2], args[3])
-    elif args[1] == 'finish-job': jobs.finish_job(args[2])
-    elif args[1] == 'help' or args[1] == '-h': desc.explain(args[2])
-    elif args[1] == 'add-tpu-alias' or args[1] == '-ta': logger.add_tpu_alias(args[2], args[3])
-    elif args[1] == '-lta': logger.explain_tpu_aliases()
-    elif args[1] == 'add-user': users.create_user()
-    elif args[1] == 'del-user': users.del_user()
-    elif args[1] == 'check-tpu': logger.check_tpu(args[2:])
-    elif args[1] == 'list-users' or args[1] == '-lu': users.list_users()
+    if cmd == 'tldr': desc.tldr()
+    elif cmd == 'upd-log': jobs.upd_log(args[2], args[3], args[4], args[5]) #windows, log_dir, ka, time
+    elif cmd == 'finish-job': jobs.finish_job(args[2])
+    elif cmd == 'help' or cmd == '-h': desc.explain(args[2])
+    elif cmd == 'add-tpu-alias' or cmd == '-ta': logger.add_tpu_alias(args[2], args[3])
+    elif cmd == '-lta': logger.explain_tpu_aliases()
+    elif cmd == 'add-user': users.create_user()
+    elif cmd == 'del-user': users.del_user()
+    elif cmd == 'check-tpu': logger.check_tpu(args[2:])
+    elif cmd == 'list-users' or cmd == '-lu': users.list_users()
+    elif cmd == 'init': handler.initialization()
     else: 
     ############### JOBS that require a user ###############
         with open(DATA_PATH, 'r') as file: data = json.load(file)
@@ -57,8 +60,6 @@ if __name__ == '__main__':
         if user is None: user = input_user(data)
         user = data['users'][user]
         user_object = users.user_from_dict(user)
-
-        cmd = args[1]
         if cmd == 'set-cur': dirs.set_cur(user_object, args[2:])
         elif cmd == 'set-dir': dirs.set_dir(user_object, args[2])
         elif cmd == 'get-settings': logger.get_settings(user_object)

@@ -1,5 +1,5 @@
-from helpers import DATA_PATH
-from data_io import read_and_lock_data, write_and_unlock_data, release_lock_data
+from .helpers import DATA_PATH
+from .data_io import read_and_lock_data, write_and_unlock_data, release_lock_data
 import os, json, time
 class User():
     def __init__(self, id, name, tmux_name = None):
@@ -9,11 +9,14 @@ class User():
         self.working_dir = {}
         self.job_data = []
         self.config_aliases = {}
+        self.windows_offset = 1
+        self.logs = []
         self.settings = {
             "monitor_after_run": True,
             "monitor_upd_time": 5,
             "monitor_length": 500,
             "show_length": 200,
+            "time_zone": "us"
         }
     def to_dict(self):
         return {
@@ -23,7 +26,9 @@ class User():
             "working_dir": self.working_dir,
             "job_data": self.job_data,
             "config_aliases": self.config_aliases,
-            "settings": self.settings
+            "settings": self.settings,
+            "windows_offset": self.windows_offset,
+            "logs": self.logs
         }
     def add_alias(self, alias, command):
         self.aliases[alias] = command
@@ -41,6 +46,8 @@ def user_from_dict(config_dict):
     user.config_aliases = config_dict['config_aliases']
     user.settings = config_dict['settings']
     user.job_data = config_dict['job_data']
+    user.windows_offset = config_dict['windows_offset']
+    user.logs = config_dict['logs']
     return user
 
 def create_user():
@@ -58,7 +65,18 @@ def create_user():
             id += 1
         user_id = input(f'Enter user id, empty for default={id}:')
         user_id = int(user_id) if user_id != '' else id
+        timezone = input('Enter timezone(us/cn), empty for default=us:')
+        if timezone == '':
+            timezone = 'us'
+        if timezone not in ['us', 'cn']:
+            raise ValueError(f"Timezone {timezone} not supported")
         user = User(user_id, name, tmux_name)
+        init_dir = input('Enter initial working directory(abs. path), empty for to be set later:')
+        assert os.path.exists(init_dir) or init_dir == '', f"Directory {init_dir} does not exist"
+        if init_dir != '':
+            user.working_dir['1'] = init_dir
+        
+        user.settings['time_zone'] = timezone
         data['user_list'].append(name)
         data['id_list'].append(user_id)
         data['id_user_dict'][user_id] = name

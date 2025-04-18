@@ -1,7 +1,7 @@
 import os, re, time, json
-from utils.helpers import is_integer, DATA_PATH
-import utils.users as users
-from data_io import read_and_lock_data, write_and_unlock_data, release_lock_data
+from .helpers import is_integer, DATA_PATH
+from . import users
+from .data_io import read_and_lock_data, write_and_unlock_data, release_lock_data
 RED="\033[1;31m"
 GREEN="\033[1;32m"
 YELLOW="\033[1;33m"
@@ -10,6 +10,7 @@ NC="\033[0m"
 
 def run(user_obj, args):
     data = read_and_lock_data()
+    user_obj = users.user_from_dict(data['users'][user_obj.name])
     try:
         dir = '1'
         for arg in args:
@@ -31,34 +32,37 @@ def run(user_obj, args):
 
         config_args = ""
         tag = None
+        rule = 'auto-reapply' if tpu in data['all_tpus']['preemptible'] else ''
+        monitor = True
+        ignore_keys = ['dir', 'user', 'id', 'tag', 'rule', 'monitor']
         for arg in args:
             #check if contains '='
             if '=' in arg:
                 key, value = arg.split('=')
-                if key != 'dir' and key != 'user' and key != 'id' and key != 'tag':
+                if key not in ignore_keys:
                     if key in user_obj.config_aliases:
                         config_args += f" --{user_obj.config_aliases[key]}={value}"
                     else:
                         config_args += f" --{key}={value}"
                 if key == 'tag':
                     tag = value
+                if key == 'rule':
+                    rule = value
+                if key == 'monitor':
+                    if value == 'False' or value == '0' or value == 'false':
+                        monitor = False
+                    elif value == 'True' or value == '1' or value == 'true':
+                        monitor = True
+                    else:
+                        raise ValueError(f"Value {value} is not a valid boolean")
 
         # kill all the windows that uses the same tpu
         session_name = user_obj.tmux_name
         all_jobs = user_obj.job_data
-        all_ids = [0]
-        for job in all_jobs:
-            if job['tpu'] == tpu:
-                print(f"Killing window {job['windows_id']} using tpu {tpu}")
-                os.system(f"tmux kill-window -t {session_name}:{job['windows_id']}")
-                time.sleep(0.5)
-                all_jobs.remove(job)
-            all_ids.append(job['windows_id'])
 
         # Find a minimum id not in use
-        id = 0
-        while id in all_ids:
-            id += 1
+        id = user_obj.windows_offset
+        data['users'][user_obj.name]['windows_offset'] = id + 1
         all_jobs.append({
             'windows_id': id,
             'job_dir_id': dir,
@@ -68,6 +72,10 @@ def run(user_obj, args):
             'log_dir': None,
             'extra_configs': config_args,
             'finished': False,
+            'status': '0',
+            'monitor': monitor,
+            'rules': rule,
+            'error': None
         })
         data['users'][user_obj.name]['job_data'] = all_jobs
 
@@ -128,7 +136,18 @@ def check(user_obj, args):
         last_line = last_line.rstrip()
         # Get last user_obj.monitor_length words
         last_line = last_line[-user_obj.settings['monitor_length']:]
-        if re.search(r'[cC]ompiling', last_line) or re.search(r'[cC]ompilation', last_line)or re.search(r'[cC]ompile', last_line):
+        if job_data["finished"]:
+            print(f"Status: {GREEN}Finished{NC}")
+        if job_data["error"] is not None:
+            if job_data["error"] == 'preempted':
+                print(f"Status: {RED}Preempted{NC}")
+                print(f"msg: {last_line}")
+            elif job_data["error"] == 'rerun':
+                print(f"Status: {YELLOW}Rerun{NC}")
+            else:
+                print(f"Status: {RED}Error{NC}")
+                print(f"msg: {last_line}")
+        elif re.search(r'[cC]ompiling', last_line) or re.search(r'[cC]ompilation', last_line)or re.search(r'[cC]ompile', last_line):
             print(f"Status: {GREEN}Compiling{NC}")
         elif re.search(r'[eE]poch\s([0-9]{1,4})', last_line):
             epoch = re.search(r'[eE]poch\s([0-9]{1,6})', last_line).group(1)
@@ -143,8 +162,6 @@ def check(user_obj, args):
         elif re.search(r'[eE]rror', last_line):
             print(f"Status: {RED}Error{NC}")
             print(f"msg: {last_line}")
-        elif re.search(r't1v', last_line):
-            print(f"{GREEN}Finished{NC}")
         else:
             print(f"{YELLOW}Unknown{NC}")
             print(f"msg: {last_line[-user_obj.settings['show_length']:]}")
@@ -208,7 +225,7 @@ def monitor(user_obj, args):
         user_obj = users.user_from_dict(user_obj)
 
 
-def upd_logdir(window, log_dir):
+def upd_log(window, log_dir, ka, start_time):
     data = read_and_lock_data()
     try:
         session_name, window_num = window.split(':')
@@ -219,6 +236,8 @@ def upd_logdir(window, log_dir):
                 for job in data['users'][user]['job_data']:
                     if job['windows_id'] == window_num:
                         job['log_dir'] = log_dir
+                        job['tpu'] = ka
+                        job['start_time'] = start_time
                         break
                 break
         write_and_unlock_data(data)

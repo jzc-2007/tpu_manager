@@ -1,10 +1,10 @@
-from helpers import DATA_PATH, is_integer, is_boolean, to_boolean
-from data_io import read_and_lock_data, write_and_unlock_data, release_lock_data
+from .helpers import DATA_PATH, is_integer, is_boolean, to_boolean
+from .data_io import read_and_lock_data, write_and_unlock_data, release_lock_data, read_data
+from .users import user_from_dict
 import json
 
 def explain_tpu_aliases():
-    with open(DATA_PATH, 'r') as file:
-        data = json.load(file)
+    data = read_data()
     for alias, name in data['tpu_aliases'].items():
         print(f"{alias}: {name}")
 
@@ -55,10 +55,24 @@ def show_config_alias(user_object):
 
 def del_config_alias(user_object, args):
     data = read_and_lock_data()
+    user_object = user_from_dict(data['users'][user_object.name])
     try:
         alias = args[0]
         user_object.del_config_alias(alias)
         data['users'][user_object.name] = user_object.to_dict()
+        write_and_unlock_data(data)
+    except:
+        release_lock_data()
+
+def read_user_logs(user_object, args):
+    for msg in user_object.logs:
+        print(msg)
+
+def clear_user_logs(user_object):
+    data = read_and_lock_data()
+    try:
+        user_object.logs = []
+        data['users'][user_object.name]['logs'] = user_object.logs
         write_and_unlock_data(data)
     except:
         release_lock_data()

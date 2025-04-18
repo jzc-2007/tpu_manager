@@ -1,7 +1,7 @@
 import json
 import os
-from data_io import read_and_lock_data, write_and_unlock_data, release_lock_data
-from helpers import is_integer, DATA_PATH
+from .data_io import read_and_lock_data, write_and_unlock_data, release_lock_data
+from .helpers import is_integer, DATA_PATH
 
 def get_dir(user_obj, num):
     if not is_integer(num):
