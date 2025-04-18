@@ -1,0 +1,123 @@
+import json
+import os
+import time
+import re
+import sys
+import utils.descriptions as desc
+import utils.directories as dirs
+import utils.users as users
+import utils.jobs as jobs
+import utils.logger as logger
+from utils.helpers import is_integer, is_boolean, to_boolean, DATA_PATH
+
+def find_user(data, args):
+    for arg in args:
+        if arg in data['user_list'] or arg.startswith('id=') or arg.startswith('user='):
+            if arg.startswith('id='):
+                id = arg.split('=')[1]
+                assert id in data['id_user_dict'], f"User with id {id} not found"
+                return data['id_user_dict'][id]
+            elif arg.startswith('user='):
+                user = arg.split('=')[1]
+                assert user in data['user_list'], f"User {user} not found"
+                return user
+            else:
+                return arg
+    return None
+
+def input_user(data):
+    res = input(f'Please enter user name/id, or empty for default user 0({data["id_user_dict"]["0"]}):')
+    if res == '':
+        return data['id_user_dict']["0"]
+    elif res in data['user_list']:
+        return res
+    elif res in data['id_user_dict']:
+        return data['id_user_dict'][res]
+    else:
+        raise ValueError(f"User {res} not found")
+
+if __name__ == '__main__':
+    args = sys.argv
+
+    ############### JOBS that don't require a user ###############
+    if args[1] == 'tldr': desc.tldr()
+    elif args[1] == 'upd-logdir': jobs.upd_logdir(args[2], args[3])
+    elif args[1] == 'finish-job': jobs.finish_job(args[2])
+    elif args[1] == 'help' or args[1] == '-h': desc.explain(args[2])
+    elif args[1] == 'add-tpu-alias' or args[1] == '-ta': logger.add_tpu_alias(args[2], args[3])
+    elif args[1] == '-lta': logger.explain_tpu_aliases()
+    elif args[1] == 'add-user': users.create_user()
+    elif args[1] == 'del-user': users.del_user()
+    elif args[1] == 'check-tpu': logger.check_tpu(args[2:])
+    elif args[1] == 'list-users' or args[1] == '-lu': users.list_users()
+    else: 
+    ############### JOBS that require a user ###############
+        with open(DATA_PATH, 'r') as file: data = json.load(file)
+        user = find_user(data, args[1:])
+        if user is None: user = input_user(data)
+        user = data['users'][user]
+        user_object = users.user_from_dict(user)
+
+        cmd = args[1]
+        if cmd == 'set-cur': dirs.set_cur(user_object, args[2:])
+        elif cmd == 'set-dir': dirs.set_dir(user_object, args[2])
+        elif cmd == 'get-settings': logger.get_settings(user_object)
+        elif cmd == 'set-settings': logger.set_settings(user_object, args[2:])
+        elif cmd == 'get-dir': print(dirs.get_dir(user_object, args[2]))
+        elif cmd == 'check': jobs.check(user_object, args[2:])
+        elif cmd == 'monitor': jobs.monitor(user_object, args[2:])
+        elif cmd == 'run': jobs.run(user_object, args[2:])
+        elif cmd == 'ls': dirs.list_dir(user_object, args[2:])
+        elif cmd == 'kill-window' or cmd == '-kw': jobs.kill_window(user_object, args[2:])
+        elif cmd == 'add-config-alias' or cmd == '-a' or cmd == '-alias': logger.add_config_alias(user_object, args[2:])
+        elif cmd == 'show-config-alias' or cmd == '-sa': logger.show_config_alias(user_object)
+        elif cmd == 'del-config-alias': logger.del_config_alias(user_object, args[2:])
+        elif cmd == 'add-tag': jobs.add_tag(user_object, args[2], args[3])
+        else: print(f"Unknown command {cmd}")
+
+# DATA 
+# {
+#     "users":{
+#        "user1": {
+#             "id": 1,
+#             "name": "user1",
+#             "tmux_name": "user1",
+#             "working_dir": "/home/user1",
+#             "config_aliases": {
+#                 "lr": "config.training.learning_rate",
+#                 "bs": "config.training.batch_size"
+#             },
+#             "settings": {
+#                 "auto attach": True,
+#             }
+#             "job_data":[
+#                 {
+#                     "windows_id": 1,
+#                     "job_dir_id": 1,
+#                     "job_dir": "/home/user1/job1",
+#                     "tpu": "v2-32-1",
+#                     "job_tags": "residual",
+#                     "log_dir": "/home/user1/job1/logs",
+#                     "extra_configs": "--config1=value1 --config2=value2",
+#                     "finished": false
+#                 }
+#             ]
+#         }
+#     },
+#     "tpu_aliases": {
+#     },
+#     "user_list": [
+#         "user1",
+#     ],
+#     "id_list": [
+#         1,
+#     ],
+#     "id_user_dict": {
+#         1: "user1",
+#     },
+#     "user_id_dict": {
+#         "user1": 1,
+#     },
+# }
+
+
