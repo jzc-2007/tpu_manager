@@ -64,6 +64,7 @@ def run(user_obj, args):
         id = user_obj.windows_offset
         data['users'][user_obj.name]['windows_offset'] = id + 1
         all_jobs.append({
+            'user': user_obj.name,
             'windows_id': id,
             'job_dir_id': dir,
             'job_dir': dir_path,
@@ -98,6 +99,7 @@ def run(user_obj, args):
         write_and_unlock_data(data)
 
     except:
+        print(f"Error: {RED}Failed to create job in tmux window {session_name}:{id}{NC}")
         release_lock_data()
 
     time.sleep(3)
@@ -125,8 +127,9 @@ def check(user_obj, args):
             if job['windows_id'] == int(window_id):
                 job_data = job
                 break
-        if job_data is None and window_id == '0':
-            print(f'Window {window_id} (NOT FOUND IN DATA)')
+        if job_data is None:
+            if window_id != '0':
+                print(f'Window {window_id} (NOT FOUND IN DATA)')
         else:
             print(f'Window {window_id} (tag: {job_data["job_tags"]})')
             print(f"DIR: {job_data['job_dir'].split('/')[-1]}\nTPU: {job_data['tpu']}")
@@ -242,6 +245,7 @@ def upd_log(window, log_dir, ka, start_time):
                 break
         write_and_unlock_data(data)
     except:
+        print(f"{RED}Error: Failed to update log data{NC}")
         release_lock_data()
 
 def add_tag(user_object, job_window_id, tag):
@@ -255,4 +259,5 @@ def add_tag(user_object, job_window_id, tag):
                 print(f"Set tag {tag} to window {job_window_id}")
                 break
     except:
+        print(f"{RED}Error: Failed to set tag {tag} to window {job_window_id}{NC}")
         release_lock_data()

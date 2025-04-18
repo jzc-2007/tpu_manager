@@ -45,6 +45,7 @@ def rerun_job(job):
         id = user_obj.windows_offset
         data['users'][user_obj.name]['windows_offset'] = id + 1
         new_job = {
+            'user': user_obj.name,
             'windows_id': id,
             'job_dir_id': job["job_dir_id"],
             'job_dir': job["job_dir"],
@@ -64,17 +65,20 @@ def rerun_job(job):
         session_name = user_obj.tmux_name
         tpu = job["tpu"]
         config_args = job["extra_configs"]
+        tags = job["job_tags"]
+        job_dir = job["job_dir"]
+        log_dir = job["log_dir"]
         print(f"Rerun job {job['windows_id']} for user {user_obj.name} with new windows id {id}")
         if os.system(f"tmux list-windows -t {session_name} | grep {id}") == 0:
             print(f"Killing tmux window {session_name}:{id}")
             os.system(f"tmux kill-window -t {session_name}:{id}")
-            time.sleep(0.5)
+            time.sleep(1.5)
 
                 # create the tmux window
-        os.system(f"tmux new-window -t {session_name}:{id} -n {job["job_tags"]}")
+        os.system(f"tmux new-window -t {session_name}:{id} -n {tags}")
         time.sleep(0.5)
-        os.system(f"tmux send-keys -t {session_name}:{id} 'cd {job["job_dir"]}' Enter")
-        os.system(f"tmux send-keys -t {session_name}:{id} 'source kill_remote.sh {tpu}; source staging.sh ka={tpu} {config_args} --config.load_from={job['log_dir']}' Enter") 
+        os.system(f"tmux send-keys -t {session_name}:{id} 'cd {job_dir}' Enter")
+        os.system(f"tmux send-keys -t {session_name}:{id} 'source kill_remote.sh {tpu}; source staging.sh ka={tpu} {config_args} --config.load_from={log_dir}' Enter") 
         
         print(f"Successfully created job in tmux window {session_name}:{id}")
 
@@ -105,6 +109,7 @@ def reapply_rerun(job, timeout=1800):
         print(f"Reapply TPU {ka} timeout, killing the process")
         process.terminate()
         process.join()
+        running_processes.remove(process)
         print(f"Reapply TPU {ka} timeout")
     else:
         if not result_queue.empty():
@@ -118,23 +123,26 @@ def reapply_rerun(job, timeout=1800):
             print(f"Reapply TPU {ka} failed, no result returned")
 
 def mainloop():
-    dead_job_list = []
+    preempted_job_list = []
     data = read_data()
     for user in data["user_list"]:
         for job in data["users"][user]["job_data"]:
             if not job["finished"] and job['monitor']:
                 if check_status(job) == 'preempted':
-                    dead_job_list.append(job)
-                    # log the dead job
-                    data = read_and_lock_data()
-                    try:
-                        for job in data["users"][user]["job_data"]:
-                            if job["windows_id"] == job["windows_id"]:
-                                job['error'] = 'preempted'
-                        write_and_unlock_data(data)
-                    except:
-                        release_lock_data()
-    for job in dead_job_list:
+                    preempted_job_list.append(job)
+
+    for job in preempted_job_list:
+        user = job["user"]
+        data = read_and_lock_data()
+        try:
+            for jb in data["users"][user]["job_data"]:
+                if jb["windows_id"] == job["windows_id"]:
+                    jb['error'] = 'preempted'
+            write_and_unlock_data(data)
+        except:
+            release_lock_data()
+
+    for job in preempted_job_list:
         if job["rules"] == 'auto-reapply':
             reapply_rerun(job, timeout=1800)
     

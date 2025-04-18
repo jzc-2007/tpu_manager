@@ -38,15 +38,18 @@ def set_cur(user_obj, args):
     except:
         release_lock_data()
 
-def set_dir(user_obj, dir):
+def set_dir(user_obj, args):
     data = read_and_lock_data()
     try:
+        assert len(args) >= 2, "Please specify a directory and a number"
+        dir, num = args[0], args[1]
         if not os.path.exists(dir):
             raise ValueError(f"Directory {dir} does not exist")
         
-        data['users'][user_obj.name]['working_dir'].append(dir)
-        print(f"Set directory {dir} to {dir}")
+        data['users'][user_obj.name]['working_dir'][num] = dir
+        print(f"Set directory {num} to {dir}")
         print("Current directories:")
+        
         for i, dir in data['users'][user_obj.name]['working_dir'].items():
             print(f"{i}: {dir}", end='')
             if i == "1":

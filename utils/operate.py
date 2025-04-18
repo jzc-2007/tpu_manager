@@ -43,9 +43,15 @@ def reapply_pre(tpu):
     elif 'v2-32' in tpu: acc_type = 'v2-32'
     elif 'v4-32' in tpu: acc_type = 'v4-32'
     elif 'v4-8' in tpu: acc_type = 'v4-8'
+    else: raise ValueError(f"Unknown TPU type {tpu}")
     
     cmd = f"yes | gcloud compute tpus tpu-vm delete {tpu} --zone={zone} --quiet"
-    os.system(cmd)
+    try:
+        subprocess.run(cmd.split(), timeout=300, check=True)
+    except subprocess.CalledProcessError as e:
+        print(f"TPU deletion failed: {e}")
+        return 'delete failed'
+
     cmd = f"yes | gcloud compute tpus tpu-vm create {tpu} --zone={zone} --accelerator-type={acc_type} --version=tpu-ubuntu2204-base --preemptible"
     try:
         subprocess.run(cmd, shell=True, timeout=300, check=True)
@@ -54,7 +60,12 @@ def reapply_pre(tpu):
         return 'timeout'
 
     cmd = f"gcloud compute tpus describe {tpu} --zone={zone} --format='value(state)'"
-    state = os.popen(cmd).read().strip()
+    try:
+        state = subprocess.check_output(cmd, shell=True).decode().strip()
+    except subprocess.CalledProcessError:
+        print("Failed to query TPU state")
+        return 'describe failed'
+
     if state == 'READY':
         print(f"Now, TPU VM {tpu} is good, ready to use")
         cmd = f"bash xibo_init_pre.sh {tpu} {zone}"

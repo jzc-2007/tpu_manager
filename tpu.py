@@ -61,7 +61,7 @@ if __name__ == '__main__':
         user = data['users'][user]
         user_object = users.user_from_dict(user)
         if cmd == 'set-cur': dirs.set_cur(user_object, args[2:])
-        elif cmd == 'set-dir': dirs.set_dir(user_object, args[2])
+        elif cmd == 'set-dir': dirs.set_dir(user_object, args[2:])
         elif cmd == 'get-settings': logger.get_settings(user_object)
         elif cmd == 'set-settings': logger.set_settings(user_object, args[2:])
         elif cmd == 'get-dir': print(dirs.get_dir(user_object, args[2]))
