@@ -8,6 +8,7 @@ import utils.directories as dirs
 import utils.users as users
 import utils.jobs as jobs
 import utils.logger as logger
+import utils.operate as operate
 from utils.helpers import is_integer, is_boolean, to_boolean, DATA_PATH
 import utils.error_handler as handler
 
@@ -43,8 +44,8 @@ if __name__ == '__main__':
 
     ############### JOBS that don't require a user ###############
     if cmd == 'tldr': desc.tldr()
-    elif cmd == 'upd-log': jobs.upd_log(args[2], args[3], args[4], args[5]) #windows, log_dir, ka, time
-    elif cmd == 'finish-job': jobs.finish_job(args[2])
+    elif cmd == 'upd-log': jobs._upd_log(args[2], args[3], args[4], args[5]) #windows, log_dir, ka, time
+    elif cmd == 'finish-job': jobs._finish_job(args[2])
     elif cmd == 'help' or cmd == '-h': desc.explain(args[2])
     elif cmd == 'add-tpu-alias' or cmd == '-ta': logger.add_tpu_alias(args[2], args[3])
     elif cmd == '-lta': logger.explain_tpu_aliases()
@@ -53,6 +54,7 @@ if __name__ == '__main__':
     elif cmd == 'check-tpu': logger.check_tpu(args[2:])
     elif cmd == 'list-users' or cmd == '-lu': users.list_users()
     elif cmd == 'init': handler.initialization()
+    elif cmd == 'reapply': operate.reapply_pre(args[2]) 
     else: 
     ############### JOBS that require a user ###############
         with open(DATA_PATH, 'r') as file: data = json.load(file)
@@ -65,15 +67,18 @@ if __name__ == '__main__':
         elif cmd == 'get-settings': logger.get_settings(user_object)
         elif cmd == 'set-settings': logger.set_settings(user_object, args[2:])
         elif cmd == 'get-dir': print(dirs.get_dir(user_object, args[2]))
-        elif cmd == 'check': jobs.check(user_object, args[2:])
-        elif cmd == 'monitor': jobs.monitor(user_object, args[2:])
-        elif cmd == 'run': jobs.run(user_object, args[2:])
+        elif cmd == 'check': jobs._check(user_object, args[2:])
+        elif cmd == 'monitor': jobs._monitor(user_object, args[2:])
+        elif cmd == 'run': jobs._run(user_object, args[2:])
         elif cmd == 'ls' or cmd == 'lsdir': dirs.list_dir(user_object, args[2:])
-        elif cmd == 'kill-window' or cmd == '-kw': jobs.kill_window(user_object, args[2:])
+        elif cmd == 'kill-window' or cmd == '-kw': jobs._kill_window(user_object, args[2:])
         elif cmd == 'add-config-alias' or cmd == '-a' or cmd == '-alias': logger.add_config_alias(user_object, args[2:])
         elif cmd == 'show-config-alias' or cmd == '-sa': logger.show_config_alias(user_object)
         elif cmd == 'del-config-alias': logger.del_config_alias(user_object, args[2:])
-        elif cmd == 'add-tag': jobs.add_tag(user_object, args[2], args[3])
+        elif cmd == 'add-tag': jobs._add_tag(user_object, args[2], args[3])
+        elif cmd == 'clear-finished': jobs._clear_finished_jobs(user_object)
+        elif cmd == 'clear-error': jobs._clear_error_jobs(user_object)
+        elif cmd == 'clear-all' or cmd == 'clear': jobs._clear_all_jobs(user_object)
         else: print(f"Unknown command {cmd}")
 
 # DATA 

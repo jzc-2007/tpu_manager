@@ -15,6 +15,7 @@ class User():
             "monitor_after_run": True,
             "monitor_upd_time": 5,
             "monitor_length": 500,
+            "monitor_verbose": False,
             "show_length": 200,
             "time_zone": "us"
         }

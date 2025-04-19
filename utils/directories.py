@@ -20,9 +20,11 @@ def set_cur(user_obj, args):
         current_dir = os.getcwd()
         if len(args) == 0:
             print("Please specify a number")
+            release_lock_data()
             return
         if not is_integer(args[0]):
             print("Please specify a number")
+            release_lock_data()
             return
         dir_num = int(args[0])
         assert dir_num >= 1 and dir_num <= 100, "Directory number must be between 1 and 100"
