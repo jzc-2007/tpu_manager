@@ -54,7 +54,8 @@ if __name__ == '__main__':
     elif cmd == 'check-tpu': logger.check_tpu(args[2:])
     elif cmd == 'list-users' or cmd == '-lu': users.list_users()
     elif cmd == 'init': handler.initialization()
-    elif cmd == 'reapply': operate.reapply_pre(args[2]) 
+    elif cmd == 'reapply': operate.apply_pre(args[2], delete=True)
+    elif cmd == 'apply': operate.apply_pre(args[2], delete=False)
     else: 
     ############### JOBS that require a user ###############
         with open(DATA_PATH, 'r') as file: data = json.load(file)

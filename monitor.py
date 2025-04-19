@@ -4,7 +4,7 @@ import time
 import multiprocessing
 import utils.users as users
 from utils.data_io import read_and_lock_data, write_and_unlock_data, release_lock_data, read_data
-from utils.operate import reapply_pre, kill_tpu
+from utils.operate import apply_pre, kill_tpu
 DATA_PATH="/home/jzc/zhichengjiang/working/xibo_tpu_manager/data.json"
 running_processes = []
 RED="\033[1;31m"
@@ -98,7 +98,7 @@ def rerun_job(job):
 
 def reapply_worker(ka, result_queue):
     try:
-        result = reapply_pre(ka)
+        result = apply_pre(ka, delete=True)
         result_queue.put(result)
     except Exception as e:
         print(f"{RED}[ERROR]{NC} reapply_worker: Failed to reapply TPU {ka}: {e}")

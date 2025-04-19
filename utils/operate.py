@@ -10,6 +10,7 @@ OPERATE_PATH = "/home/jzc/zhichengjiang/working/xibo_tpu_manager"
 def get_zone_pre(tpu):
     """
     Get the zone of the TPU, and check if it is preemptible.
+    If the input is alias, it will be replaced with the real TPU name.
     """
     data = read_data()
     tpu_aliases = data['tpu_aliases']
@@ -34,10 +35,10 @@ def get_zone_pre(tpu):
     if zone is None:
         print(f"{RED}[ERROR]{NC} get_zone_pre: TPU {tpu} not found in any zone")
         return None, None
-    return zone, tpu in data['all_tpus']['preemptible']
+    return zone, tpu in data['all_tpus']['preemptible'], tpu
 
 def kill_tpu(tpu):
-    zone, pre = get_zone_pre(tpu)
+    zone, pre, tpu = get_zone_pre(tpu)
     if zone is None: return
     print(f"Killing jobs in TPU {tpu} in zone {zone}...")
     cmd = '''
@@ -46,11 +47,11 @@ def kill_tpu(tpu):
     '''
     os.system(cmd.format(tpu=tpu, zone=zone))
 
-def reapply_pre(tpu):
-    zone, pre = get_zone_pre(tpu)
+def apply_pre(tpu, delete=True):
+    zone, pre, tpu = get_zone_pre(tpu)
     if zone is None: return
     if not pre:
-        print(f"{RED}[ERROR]{NC} reapply_pre: TPU {tpu} in zone {zone} is not preemptible")
+        print(f"{RED}[ERROR]{NC} apply_pre: TPU {tpu} in zone {zone} is not preemptible")
         return
     print(f"Re-apply in TPU {tpu} in zone {zone}...")
     acc_type = None
@@ -58,48 +59,48 @@ def reapply_pre(tpu):
     elif 'v2-32' in tpu: acc_type = 'v2-32'
     elif 'v4-32' in tpu: acc_type = 'v4-32'
     elif 'v4-8' in tpu: acc_type = 'v4-8'
-    else: raise ValueError(f"{RED}[ERROR]{NC} reapply_pre: Unknown TPU type {tpu}")
-    
-    cmd = f"yes | gcloud compute tpus tpu-vm delete {tpu} --zone={zone} --quiet"
-    try:
-        subprocess.run(cmd.split(), timeout=300, check=True)
-    except subprocess.CalledProcessError as e:
-        print(f"{RED}[ERROR]{NC} reapply_pre: TPU deletion failed: {e}")
-        return 'delete failed'
+    else: raise ValueError(f"{RED}[ERROR]{NC} apply_pre: Unknown TPU type {tpu}")
+    if delete:
+        cmd = f"gcloud compute tpus tpu-vm delete {tpu} --zone={zone} --quiet"
+        try:
+            subprocess.run(cmd.split(), timeout=300, check=True)
+        except subprocess.CalledProcessError as e:
+            print(f"{RED}[ERROR]{NC} apply_pre: TPU deletion failed: {e}")
+            return 'delete failed'
 
-    cmd = f"yes | gcloud compute tpus tpu-vm create {tpu} --zone={zone} --accelerator-type={acc_type} --version=tpu-ubuntu2204-base --preemptible"
+    cmd = f"gcloud compute tpus tpu-vm create {tpu} --zone={zone} --accelerator-type={acc_type} --version=tpu-ubuntu2204-base --preemptible"
     try:
-        subprocess.run(cmd, shell=True, timeout=300, check=True)
+        subprocess.run(cmd, shell=True, timeout=600, check=True)
     except subprocess.TimeoutExpired:
-        print("{RED}[ERROR]{NC} reapply_pre: applying preemptible TPU timed out")
+        print("{RED}[ERROR]{NC} apply_pre: applying preemptible TPU timed out")
         return 'timeout'
 
     cmd = f"gcloud compute tpus describe {tpu} --zone={zone} --format='value(state)'"
     try:
         state = subprocess.check_output(cmd, shell=True).decode().strip()
     except subprocess.CalledProcessError:
-        print("{RED}[ERROR]{NC} reapply_pre: Failed to query TPU state")
+        print("{RED}[ERROR]{NC} apply_pre: Failed to query TPU state")
         return 'describe failed'
 
     if state == 'READY':
         print(f"Now, TPU VM {tpu} is good, ready to use")
         cmd = f"bash xibo_init_pre.sh {tpu} {zone}"
         try:
-            subprocess.run(cmd, shell=True, timeout=300, check=True, cwd=OPERATE_PATH)
+            subprocess.run(cmd, shell=True, timeout=600, check=True, cwd=OPERATE_PATH)
         except subprocess.TimeoutExpired:
-            print("{RED}[ERROR]{NC} reapply_pre: initializing preemptible TPU timed out")
+            print("{RED}[ERROR]{NC} apply_pre: initializing preemptible TPU timed out")
             return 'init failed'
         
         cmd = f"bash test_remote_env.sh {tpu} {zone}"
         try:
             subprocess.run(cmd, shell=True, timeout=300, check=True, cwd=OPERATE_PATH)
         except subprocess.TimeoutExpired:
-            print("{RED}[ERROR]{NC} reapply_pre: testing remote env timed out")
+            print("{RED}[ERROR]{NC} apply_pre: testing remote env timed out")
             return 'test failed'
         
         return 'success'
     else:
-        print(f"{RED}[ERROR]{NC} reapply_pre: TPU {tpu} not ready, state: {state}")
+        print(f"{RED}[ERROR]{NC} apply_pre: TPU {tpu} not ready, state: {state}")
         return 'unknown'
 
 

@@ -10,8 +10,11 @@ NC="\033[0m"
 
 def test_get_zone_pre():
     try:
-        assert operate.get_zone_pre("kmh-tpuvm-v2-32-preemptible-2") == ("europe-west4-a", True), f"T1, Expected ('europe-west4-a', True), got {operate.get_zone_pre('kmh-tpuvm-v2-32-preemptible-2')}"
-        assert operate.get_zone_pre("kmh-tpuvm-v2-32-1") == ("us-central1-a", False), f"T2, Expected ('us-central1-a', False), got {operate.get_zone_pre('kmh-tpuvm-v2-32-1')}"
+        assert operate.get_zone_pre("kmh-tpuvm-v2-32-preemptible-2") == ("europe-west4-a", True, "kmh-tpuvm-v2-32-preemptible-2"), f"T1, Expected ('europe-west4-a', True, 'kmh-tpuvm-v2-32-preemptible-2'), got {operate.get_zone_pre('kmh-tpuvm-v2-32-preemptible-2')}"
+        assert operate.get_zone_pre("kmh-tpuvm-v2-32-1") == ("us-central1-a", False, "kmh-tpuvm-v2-32-1"), f"T2, Expected ('us-central1-a', False, 'kmh-tpuvm-v2-32-1'), got {operate.get_zone_pre('kmh-tpuvm-v2-32-1')}"
+        print(f"{GREEN}[PASSED]{NC} test_get_zone_pre")
+        assert operate.get_zone_pre("v2-32-p2") == ("europe-west4-a", True, "kmh-tpuvm-v2-32-preemptible-2"), f"T3, Expected ('europe-west4-a', True, 'kmh-tpuvm-v2-32-preemptible-2'), got {operate.get_zone_pre('kmh-tpuvm-v2-32-preemptible-2')}"
+        assert operate.get_zone_pre("v2-32-1") == ("us-central1-a", False, "kmh-tpuvm-v2-32-1"), f"T4, Expected ('us-central1-a', False, 'kmh-tpuvm-v2-32-1'), got {operate.get_zone_pre('kmh-tpuvm-v2-32-1')}"
         print(f"{GREEN}[PASSED]{NC} test_get_zone_pre")
     except Exception as e:
         print(f"{RED}[FAILED]{NC} test_get_zone_pre")
