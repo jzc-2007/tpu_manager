@@ -68,7 +68,7 @@ if __name__ == '__main__':
         elif cmd == 'check': jobs.check(user_object, args[2:])
         elif cmd == 'monitor': jobs.monitor(user_object, args[2:])
         elif cmd == 'run': jobs.run(user_object, args[2:])
-        elif cmd == 'ls': dirs.list_dir(user_object, args[2:])
+        elif cmd == 'ls' or cmd == 'lsdir': dirs.list_dir(user_object, args[2:])
         elif cmd == 'kill-window' or cmd == '-kw': jobs.kill_window(user_object, args[2:])
         elif cmd == 'add-config-alias' or cmd == '-a' or cmd == '-alias': logger.add_config_alias(user_object, args[2:])
         elif cmd == 'show-config-alias' or cmd == '-sa': logger.show_config_alias(user_object)

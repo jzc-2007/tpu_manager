@@ -154,7 +154,7 @@ if __name__ == "__main__":
             mainloop()
             cur_time = time.time()
             time_used = cur_time - last_time # in seconds
-            time.sleep(max(0, 1800 - time_used))
+            time.sleep(max(0, 600 - time_used))
     except KeyboardInterrupt:
         print("KeyboardInterrupt, exiting...")
         # kill all the processes

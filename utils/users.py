@@ -109,6 +109,7 @@ def del_user():
         del data['user_id_dict'][name]
         write_and_unlock_data(data)
     except:
+        print(f"Error deleting user {name}: NOT FOUND")
         release_lock_data()
 
 def list_users():

@@ -1,7 +1,7 @@
 import os, re, time, json
 from .helpers import is_integer, DATA_PATH
 from . import users
-from .data_io import read_and_lock_data, write_and_unlock_data, release_lock_data
+from .data_io import read_and_lock_data, write_and_unlock_data, release_lock_data, read_data
 RED="\033[1;31m"
 GREEN="\033[1;32m"
 YELLOW="\033[1;33m"
@@ -29,6 +29,19 @@ def run(user_obj, args):
                 break
         if tpu is None:
             print('No TPU Specified, use the TPU in ka.sh instead')
+
+        # Check if there is job running using this tpu
+        if tpu is not None:
+            for user in data['users']:
+                for job in data['users'][user]['job_data']:
+                    if job['tpu'] == tpu and job['finished'] == False and job['error'] is None:
+                        print(f"{YELLOW}[WARNING]{NC} There is a job running using tpu {tpu}, by user {user}")
+                        print(f"DO YOU WANT TO CONTINUE? (y/n)")
+                        res = input()
+                        if res != 'y' and res != 'Y':
+                            print("Exiting...")
+                            release_lock_data()
+                            return
 
         config_args = ""
         tag = None
@@ -222,8 +235,7 @@ def monitor(user_obj, args):
         # clear the screen
         os.system('clear' if os.name == 'posix' else 'cls')
         # Update user object
-        with open(DATA_PATH, 'r') as file:
-            data = json.load(file)
+        data = read_data()
         user_obj = data['users'][user_obj.name]
         user_obj = users.user_from_dict(user_obj)
 

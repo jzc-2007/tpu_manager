@@ -21,6 +21,9 @@ def set_cur(user_obj, args):
         if len(args) == 0:
             print("Please specify a number")
             return
+        if not is_integer(args[0]):
+            print("Please specify a number")
+            return
         dir_num = int(args[0])
         assert dir_num >= 1 and dir_num <= 100, "Directory number must be between 1 and 100"
         data['users'][user_obj.name]['working_dir'][str(dir_num)] = current_dir
@@ -36,6 +39,7 @@ def set_cur(user_obj, args):
 
         write_and_unlock_data(data)
     except:
+        print("Error setting directory")
         release_lock_data()
 
 def set_dir(user_obj, args):
