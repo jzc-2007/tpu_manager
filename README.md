@@ -5,6 +5,9 @@ This is a automatic job manager to run TPU jobs. It supports to auto-resume the 
 ### Basic Usage
 - **IMPORTANT**:
 You should **update your scripts** to the newest version that supports command-line arguments. The newest scripts can be pulled from zhh's repo. The current finishing check is based on wandb final output, so please make sure your scripts are using wandb to log the final output.
+
+Also, this script is not very robust to attack, so try not do OOD things, for example set username to be `run`, `false` or Chinese characters.
+
 #### Setup
 ```bash
 tpu add-user # Then follow the guide
@@ -21,7 +24,13 @@ tpu set-cur num username # Set the working directory<num> to the current directo
 tpu ls username # List all the working directories
 tpu run tpu_name username [dir=1] [tag=suibian] # Run the job in working directory<dir>, tag is optional and you can see it in the monitor window
 ```
-The ``tpu_name`` is of the format ``v2-32-6``or ``v2-32-p1`` or ``v4-32-py2``. For more detail use ``tpu -lta``(list tpu aliases), or ``tpu -ta alias FULL_TPU_NAME``(to add a new alias).  
+The ``tpu_name`` is of the format ``v2-32-6``or ``v2-32-p1`` or ``v4-32-py2``. For more detail use ``tpu -lta``(list tpu aliases), or ``tpu -ta alias FULL_TPU_NAME``(to add a new alias). 
+
+Example:
+```bash
+tpu run v2-32-6 xibo # default run the job in working directory 1
+tpu run v2-32-p1 lyy dir=2 tag=bird # run the job in working directory 2 
+```
 
 #### monitor jobs
 If the TPU is a preemptible TPU, ``tpu run`` will **auto-rerun when GRPC**, and will **auto-reapply** and rerun when preempted. 
@@ -165,6 +174,7 @@ Future work:
 - [ ] More testing/docs
 - [ ] Support to read the spreadsheet, then we can auto-choose the TPU to run a job
 - [ ] More auto env solvers
+- [ ] Logging for every user so that you can check the things happen since last time
 
 ### New Scripts
 ```bash

@@ -1,6 +1,11 @@
 from .helpers import DATA_PATH
 from .data_io import read_and_lock_data, write_and_unlock_data, release_lock_data
 import os, json, time
+RED="\033[1;31m"
+GREEN="\033[1;32m"
+YELLOW="\033[1;33m"
+PURPLE="\033[1;34m"
+NC="\033[0m"
 class User():
     def __init__(self, id, name, tmux_name = None):
         self.id = id
@@ -84,6 +89,7 @@ def create_user():
         data['user_id_dict'][name] = user_id
         data['users'][name] = user.to_dict()
         write_and_unlock_data(data)
+        print(f"{GREEN}[SUCCESS]{NC} create_user: Created user {name} with id {user_id} and tmux name {tmux_name}, start working with cute TPUs!")
     except:
         release_lock_data()
 
@@ -110,7 +116,7 @@ def del_user():
         del data['user_id_dict'][name]
         write_and_unlock_data(data)
     except:
-        print(f"Error deleting user {name}: NOT FOUND")
+        print(f"{RED}[Error] {NC}del_user: Deleting user {name} failed: NOT FOUND")
         release_lock_data()
 
 def list_users():
