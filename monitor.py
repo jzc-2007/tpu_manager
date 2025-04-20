@@ -188,7 +188,7 @@ if __name__ == "__main__":
             cur_time = time.time()
             time_used = cur_time - last_time # in seconds
             print(f"Loop {num_loops} finished, time used: {time_used:.2f} seconds")
-            time.sleep(max(0, 60 - time_used))
+            time.sleep(max(0, 600 - time_used))
     except KeyboardInterrupt:
         print("KeyboardInterrupt, exiting...")
         # kill all the processes

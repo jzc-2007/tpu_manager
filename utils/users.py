@@ -57,7 +57,7 @@ def create_user():
         name = input('Enter user name:')
         if name in data['user_list']:
             raise ValueError(f"User {name} already exists")
-        tmux_name = input(f'Enter tmux name, empty for default={name}:')
+        tmux_name = input(f'Enter tmux name, empty for default={name}(Warning: This may clear you all current windows if the tmux_name already exists):')
         if tmux_name == '':
             tmux_name = name
         # Find a mininum id not in use
