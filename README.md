@@ -1,12 +1,12 @@
 # Auto TPU job manager for Google Cloud Platform (experimental)
 
-This is a automatic job manager to run TPU jobs. It supports to auto-resume the preempted/grpc TPUs, and monitor the jobs status.
+This is a automatic job manager for running TPU jobs. It supports auto-resuming the preempted/grpc TPUs, and monitoring the jobs status.
 
 ### Basic Usage
 - **IMPORTANT**:
-You should **update your scripts** to the newest version that supports command-line arguments. The newest scripts can be pulled from zhh's repo. The current finishing check is based on wandb final output, so please make sure your scripts are using wandb to log the final output.
+You should **update your scripts** to the newest version supporting command-line arguments. The newest scripts can be pulled from zhh's repo. The current finishing check is based on wandb final output, so please make sure your scripts are using wandb to log the final output.
 
-Also, this script is not very robust to attack, so try not do OOD things, for example set username to be `run`, `false` or Chinese characters.
+Also, this script is not very robust to attack, so try not to do OOD things, for example, setting username to be `run`, `false` or Chinese characters.
 
 #### Setup
 ```bash
@@ -17,7 +17,7 @@ tpu add-user # Then follow the guide
 tpu tldr
 tpu -h command # details of the command
 ```
-The documentation is not very complete now.
+The documentation is not very complete now, please refer README as the main source of truth. (Or, look at the code lol)
 #### Run jobs
 ```bash
 tpu set-cur num username # Set the working directory<num> to the current directory, default directory is 1
@@ -33,12 +33,12 @@ tpu run v2-32-p1 lyy dir=2 tag=bird # run the job in working directory 2
 ```
 
 #### monitor jobs
-If the TPU is a preemptible TPU, ``tpu run`` will **auto-rerun when GRPC**, and will **auto-reapply** and rerun when preempted. 
+If the TPU is a preemptible TPU, ``tpu run`` will **auto-rerun when GRPC**, and will **auto-reapply and rerun** when preempted. 
 The ``tpu run`` command will open a monitor window to monitor all the jobs you have, and you can also use 
 ```bash
 tpu monitor username
 ``` 
-to get that. It will update every 5 seconds, and for one-time check, you can use ``tpu check username``.
+to get that. It will update in every 5 seconds, and for one-time check, you can use ``tpu check username``.
 
 ### More Functions
 
@@ -59,12 +59,12 @@ tpu run v2-32-6 xibo lr=0.01
 tpu run v2-32-6 xibo config.training.learning_rate=0.01 # This is also supported
 ```
 #### kill windows/jobs
-We recommend to use our kill windows command to kill the windows. You can use this to kill the specific tmux window
+We recommend using our kill-windows command to kill the windows instead of killing by yourself. You can use this command to kill the specific tmux window:
 ```bash
 tpu -kw/kill-window window_number username
 ```
 
-Also, you can clear all the jobs that is finished/error by
+Also, you can clear all the jobs that are finished/error by
 ```bash
 tpu clear-finished username # clear all the finished jobs
 tpu clear-error username # clear all the error jobs
@@ -88,16 +88,16 @@ tpu add-tag window_num tag_name username # add a tag to the job
 ```
 
 #### Sanity check and tests
-Some very naive sanity checks is implemented in ``unit_tests.py``.
+Some very naive sanity checks are implemented in ``unit_tests.py``.
 
 
 ### For Developers
 
-The user interface is implemented in ``tpu.py``, and the specific detail are in ``utils/``. ``monitor.py`` do the check and rerun work, and will be run all day.
+The user interface is implemented in ``tpu.py``, and the specific detail is in ``utils/``. ``monitor.py`` does the check and rerun work, and will be run all day.
 
-For ``utils/``,``desciptions.py`` do all the documentation work,``operate.py`` do the tpu remote operations, and ``job.py`` do the job management. ``directories.py`` deal with the user working dirs, and ``logger.py`` do most of the logging with meta-data.(see more in next paragraph)
+For ``utils/``,``desciptions.py`` does all the documentation work,``operate.py`` does the tpu remote operations, and ``job.py`` does the job management. ``directories.py`` deals with the user working dirs, and ``logger.py`` does most of the logging with meta-data.(see more in next paragraph)
 
-The key data is stored in ``data.json``, and the program read and write it using the API in ``data_io.py``, which implements locking.(in ``lock.json``) The structure of ``data.json`` is of the following:
+The key data is stored in ``data.json``, and the program read and write it using the API in ``data_io.py``, which implements locking(in ``lock.json``). The structure of ``data.json`` is of the following:
 ```bash
 {
     "users": {
