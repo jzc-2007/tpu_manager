@@ -1,6 +1,6 @@
 # Auto TPU job manager for Google Cloud Platform (experimental)
 
-This is a automatic job manager for running TPU jobs. It supports auto-resuming the preempted/grpc TPUs, and monitoring the jobs status.
+This is an automatic job manager for running TPU jobs. It supports auto-resuming the preempted/grpc TPUs, and monitoring the jobs status.
 
 ### Basic Usage
 - **IMPORTANT**:
