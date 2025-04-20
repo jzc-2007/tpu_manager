@@ -4,7 +4,7 @@ This is a automatic job manager to run TPU jobs. It supports to auto-resume the 
 
 ### Basic Usage
 - **IMPORTANT**:
-You should **update your scripts** to the newest version that supports command-line arguments. The newest scripts can be pulled from zhh's repo, and please update ka.sh(which **will not be auto-updated**) according to the README. The current finishing check is based on wandb final output, so please make sure your scripts are using wandb to log the final output.
+You should **update your scripts** to the newest version that supports command-line arguments. The newest scripts can be pulled from zhh's repo. The current finishing check is based on wandb final output, so please make sure your scripts are using wandb to log the final output.
 #### Setup
 ```bash
 tpu add-user # Then follow the guide
