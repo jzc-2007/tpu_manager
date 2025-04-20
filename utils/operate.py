@@ -60,14 +60,14 @@ def apply_pre(tpu, delete=True):
     if delete:
         cmd = f"gcloud compute tpus tpu-vm delete {tpu} --zone={zone} --quiet"
         try:
-            subprocess.run(cmd.split(), timeout=300, check=True)
+            subprocess.run(cmd.split(), timeout=300, check=True, stdout=subprocess.DEVNULL)
         except subprocess.CalledProcessError as e:
             print(f"{RED}[ERROR]{NC} apply_pre: TPU deletion failed: {e}")
             return 'delete failed'
 
     cmd = f"gcloud compute tpus tpu-vm create {tpu} --zone={zone} --accelerator-type={acc_type} --version=tpu-ubuntu2204-base --preemptible"
     try:
-        subprocess.run(cmd, shell=True, timeout=600, check=True)
+        subprocess.run(cmd, shell=True, timeout=600, check=True, stdout=subprocess.DEVNULL)
     except subprocess.TimeoutExpired:
         print("{RED}[ERROR]{NC} apply_pre: applying preemptible TPU timed out")
         return 'timeout'

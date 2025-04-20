@@ -34,6 +34,10 @@ def rerun_job(job):
         user = data['users'][job["user"]]
         user_obj = users.user_from_dict(user)
         new_stage = int(job['stage']) + 1
+        if new_stage > 10:
+            print(f"{RED}[ERROR]{NC} rerun_job: job {job['windows_id']} for user {user_obj.name} has reached max stage, cannot rerun")
+            release_lock_data()
+            return
         id = user_obj.windows_offset
         data['users'][user_obj.name]['windows_offset'] = id + 1
         new_job = {
