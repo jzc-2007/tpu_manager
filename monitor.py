@@ -1,4 +1,4 @@
-import os
+import os, sys
 import json
 import time
 import multiprocessing
@@ -13,40 +13,27 @@ YELLOW="\033[1;33m"
 PURPLE="\033[1;34m"
 NC="\033[0m"
 def check_status(job):
-    if job["log_dir"] == '':
+    if job["log_dir"] == '' or job["log_dir"] is None:
         return None
     log_dir = job["log_dir"]+"/output.log"
     if not os.path.exists(log_dir):
+        print(f"{RED}[ERROR]{NC} check_status: log file {log_dir} not found")
         return None
     with open(log_dir, 'r') as file:
         lines = file.readlines()
-    # Check if there is: This TPU has terminal state "PREEMPTED", so it cannot be used anymore. in log
     for line in lines:
         if "This TPU has terminal state \"PREEMPTED\"" in line:
             return 'preempted'
         if "GRPC error" in line:
             return 'grpc'
+    return None
 
 def rerun_job(job):
-    #{
-    #     'windows_id': id,
-    #     'job_dir_id': dir,
-    #     'job_dir': dir_path,
-    #     'tpu': tpu,
-    #     'job_tags': tag,
-    #     'log_dir': None,
-    #     'extra_configs': config_args,
-    #     'finished': False,
-    #     'status': '0',
-    #     'monitor': monitor,
-    #     'rules': rule,
-    #}
     data = read_and_lock_data()
     try:
         user = data['users'][job["user"]]
         user_obj = users.user_from_dict(user)
-        new_status = str(int(job["status"]) + 1)
-        job["status"] = new_status
+        new_stage = int(job['stage']) + 1
         id = user_obj.windows_offset
         data['users'][user_obj.name]['windows_offset'] = id + 1
         new_job = {
@@ -59,13 +46,21 @@ def rerun_job(job):
             'log_dir': None,
             'extra_configs': job["extra_configs"],
             'finished': False,
-            'status': new_status,
+            'status': None,
+            'stage': new_stage,
             'monitor': job["monitor"],
             'rules': job["rules"],
+            'error': None,
+            'extra_msgs': job["extra_msgs"] | {"father": job["windows_id"]},
         }
         data['users'][user_obj.name]['job_data'].append(new_job)
         user_obj.windows_offset = id + 1
         data['users'][user_obj.name] = user_obj.to_dict()
+        # find the current job in the job_data list and set its status to 'rerunned'
+        for jb in data["users"][user_obj.name]["job_data"]:
+            if jb["windows_id"] == job["windows_id"]:
+                jb["status"] = 'rerunned'
+                jb["extra_msgs"].update({"child": id})
         
         session_name = user_obj.tmux_name
         tpu = job["tpu"]
@@ -73,6 +68,7 @@ def rerun_job(job):
         tags = job["job_tags"]
         job_dir = job["job_dir"]
         log_dir = job["log_dir"]
+        print(f"job:{job}, new_job:{new_job}")
         print(f"Rerun job {job['windows_id']} for user {user_obj.name} with new windows id {id}")
         if os.system(f"tmux list-windows -t {session_name} | grep {id}") == 0:
             print(f"Killing tmux window {session_name}:{id}")
@@ -91,12 +87,13 @@ def rerun_job(job):
         write_and_unlock_data(data)
 
 
-    except:
-        print(f"{RED}[ERROR]{NC} rerun_job: Failed to rerun job {job['windows_id']} for user {user_obj.name}")
+    except Exception as e:
+        print(f"{RED}[ERROR]{NC} rerun_job: Failed to rerun job {job['windows_id']} for user {user_obj.name}, error: {e}")
         release_lock_data()
 
 
 def reapply_worker(ka, result_queue):
+    sys.stdout = open(os.devnull, 'w')
     try:
         result = apply_pre(ka, delete=True)
         result_queue.put(result)
@@ -139,14 +136,19 @@ def reapply_rerun(job, timeout=1800):
 def mainloop():
     error_jobs = {'preempted': [], 'grpc': []}
     data = read_data()
+    print(f"{PURPLE}[INFO]{NC} mainloop: checking jobs")
     for user in data["user_list"]:
         for job in data["users"][user]["job_data"]:
-            if not job["finished"] and job['monitor']:
-                status = check_status(job)
-                if status == 'preempted':
-                    error_jobs['preempted'].append(job)
-                elif status == 'grpc':
-                    error_jobs['grpc'].append(job)
+            if job['status'] == 'finished' or job['status'] == 'rerunned' or not job['monitor']:
+                continue
+            status = job['error'] if job['status'] == 'error' else check_status(job)
+            if status == 'preempted':
+                error_jobs['preempted'].append(job)
+            elif status == 'grpc':
+                error_jobs['grpc'].append(job)
+
+    print(f"{PURPLE}[INFO]{NC} mainloop: found {len(error_jobs['preempted'])} preempted jobs and {len(error_jobs['grpc'])} grpc jobs")
+
     for error_type in error_jobs:
         for job in error_jobs[error_type]:
             user = job["user"]
@@ -154,6 +156,7 @@ def mainloop():
             try:
                 for jb in data["users"][user]["job_data"]:
                     if jb["windows_id"] == job["windows_id"]:
+                        jb["status"] = 'error'
                         jb['error'] = error_type
                 write_and_unlock_data(data)
             except:
@@ -189,48 +192,3 @@ if __name__ == "__main__":
             process.terminate()
             process.join()
         print("All processes killed")
-
-# DATA 
-# {
-#     "users":{
-#        "user1": {
-#             "id": 1,
-#             "name": "user1",
-#             "tmux_name": "user1",
-#             "working_dir": "/home/user1",
-#             "config_aliases": {
-#                 "lr": "config.training.learning_rate",
-#                 "bs": "config.training.batch_size"
-#             },
-#             "settings": {
-#                 "auto attach": True,
-#             }
-#             "job_data":[
-#                 {
-#                     "windows_id": 1,
-#                     "job_dir_id": 1,
-#                     "job_dir": "/home/user1/job1",
-#                     "tpu": "v2-32-1",
-#                     "job_tags": "residual",
-#                     "log_dir": "/home/user1/job1/logs",
-#                     "extra_configs": "--config1=value1 --config2=value2",
-#                     "finished": false
-#                 }
-#             ]
-#         }
-#     },
-#     "tpu_aliases": {
-#     },
-#     "user_list": [
-#         "user1",
-#     ],
-#     "id_list": [
-#         1,
-#     ],
-#     "id_user_dict": {
-#         1: "user1",
-#     },
-#     "user_id_dict": {
-#         "user1": 1,
-#     },
-# }

@@ -41,11 +41,8 @@ def kill_tpu(tpu):
     zone, pre, tpu = get_zone_pre(tpu)
     if zone is None: return
     print(f"Killing jobs in TPU {tpu} in zone {zone}...")
-    cmd = '''
-    gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --worker=all \
-        --command "pgrep -af python | grep 'main.py' | grep -v 'grep' | awk '{print \"sudo kill -9 \" $1}' | sh"
-    '''
-    os.system(cmd.format(tpu=tpu, zone=zone))
+    cmd = "gcloud compute tpus tpu-vm ssh "+tpu+" --zone "+zone+" --worker=all --command \"pgrep -af python | grep 'main.py' | grep -v 'grep' | awk '{print \\\"sudo kill -9 \\\" $1}' | sh\""
+    os.system(cmd)
 
 def apply_pre(tpu, delete=True):
     zone, pre, tpu = get_zone_pre(tpu)
@@ -86,14 +83,14 @@ def apply_pre(tpu, delete=True):
         print(f"Now, TPU VM {tpu} is good, ready to use")
         cmd = f"bash xibo_init_pre.sh {tpu} {zone}"
         try:
-            subprocess.run(cmd, shell=True, timeout=600, check=True, cwd=OPERATE_PATH)
+            subprocess.run(cmd, shell=True, timeout=600, check=True, cwd=OPERATE_PATH, stdout=subprocess.DEVNULL)
         except subprocess.TimeoutExpired:
             print("{RED}[ERROR]{NC} apply_pre: initializing preemptible TPU timed out")
             return 'init failed'
         
         cmd = f"bash test_remote_env.sh {tpu} {zone}"
         try:
-            subprocess.run(cmd, shell=True, timeout=300, check=True, cwd=OPERATE_PATH)
+            subprocess.run(cmd, shell=True, timeout=300, check=True, cwd=OPERATE_PATH, stdout=subprocess.DEVNULL)
         except subprocess.TimeoutExpired:
             print("{RED}[ERROR]{NC} apply_pre: testing remote env timed out")
             return 'test failed'

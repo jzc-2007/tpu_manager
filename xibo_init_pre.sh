@@ -1,6 +1,9 @@
 # initialize and set up remote TPU VM
 
 # test whether $2 is empty, if it is, exit 1
+
+source config.sh
+
 if [ -z "$1" ]; then
     echo "PASS VM AND ZONE!"
     exit 1
@@ -67,17 +70,6 @@ if [[ $USE_CONDA == 1 ]]; then
 else
     echo This is deprecated
     exit 2
-    # read "装牛牛X.sh" into command
-    export COMMAND=$(cat 装牛牛X.sh)
-
-    gcloud compute tpus tpu-vm ssh $VM_NAME --zone $ZONE \
-    --worker=all --command "
-    sudo rm -rf /home/\$(whoami)/.local
-    cd $STAGEDIR
-    echo 'Current dir: '
-    pwd
-    $COMMAND
-    "
 fi
 
 # setup remote wandb
@@ -97,8 +89,6 @@ if [[ $USE_CONDA == 1 ]]; then
     export CONDA_PY_PATH=/$DATA_ROOT/code/qiao/anaconda3/envs/$OWN_CONDA_ENV_NAME/bin/python
     echo $CONDA_PY_PATH
 fi
-
-source config.sh
 
 echo "setup wandb in $VM_NAME $ZONE"
 

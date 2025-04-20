@@ -12,13 +12,22 @@ RULE_DICT ={
         'preempted': 'reapply',
         'grpc': 'rerun',
     },
-    'normal':{
+    'rerun':{
+        'preempted': 'pass',
+        'grpc': 'rerun',
+    },
+    'pass':{
         'preempted': 'pass',
         'grpc': 'pass',
     }
 }
+def apply_run(user_obj, args):
+    raise NotImplementedError("apply_run is not implemented yet")
 
-def _run(user_obj, args):
+def reapply_run(user_obj, args):
+    raise NotImplementedError("reapply_run is not implemented yet")
+
+def run(user_obj, args):
     data = read_and_lock_data()
     user_obj = users.user_from_dict(data['users'][user_obj.name])
     try:
@@ -44,7 +53,7 @@ def _run(user_obj, args):
         if tpu is not None:
             for user in data['users']:
                 for job in data['users'][user]['job_data']:
-                    if job['tpu'] == tpu and job['finished'] == False and job['error'] is None:
+                    if job['tpu'] == tpu and job['status'] == 'running':
                         print(f"{YELLOW}[WARNING]{NC} There is a job running using tpu {tpu}, by user {user}")
                         print(f"DO YOU WANT TO CONTINUE? (y/n)")
                         res = input()
@@ -52,6 +61,9 @@ def _run(user_obj, args):
                             print("Exiting...")
                             release_lock_data()
                             return
+                        # change the status of this job to 'killed'
+                        job['status'] = 'killed'
+                        data['users'][user]['job_data'] = job
 
         config_args = ""
         tag, rule = None, None
@@ -79,10 +91,10 @@ def _run(user_obj, args):
                     else:
                         raise ValueError(f"Value {value} is not a valid boolean")
         if rule is None:
-            rule = 'normal' if not preemptible else 'pre'
+            rule = 'pass' if not preemptible else 'pre'
         if rule not in RULE_DICT:
             print(f"Rule {rule} is not valid.")
-            rule = 'normal' if not preemptible else 'pre'
+            rule = 'pass' if not preemptible else 'pre'
             print(f"Using rule {rule} instead")
         
         rule = RULE_DICT[rule]
@@ -104,11 +116,12 @@ def _run(user_obj, args):
             'job_tags': tag,
             'log_dir': None,
             'extra_configs': config_args,
-            'finished': False,
-            'status': '0',
+            'status': None,
+            'error': None,
+            'stage': 0,
             'monitor': monitor,
             'rules': rule,
-            'error': None
+            'extra_msgs': {},
         })
         data['users'][user_obj.name]['job_data'] = all_jobs
 
@@ -130,16 +143,17 @@ def _run(user_obj, args):
 
         write_and_unlock_data(data)
 
-    except:
-        print(f"Error: {RED}Failed to create job in tmux window {session_name}:{id}{NC}")
+    except BaseException as e:
+        print(f"{RED}[Error] {NC} run: Failed to create job in tmux window")
+        print(f"Error: {e}")
         release_lock_data()
 
     time.sleep(3)
 
     if user_obj.settings['monitor_after_run']:
-        _monitor(user_obj, args)
+        monitor_jobs(user_obj, args)
 
-def _check(user_obj, args):
+def check_jobs(user_obj, args):
     """
     Print the status of all the jobs in the tmux session.
     """
@@ -162,6 +176,7 @@ def _check(user_obj, args):
         if job_data is None:
             if window_id != '0':
                 print(f'Window {window_id} (NOT FOUND IN DATA)')
+                print('-'*40)
             continue
         else:
             print(f'Window {window_id} (tag: {job_data["job_tags"]})')
@@ -176,23 +191,50 @@ def _check(user_obj, args):
         monitor_verbose = user_obj.settings['monitor_verbose']
         last_line = last_line[-monitor_length:]
         msg = last_line[-show_length:]
-        if job_data["finished"]:
-            print(f"Status: {GREEN}Finished{NC}")
             
-        if job_data["error"] is not None:
-            if job_data["error"] == 'preempted':
-                print(f"Status: {RED}Preempted{NC}")
-                print(f"msg: {msg}")
-            elif job_data["error"] == 'rerun':
-                print(f"Status: {YELLOW}Rerun{NC}")
-            else:
-                print(f"Status: {RED}Error{NC}")
-                print(f"msg: {msg}")
-        elif re.search(r'[eE]rror', last_line) or re.search(r'ERROR', last_line):
+        if job_data["status"] is not None:
+            if job_data["status"] == 'error':
+                if job_data["error"] == 'preempted':
+                    print(f"Status: {RED}Preempted{NC}")
+                    print(f"msg: {msg}")
+                else:
+                    print(f"Status: {RED}Error{NC}")
+                    print(f"msg: {msg}")
+                print('-'*40)
+                continue
+            elif job_data["status"] == 'killed':
+                print(f"Status: {RED}Killed{NC}")
+                if monitor_verbose:
+                    print(f"msg: {msg}")
+                print('-'*40)
+                continue
+            elif job_data["status"] == 'rerunned':
+                try:
+                    child = job_data['extra_msgs']['child']
+                except Exception as e:
+                    print(f"{RED}Failed to get child window id{NC}")
+                    child = None
+                print(f"Status: {YELLOW}Rerunned({job_data['error']}){NC} in window {child}")
+                if monitor_verbose:
+                    print(f"msg: {msg}")
+                print('-'*40)
+                continue
+            elif job_data["status"] == 'finished':
+                print(f"Status: {GREEN}Finished{NC}")
+                if monitor_verbose:
+                    print(f"msg: {msg}")
+                print('-'*40)
+                continue
+
+        if re.search(r'[eE]rror', last_line) or re.search(r'ERROR', last_line):
             print(f"Status: {RED}Error{NC}")
             print(f"msg: {msg}")
         elif re.search(r'[cC]ompiling', last_line) or re.search(r'[cC]ompilation', last_line)or re.search(r'[cC]ompile', last_line):
             print(f"Status: {GREEN}Compiling{NC}")
+            if monitor_verbose:
+                print(f"msg: {msg}")
+        elif re.search(r'[sS]ampling ', last_line):
+            print(f"Status: {GREEN}Sampling{NC}")
             if monitor_verbose:
                 print(f"msg: {msg}")
         elif re.search(r'[eE]poch\s([0-9]{1,4})', last_line):
@@ -216,11 +258,11 @@ def _check(user_obj, args):
         else:
             print(f"{YELLOW}Unknown{NC}")
             print(f"msg: {msg}")
-        print('----------------------------------------------')
+        print('-'*40)
 
 
 
-def _kill_window(user_obj, args):
+def kill_window(user_obj, args):
     data = read_and_lock_data()
     try:
         window_num = args[0]
@@ -247,7 +289,7 @@ def _kill_window(user_obj, args):
         release_lock_data()
 
 
-def _finish_job(window):
+def finish_job(window):
     session_name, window_num = window.split(':')
     window_num = int(window_num)
     data = read_and_lock_data()
@@ -256,16 +298,16 @@ def _finish_job(window):
             if data['users'][user]['tmux_name'] == session_name:
                 for job in data['users'][user]['job_data']:
                     if job['windows_id'] == window_num:
-                        job['finished'] = True
+                        job['status'] = 'finished'
                         break
                 break
         write_and_unlock_data(data)
     except:
         release_lock_data()
     
-def _monitor(user_obj, args):
+def monitor_jobs(user_obj, args):
     while True:
-        _check(user_obj, args)
+        check_jobs(user_obj, args)
         time.sleep(user_obj.settings['monitor_upd_time'])
         # clear the screen
         os.system('clear' if os.name == 'posix' else 'cls')
@@ -275,11 +317,13 @@ def _monitor(user_obj, args):
         user_obj = users.user_from_dict(user_obj)
 
 
-def _upd_log(window, log_dir, ka, start_time):
+def upd_log(window, log_dir, ka, start_time):
     data = read_and_lock_data()
     try:
         session_name, window_num = window.split(':')
         window_num = int(window_num)
+        print(f"Updating log dir to {log_dir} for window {window_num} in session {session_name}")
+        print(f"Updating ka to {ka}")
         # find the job in the job data
         for user in data['users']:
             if data['users'][user]['tmux_name'] == session_name:
@@ -288,6 +332,8 @@ def _upd_log(window, log_dir, ka, start_time):
                         job['log_dir'] = log_dir
                         job['tpu'] = ka
                         job['start_time'] = start_time
+                        job['status'] = 'running'
+                        job['error'] = None
                         break
                 break
         write_and_unlock_data(data)
@@ -295,7 +341,7 @@ def _upd_log(window, log_dir, ka, start_time):
         print(f"{RED}Error: Failed to update log data{NC}")
         release_lock_data()
 
-def _add_tag(user_object, job_window_id, tag):
+def add_tag(user_object, job_window_id, tag):
     data = read_and_lock_data()
     try:
         for job in user_object.job_data:
@@ -309,12 +355,12 @@ def _add_tag(user_object, job_window_id, tag):
         print(f"{RED}Error: Failed to set tag {tag} to window {job_window_id}{NC}")
         release_lock_data()
 
-def _clear_finished_jobs(user_object):
+def clear_finished_jobs(user_object):
     data = read_and_lock_data()
     try:
         all_jobs = user_object.job_data
         for job in all_jobs:
-            if job['finished'] == True:
+            if job['status'] == 'finished':
                 all_jobs.remove(job)
             # delete tmux window
             os.system(f"tmux kill-window -t {user_object.tmux_name}:{job['windows_id']}")
@@ -324,12 +370,13 @@ def _clear_finished_jobs(user_object):
         print(f"{RED}[Error] {NC}clear_finished_jobs: Failed to clear finished jobs")
         release_lock_data()
 
-def _clear_error_jobs(user_object):
+def clear_error_jobs(user_object):
     data = read_and_lock_data()
     try:
+        print(f"Clearing error jobs...")
         all_jobs = user_object.job_data
         for job in all_jobs:
-            if job['error'] is not None:
+            if job['status'] == 'error' or job['error'] is not None:
                 all_jobs.remove(job)
             # delete tmux window
             os.system(f"tmux kill-window -t {user_object.tmux_name}:{job['windows_id']}")
@@ -339,13 +386,30 @@ def _clear_error_jobs(user_object):
         print(f"{RED}[Error] {NC}clear_error_jobs: Failed to clear error jobs")
         release_lock_data()
 
-def _clear_all_jobs(user_object):
+def clear_all_jobs(user_object):
     print(f"Clearing all jobs...")
     try:
-        _clear_finished_jobs(user_object)
+        clear_finished_jobs(user_object)
     except:
         print(f"{RED}[Error] {NC}clear_all_jobs: Failed to clear finished jobs")
     try:
-        _clear_error_jobs(user_object)
+        clear_error_jobs(user_object)
     except:
         print(f"{RED}[Error] {NC}clear_all_jobs: Failed to clear error jobs{NC}")
+
+def clear_zombie_jobs(user_object):
+    """
+    clear jobs whose window number can't be found in tmux session
+    """
+    data = read_and_lock_data()
+    try:
+        print(f"Clearing zombie jobs...")
+        all_jobs = user_object.job_data
+        for job in all_jobs:
+            if os.system(f"tmux list-windows -t {user_object.tmux_name} | grep \" {job['windows_id']}:\"") != 0:
+                all_jobs.remove(job)
+        data['users'][user_object.name]['job_data'] = all_jobs
+        write_and_unlock_data(data)
+    except:
+        print(f"{RED}[Error] {NC}clear_zombie_jobs: Failed to clear zombie jobs")
+        release_lock_data()

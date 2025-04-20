@@ -2,7 +2,7 @@ import json
 import os, time
 from .helpers import DATA_PATH, LOCK_FILE
 from .data_io import read_and_lock_data, write_and_unlock_data, release_lock_data, read_data
-def clean_zombie_windows(user_obj):
+def clear_zombie_windows(user_obj):
     """
     Clean up all the windows that not appear in user's joblist, except the window 0.
     """
