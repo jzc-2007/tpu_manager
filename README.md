@@ -81,88 +81,6 @@ tpu add-tag window_num tag_name username # add a tag to the job
 #### Sanity check and tests
 Some very naive sanity checks is implemented in ``unit_tests.py``.
 
-### New Scripts
-```bash
-# 卡.sh
-source config.sh
-
-if [ -z "$OWN_CONDA_ENV_NAME" ]; then
-    echo "Please set your own config.sh. See README for reference"
-    sleep 60
-    exit 1
-fi
-
-if [ -z "$TASKNAME" ]; then
-    echo "Please set your own config.sh. See README for reference"
-    sleep 60
-    exit 1
-fi
-
-if [ -z "$1" ]; then
-
-############## TPU VMs ##############
-
-# export VM_NAME=kmh-tpuvm-v2-32-1
-# export VM_NAME=kmh-tpuvm-v2-32-2
-# export VM_NAME=kmh-tpuvm-v2-32-3
-# export VM_NAME=kmh-tpuvm-v2-32-4
-# export VM_NAME=kmh-tpuvm-v2-32-5
-# export VM_NAME=kmh-tpuvm-v2-32-6
-# export VM_NAME=kmh-tpuvm-v2-32-7
-# export VM_NAME=kmh-tpuvm-v2-32-8
-# export VM_NAME=kmh-tpuvm-v3-32-1
-export VM_NAME=kmh-tpuvm-v2-32-preemptible-1
-# export VM_NAME=kmh-tpuvm-v2-32-preemptible-2
-# export VM_NAME=kmh-tpuvm-v3-32-preemptible-1
-# export VM_NAME=kmh-tpuvm-v3-32-11
-# export VM_NAME=kmh-tpuvm-v3-32-12
-# export VM_NAME=kmh-tpuvm-v3-32-13
-# export VM_NAME=kmh-tpuvm-v4-8-6
-
-#####################################
-else
-    echo ka: use command line arguments
-        export VM_NAME=$1
-fi
-# Zone: your TPU VM zone
-if [[ $VM_NAME == *"v4"* ]]; then
-    export ZONE=us-central2-b
-elif [[ $VM_NAME == *"v3"* ]]; then
-    export ZONE=europe-west4-a
-else
-    if [[ $VM_NAME == *"v2-32-4"* ]]; then
-        export ZONE=europe-west4-a
-    elif [[ $VM_NAME == *"v2-32-preemptible-2"* ]]; then
-        export ZONE=europe-west4-a
-    else
-        export ZONE=us-central1-a
-    fi
-fi
-
-# DATA_ROOT: the disk mounted
-# FAKE_DATA_ROOT: the fake data (imagenet_fake) link
-# USE_CONDA: 1 for europe, 2 for us (common conda env)
-
-if [[ $ZONE == *"europe"* ]]; then
-    export DATA_ROOT="kmh-nfs-ssd-eu-mount"
-    # export TFDS_DATA_DIR='gs://kmh-gcp/tensorflow_datasets'  # use this for imagenet
-    export TFDS_DATA_DIR='/kmh-nfs-ssd-eu-mount/code/hanhong/dot/tensorflow_datasets'
-    export USE_CONDA=1
-else
-    export DATA_ROOT="kmh-nfs-us-mount"
-    export USE_CONDA=1
-    # export TFDS_DATA_DIR='gs://kmh-gcp-us-central2/tensorflow_datasets'  # use this for imagenet
-    export TFDS_DATA_DIR='/kmh-nfs-us-mount/data/tensorflow_datasets'
-fi
-
-if [[ $USE_CONDA == 1 ]]; then
-    export CONDA_PY_PATH=/$DATA_ROOT/code/qiao/anaconda3/envs/$OWN_CONDA_ENV_NAME/bin/python
-    export CONDA_PIP_PATH=/$DATA_ROOT/code/qiao/anaconda3/envs/$OWN_CONDA_ENV_NAME/bin/pip
-    echo $CONDA_PY_PATH
-    echo $CONDA_PIP_PATH
-fi
-
-```
 
 ### For Developers
 
@@ -247,3 +165,192 @@ Future work:
 - [ ] More testing/docs
 - [ ] Support to read the spreadsheet, then we can auto-choose the TPU to run a job
 - [ ] More auto env solvers
+
+### New Scripts
+```bash
+# ka.sh
+source config.sh
+
+if [ -z "$OWN_CONDA_ENV_NAME" ]; then
+    echo "Please set your own config.sh. See README for reference"
+    sleep 60
+    exit 1
+fi
+
+if [ -z "$TASKNAME" ]; then
+    echo "Please set your own config.sh. See README for reference"
+    sleep 60
+    exit 1
+fi
+
+if [ -z "$1" ]; then
+
+############## TPU VMs ##############
+
+# export VM_NAME=kmh-tpuvm-v2-32-1
+# export VM_NAME=kmh-tpuvm-v2-32-2
+# export VM_NAME=kmh-tpuvm-v2-32-3
+# export VM_NAME=kmh-tpuvm-v2-32-4
+# export VM_NAME=kmh-tpuvm-v2-32-5
+# export VM_NAME=kmh-tpuvm-v2-32-6
+# export VM_NAME=kmh-tpuvm-v2-32-7
+# export VM_NAME=kmh-tpuvm-v2-32-8
+# export VM_NAME=kmh-tpuvm-v3-32-1
+export VM_NAME=kmh-tpuvm-v2-32-preemptible-1
+# export VM_NAME=kmh-tpuvm-v2-32-preemptible-2
+# export VM_NAME=kmh-tpuvm-v3-32-preemptible-1
+# export VM_NAME=kmh-tpuvm-v3-32-11
+# export VM_NAME=kmh-tpuvm-v3-32-12
+# export VM_NAME=kmh-tpuvm-v3-32-13
+# export VM_NAME=kmh-tpuvm-v4-8-6
+
+#####################################
+else
+    echo ka: use command line arguments
+        export VM_NAME=$1
+fi
+# Zone: your TPU VM zone
+if [[ $VM_NAME == *"v4"* ]]; then
+    export ZONE=us-central2-b
+elif [[ $VM_NAME == *"v3"* ]]; then
+    export ZONE=europe-west4-a
+else
+    if [[ $VM_NAME == *"v2-32-4"* ]]; then
+        export ZONE=europe-west4-a
+    elif [[ $VM_NAME == *"v2-32-preemptible-2"* ]]; then
+        export ZONE=europe-west4-a
+    else
+        export ZONE=us-central1-a
+    fi
+fi
+
+# DATA_ROOT: the disk mounted
+# FAKE_DATA_ROOT: the fake data (imagenet_fake) link
+# USE_CONDA: 1 for europe, 2 for us (common conda env)
+
+if [[ $ZONE == *"europe"* ]]; then
+    export DATA_ROOT="kmh-nfs-ssd-eu-mount"
+    # export TFDS_DATA_DIR='gs://kmh-gcp/tensorflow_datasets'  # use this for imagenet
+    export TFDS_DATA_DIR='/kmh-nfs-ssd-eu-mount/code/hanhong/dot/tensorflow_datasets'
+    export USE_CONDA=1
+else
+    export DATA_ROOT="kmh-nfs-us-mount"
+    export USE_CONDA=1
+    # export TFDS_DATA_DIR='gs://kmh-gcp-us-central2/tensorflow_datasets'  # use this for imagenet
+    export TFDS_DATA_DIR='/kmh-nfs-us-mount/data/tensorflow_datasets'
+fi
+
+if [[ $USE_CONDA == 1 ]]; then
+    export CONDA_PY_PATH=/$DATA_ROOT/code/qiao/anaconda3/envs/$OWN_CONDA_ENV_NAME/bin/python
+    export CONDA_PIP_PATH=/$DATA_ROOT/code/qiao/anaconda3/envs/$OWN_CONDA_ENV_NAME/bin/pip
+    echo $CONDA_PY_PATH
+    echo $CONDA_PIP_PATH
+fi
+
+```
+
+```bash
+# staging.sh
+local PASS_KA=0
+if [ -n "$2" ]; then
+	if [ "$2" == "ka="* ]; then
+		ka=${2#*=}
+		export VM_NAME=$ka
+		export PASS_KA=1
+	fi
+fi
+
+source ka.sh $VM_NAME
+now=`date '+%y%m%d%H%M%S'`
+salt=`head /dev/urandom | tr -dc a-z0-9 | head -c6`
+git config --global --add safe.directory $(pwd)
+HERE=$(pwd)
+commitid=`git show -s --format=%h`  # latest commit id; may not be exactly the same as the commit
+export STAGEDIR=/$DATA_ROOT/staging/$USER/${now}-${salt}-${commitid}-code
+
+echo 'Staging files...'
+rsync -av . $STAGEDIR --exclude=tmp --exclude=.git --exclude=__pycache__ --exclude="*.png" --exclude="history" --exclude=wandb --exclude="zhh_code" --exclude="zhh"
+cp -r /kmh-nfs-ssd-eu-mount/code/hanhong/MyFile/research_utils/Jax/zhh $STAGEDIR
+echo 'Done staging.'
+
+sudo chmod 777 -R $STAGEDIR
+
+cd $STAGEDIR
+echo 'Current dir: '`pwd`
+# ------------------------------------------------
+
+if [ $PASS_KA -eq 0 ]; then
+	source run_remote.sh ${@:1}
+else
+	source run_remote.sh ${@:2}
+fi
+
+cd $HERE
+```
+
+```bash
+# run_remote.sh
+source config.sh
+CONDA_ENV=$OWN_CONDA_ENV_NAME
+
+echo Running at $VM_NAME $ZONE
+
+now=`date '+%Y%m%d_%H%M%S'`
+export salt=`head /dev/urandom | tr -dc a-z0-9 | head -c6`
+JOBNAME=${TASKNAME}/${now}_${salt}_${VM_NAME}_${CONFIG}_b${batch}_lr${lr}_ep${ep}_eval
+
+LOGDIR=/$DATA_ROOT/logs/$USER/$JOBNAME
+
+sudo mkdir -p ${LOGDIR}
+sudo chmod 777 -R ${LOGDIR}
+echo 'Log dir: '$LOGDIR
+echo 'Staging dir: '$STAGEDIR
+
+current_window=`tmux display-message -p '#S:#I'`
+echo "Current tmux window: $current_window"
+
+echo 'tpu: '$VM_NAME
+tpu upd-log $current_window $LOGDIR $VM_NAME $now
+
+export cmd="cd $STAGEDIR
+echo 'Current dir: '
+pwd
+$CONDA_PY_PATH main.py --workdir=${LOGDIR} --mode=remote_run --config=configs/load_config.py:remote_run "
+
+# add all the configs pass in to cmd
+for arg in "$@"; do
+    export cmd="$cmd $arg"
+done
+
+echo "Running command: $cmd"
+
+gcloud compute tpus tpu-vm ssh $VM_NAME --zone $ZONE \
+    --worker=all --command "${cmd}" 2>&1 | tee -a $LOGDIR/output.log
+
+if grep -q "wandb: Run history:" $LOGDIR/output.log; then
+    echo "Job completed successfully"
+    tpu finish-job $current_window
+else
+    echo "Job failed"
+fi
+```
+
+```bash
+# kill_remote.sh
+if [ -n "$1" ]; then
+	export VM_NAME=$1
+	source ka.sh $1
+else
+	source ka.sh
+fi
+
+echo 'To kill jobs in: '$VM_NAME 'in' $ZONE' after 2s...'
+sleep 2s
+
+echo 'Killing jobs...'
+gcloud compute tpus tpu-vm ssh $VM_NAME --zone $ZONE --worker=all \
+    --command "
+pgrep -af python | grep 'main.py' | grep -v 'grep' | awk '{print \"sudo kill -9 \" \$1}' | sh
+" # &> /dev/null
+echo 'Killed jobs.'
+```
