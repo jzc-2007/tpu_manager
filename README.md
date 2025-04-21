@@ -40,6 +40,24 @@ tpu monitor username
 ``` 
 to get that. It will update in every 5 seconds, and for one-time check, you can use ``tpu check username``.
 
+#### TPU/environment operations
+
+We support common operations for TPUs, such as
+```bash
+tpu apply/reapply tpu_name # apply/reapply the TPU, reapply will delete the TPU and create a new one
+tpu mount-disk tpu_name # mount the disk for the TPU
+tpu setup-wandb tpu_name # setup wandb for the TPU
+tpu kill-jobs/-k/-kj tpu_name # kill all the jobs in the TPU
+```
+
+Also, an automatic enviroment solver is used to solve the TPU environment. Now it is 
+very simple and can only deal with mounting issue. But you are **very welcome** to contribute
+to it when facing **every environment issue**, to make it a **powerful automatic one-line tool** for 
+solving the complicated TPU environment issue, then we will only need to face same issue **once**!
+```bash
+tpu solve tpu_name # integrated automatic env solver
+```
+
 ### More Functions
 
 #### Pass configs(alias) on command line
@@ -142,7 +160,13 @@ The key data is stored in ``data.json``, and the program read and write it using
         "us-central1-a": ["..."],
         "us-central2-b": ["..."],
         "preemptible": ["..."]
-    }
+    },
+    "monitor_config": {
+        "test_freq": 3600,
+        "checking_freq": 600
+    }, 
+    "wandb_api_key": key,
+    "conda_env_name": "NNX"
 }
 ```
 

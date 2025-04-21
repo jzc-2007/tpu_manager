@@ -97,6 +97,3 @@ def clear_user_logs(user_object):
         write_and_unlock_data(data)
     except:
         release_lock_data()
-
-def check_tpu(args):
-    raise NotImplementedError

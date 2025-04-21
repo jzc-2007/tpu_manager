@@ -1,4 +1,4 @@
-import os, random
+import os, random, time
 import subprocess
 from .data_io import read_and_lock_data, write_and_unlock_data, release_lock_data, read_data
 RED, GREEN, YELLOW, PURPLE, NC = "\033[1;31m", "\033[1;32m", "\033[1;33m", "\033[1;34m", "\033[0m"
@@ -33,12 +33,44 @@ def get_zone_pre(tpu):
         return None, None
     return zone, tpu in data['all_tpus']['preemptible'], tpu
 
-def kill_tpu(tpu):
+def kill_jobs(tpu):
     zone, pre, tpu = get_zone_pre(tpu)
     if zone is None: return
     print(f"Killing jobs in TPU {tpu} in zone {zone}...")
     cmd = "gcloud compute tpus tpu-vm ssh "+tpu+" --zone "+zone+" --worker=all --command \"pgrep -af python | grep 'main.py' | grep -v 'grep' | awk '{print \\\"sudo kill -9 \\\" $1}' | sh\""
     os.system(cmd)
+
+def set_wandb(tpu):
+    zone, pre, tpu = get_zone_pre(tpu)
+    if zone is None:
+        print(f"{RED}[ERROR]{NC} set_wandb: TPU {tpu} not found")
+        return
+    
+    print(f"{PURPLE}[INFO]{NC} Setting up remote wandb in TPU {tpu}...")
+
+    data = read_data()
+    wandb_key, conda_env = data["wandb_api_key"], data["conda_env_name"]
+    data_root = "kmh-nfs-ssd-eu-mount" if 'eu' in zone else "kmh-nfs-ssd-us-mount"
+    conda_path = f"/{data_root}/code/qiao/anaconda3/envs/{conda_env}/bin/python"
+
+    remote_cmd = f'{conda_path} -m wandb login {wandb_key}'
+
+
+    cmd = f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --worker=all --command \"{remote_cmd}\" "
+
+    try:
+        setup_process = subprocess.run(cmd, shell=True, timeout=300, check=True,
+                                       stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    except subprocess.TimeoutExpired:
+        print(f"{RED}[ERROR]{NC} set_wandb: setting wandb timed out")
+        return 'timeout'
+    except subprocess.CalledProcessError as e:
+        print(f"{RED}[ERROR]{NC} set_wandb: setting wandb failed.")
+        print(f"{YELLOW}stdout:{NC} {e.stdout.strip()}")
+        print(f"{YELLOW}stderr:{NC} {e.stderr.strip()}")
+        return 'wandb failed'
+
+    print(f"{GREEN}[SUCCESS]{NC} set_wandb: Setting wandb done")
 
 def apply_pre(tpu, delete=True):
     zone, pre, tpu = get_zone_pre(tpu)
@@ -46,7 +78,7 @@ def apply_pre(tpu, delete=True):
     if not pre:
         print(f"{RED}[ERROR]{NC} apply_pre: TPU {tpu} in zone {zone} is not preemptible")
         return
-    print(f"Re-apply in TPU {tpu} in zone {zone}...")
+    print(f"{PURPLE}[INFO]{NC} Re-apply in TPU {tpu} in zone {zone}...")
     acc_type = None
     if 'v3-32' in tpu: acc_type = 'v3-32'
     elif 'v2-32' in tpu: acc_type = 'v2-32'
@@ -77,12 +109,22 @@ def apply_pre(tpu, delete=True):
 
     if state == 'READY':
         print(f"Now, TPU VM {tpu} is good, ready to use")
-        cmd = f"bash xibo_init_pre.sh {tpu} {zone}"
-        try:
-            subprocess.run(cmd, shell=True, timeout=600, check=True, cwd=OPERATE_PATH, stdout=subprocess.DEVNULL)
-        except subprocess.TimeoutExpired:
-            print("{RED}[ERROR]{NC} apply_pre: initializing preemptible TPU timed out")
-            return 'init failed'
+        # mount the disk
+        print(f"{PURPLE}[INFO]{NC} Mounting disk in TPU {tpu}...")
+        res = mount_disk(tpu)
+        if res != 'success':
+            print(f"{RED}[ERROR]{NC} apply_pre: mounting disk failed")
+            return 'mount failed'
+        print(f"{GREEN}[SUCCESS]{NC} apply_pre: TPU {tpu} is good, done mounting disk")
+
+        # setup remote wandb
+        print(f"{PURPLE}[INFO]{NC} Setting up remote wandb in TPU {tpu}...")
+        res = set_wandb(tpu)
+        if res != 'success':
+            print(f"{RED}[ERROR]{NC} apply_pre: setting wandb failed")
+            return 'wandb failed'
+        print(f"{GREEN}[SUCCESS]{NC} apply_pre: Setting wandb done")
+        print(f"{GREEN}[SUCCESS]{NC} apply_pre: TPU {tpu} is good to use!")
         
         return 'success'
     else:
@@ -103,34 +145,94 @@ def describe_tpu(tpu):
 
 def check_env(tpu):
     zone, pre, tpu = get_zone_pre(tpu)
-    if zone is None: return
-    DATA_ROOT = "kmh-nfs-ssd-eu-mount" if 'eu' in zone else "kmh-nfs-ssd-us-mount"
-    CONDA_PY_PATH = "/"+DATA_ROOT+"/code/qiao/anaconda3/envs/NNX/bin/python"
-    cmd1 = "gcloud compute tpus tpu-vm ssh "+tpu+" --zone "+zone+" --worker=all --command \""+CONDA_PY_PATH+" -c 'import jax; print(jax.devices())'\""
-    cmd2 = "gcloud compute tpus tpu-vm ssh "+tpu+" --zone "+zone+" --worker=all --command \""+CONDA_PY_PATH+" -c 'import flax; print(flax.__version__)'\""
-    print(cmd1)
-    print(cmd2)
+    if zone is None: return 'no tpu found'
+    data = read_data()
+    conda_env = data["conda_env_name"]
+    data_root = "kmh-nfs-ssd-eu-mount" if 'eu' in zone else "kmh-nfs-ssd-us-mount"
+    conda_path = f"/{data_root}/code/qiao/anaconda3/envs/{conda_env}/bin/python"
+    cmd = f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --worker=all --command \"{conda_path} -c 'import jax; print(jax.devices())'\""
     try:
         # get the output of the command
-        result1 = subprocess.run(cmd1, shell=True, capture_output=True, text=True)
-        stdout1, stderr1 = result1.stdout, result1.stderr
-        result2 = subprocess.run(cmd2, shell=True, capture_output=True, text=True)
-        stdout2, stderr2 = result2.stdout, result2.stderr
+        result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+        stdout, stderr= result.stdout, result.stderr
     except subprocess.CalledProcessError:
         print(f"{RED}[ERROR]{NC} check_remote_env: Failed to query TPU state")
         return 'failed'
 
-    if 'No such file or directory' in stderr1 or 'No such file or directory' in stderr2:
-        print(f"{RED}[ERROR]{NC} check_remote_env: No such file or directory")
+    if 'No such file or directory' in stderr:
+        print(f"{RED}[ERROR]{NC} check_remote_env: Can't find directory")
         print(f"You may need to {PURPLE}mount the NFS{NC} first")
         return 'file error'
 
-    if "Tpudevice" in stdout1 and "linear" in stdout2:
-        print(f"{GREEN}[INFO]{NC} check_remote_env: TPU {tpu} is good")
+    if "TpuDevice" in stdout:
+        print(f"{GREEN}[SUCCESS]{NC} check_remote_env: TPU {tpu} is good!")
+        return 'success'
+    
+    else:
+        print(f"{RED}[ERROR]{NC} check_remote_env: TPU {tpu} is getting unkown error, please contact the admin.")
+        print(f"stdout: {stdout}")
+        print(f"stderr: {stderr}")
+        return 'unknown'
+
+def mount_disk(tpu):
+    zone, pre, tpu = get_zone_pre(tpu)
+    if zone is None: return
+    print(f"{PURPLE}[INFO]{NC} Mounting disk in TPU {tpu}...")
+
+    cmd1 = f'''
+    gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --worker=all \
+      --command "
+        for i in {{1..3}}; do
+          ps -ef | grep -i unattended | grep -v 'grep' | awk '{{print \\$2}}' | xargs -r sudo kill -9
+          sleep 2
+        done
+        sudo DEBIAN_FRONTEND=noninteractive apt-get -y update
+        sudo DEBIAN_FRONTEND=noninteractive apt-get -y install nfs-common
+        ps -ef | grep -i unattended | grep -v 'grep' | awk '{{print \\$2}}' | xargs -r sudo kill -9
+        sleep 2
+      "
+    '''
+
+    cmd2 = f"""
+    gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --worker=all --command "
+    sudo mkdir -p /kmh-nfs-us-mount
+    sudo mount -t nfs -o vers=3 10.26.72.146:/kmh_nfs_us /kmh-nfs-us-mount
+    sudo chmod go+rw /kmh-nfs-us-mount
+    ls /kmh-nfs-us-mount
+    sudo mkdir -p /kmh-nfs-ssd-eu-mount
+    sudo mount -t nfs -o vers=3 10.150.179.250:/kmh_nfs_ssd_eu /kmh-nfs-ssd-eu-mount
+    sudo chmod go+rw /kmh-nfs-ssd-eu-mount
+    ls /kmh-nfs-ssd-eu-mount
+    "
+    """
+    try:
+        download_process = subprocess.run(cmd1, shell=True, timeout=600, check=True)
+        time.sleep(5)
+        mount_process = subprocess.run(cmd2, shell=True, timeout=600, check=True)
+    except subprocess.TimeoutExpired:
+        print(f"{RED}[ERROR]{NC} mount_disk: mounting disk timed out")
+        return 'timeout'
+    except subprocess.CalledProcessError as e:
+        print(f"{RED}[ERROR]{NC} mount_disk: {e}")
+        print(f"stderr: {e.stderr}")
+        print(f"stdout: {e.stdout}")
+        return 'failed'
+    
+    print(f"{PURPLE}[INFO]{NC} Mounting disk in TPU {tpu} done")
+    print(f"{PURPLE}[INFO]{NC} Checking environment in TPU {tpu}...")
+    state = check_env(tpu)
+
+    if state == 'success':
+        print(f"{GREEN}[SUCCESS]{NC} Environment in TPU {tpu} is good, done mounting disk")
         return 'success'
     else:
-        print(f"{RED}[ERROR]{NC} check_remote_env: TPU {tpu} is not good")
+        print(f"{RED}[ERROR]{NC} Environment in TPU {tpu} is not good")
+        print(f"state: {state}")
+        print("Unexpected error, please check the TPU manually, or contact the admin")
         return 'failed'
+
+    
+    
     
 
 

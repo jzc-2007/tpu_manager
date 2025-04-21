@@ -2,6 +2,7 @@ import json
 import os, time
 from .helpers import DATA_PATH, LOCK_FILE
 from .data_io import read_and_lock_data, write_and_unlock_data, release_lock_data, read_data
+from .operate import get_zone_pre, check_env, mount_disk
 RED, GREEN, YELLOW, PURPLE, NC = "\033[1;31m", "\033[1;32m", "\033[1;33m", "\033[1;34m", "\033[0m"
 def clear_zombie_windows(user_obj):
     """
@@ -23,6 +24,28 @@ def clear_zombie_windows(user_obj):
             os.system(f'tmux kill-window -t {user_obj.tmux_name}:{window_num}')
             time.sleep(0.5)
 
+def solve_env(tpu):
+    zone, pre, tpu = get_zone_pre(tpu)
+    if zone is None: return
+    print(f"{PURPLE}[INFO]{NC} solve_env: Trying to solve the environment in TPU {tpu}...")
+    print(f"{PURPLE}[INFO]{NC} solve_env: Checking the environment, this may take some time...")
+    state = check_env(tpu)
+    if state == 'success':
+        print(f"{GREEN}[SUCCESS]{NC} solve_env: Environment in TPU {tpu} is good")
+        return 'success'
+    elif state == 'file error':
+        print(f"{PURPLE}[INFO]{NC} solve_env: Environment in TPU has file error, trying to mount disk...")
+        res = mount_disk(tpu)
+        if res == 'success':
+            print(f"{GREEN}[SUCCESS]{NC} solve_env: Solving environment in TPU {tpu} done")
+            return 'success'
+        else:
+            print(f"{RED}[ERROR]{NC} solve_env: Solving environment in TPU {tpu} failed, please contact the admin")
+            return 'failed'
+    elif state == 'unknown':
+        print(f"{RED}[ERROR]{NC} solve_env: Environment in TPU {tpu} is unknown error, please contact the admin")
+        return 'failed'
+    
 def initialization():
     """
     remove all the job data for all users

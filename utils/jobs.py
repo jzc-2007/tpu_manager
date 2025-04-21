@@ -256,7 +256,6 @@ def check_jobs(user_obj, args):
             if job_data["status"] == 'error':
                 if job_data["error"] == 'preempted':
                     print(f"Status: {RED}Preempted{NC}")
-                    print(f"msg: {msg}")
                 else:
                     print(f"Status: {RED}Error{NC}")
                     print(f"msg: {msg}")
@@ -286,6 +285,17 @@ def check_jobs(user_obj, args):
                 print('-'*40)
                 continue
         if re.search(r'Job failed', last_line) or re.search(r'[eE]rror', last_line) or re.search(r'ERROR', last_line):
+            # change the job status to error
+            data = read_and_lock_data()
+            for user in data['users']:
+                if data['users'][user]['tmux_name'] == session_name:
+                    for job in data['users'][user]['job_data']:
+                        if job['windows_id'] == int(window_id):
+                            job['status'] = 'error'
+                            job['error'] = 'unknown'
+                            break
+                    break
+            write_and_unlock_data(data)
             print(f"Status: {RED}Error{NC}")
             print(f"msg: {msg}")
         elif re.search(r'[cC]ompiling', last_line) or re.search(r'[cC]ompilation', last_line)or re.search(r'[cC]ompile', last_line):

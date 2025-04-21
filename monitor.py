@@ -4,7 +4,7 @@ import time
 import multiprocessing
 import utils.users as users
 import utils.data_io as data_io
-from utils.operate import apply_pre, kill_tpu
+from utils.operate import apply_pre, kill_jobs
 import utils.unit_tests as unit_tests
 DATA_PATH="/home/jzc/zhichengjiang/working/xibo_tpu_manager/data.json"
 running_processes = []
@@ -109,7 +109,7 @@ def reapply_worker(ka, result_queue):
 def kill_rerun(job):
     ka = job["tpu"]
     print(f"Kill TPU {ka}...")
-    kill_tpu(ka)
+    kill_jobs(ka)
     print("Rerun job...")
     rerun_job(job)
 
@@ -181,7 +181,7 @@ def mainloop():
 
 if __name__ == "__main__":
     num_loops = 0
-    last_unit_test_time = time.time()
+    last_test_time = time.time()
 
     if data_io.check_code_lock():
         print(f"{RED}[ERROR]{NC} Code is locked for developing, please unlock it first.")
@@ -189,7 +189,7 @@ if __name__ == "__main__":
     try:
         while True:
             data = data_io.read_data()
-            checking_time, unit_test_time = data["monitor_config"]["checking_time"], data["monitor_config"]["unit_test_time"]
+            checking_freq, test_freq = data["monitor_config"]["checking_freq"], data["monitor_config"]["test_freq"]
 
             num_loops += 1
             last_time = time.time()
@@ -197,12 +197,12 @@ if __name__ == "__main__":
             cur_time = time.time()
             time_used = cur_time - last_time # in seconds
             print(f"Loop {num_loops} finished, time used: {time_used:.2f} seconds")
-            time.sleep(max(0, checking_time - time_used))
+            time.sleep(max(0, checking_freq - time_used))
 
-            if time.time() - last_unit_test_time > unit_test_time:
+            if time.time() - last_test_time > test_freq:
                 print(f"{PURPLE}[INFO]{NC} Running unit tests...")
                 unit_tests.sanity_check()
-                last_unit_test_time = time.time()
+                last_test_time = time.time()
 
                 
     except KeyboardInterrupt:
