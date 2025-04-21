@@ -3,8 +3,9 @@ import json
 import time
 import multiprocessing
 import utils.users as users
-from utils.data_io import read_and_lock_data, write_and_unlock_data, release_lock_data, read_data
+import utils.data_io as data_io
 from utils.operate import apply_pre, kill_tpu
+import utils.unit_tests as unit_tests
 DATA_PATH="/home/jzc/zhichengjiang/working/xibo_tpu_manager/data.json"
 running_processes = []
 RED="\033[1;31m"
@@ -29,14 +30,14 @@ def check_status(job):
     return None
 
 def rerun_job(job):
-    data = read_and_lock_data()
+    data = data_io.read_and_lock_data()
     try:
         user = data['users'][job["user"]]
         user_obj = users.user_from_dict(user)
         new_stage = int(job['stage']) + 1
         if new_stage > 10:
             print(f"{RED}[ERROR]{NC} rerun_job: job {job['windows_id']} for user {user_obj.name} has reached max stage, cannot rerun")
-            release_lock_data()
+            data_io.release_lock_data()
             return
         id = user_obj.windows_offset
         data['users'][user_obj.name]['windows_offset'] = id + 1
@@ -88,12 +89,12 @@ def rerun_job(job):
         print(f"Successfully created job in tmux window {session_name}:{id}")
 
         
-        write_and_unlock_data(data)
+        data_io.write_and_unlock_data(data)
 
 
     except Exception as e:
         print(f"{RED}[ERROR]{NC} rerun_job: Failed to rerun job {job['windows_id']} for user {user_obj.name}, error: {e}")
-        release_lock_data()
+        data_io.release_lock_data()
 
 
 def reapply_worker(ka, result_queue):
@@ -139,7 +140,7 @@ def reapply_rerun(job, timeout=1800):
 
 def mainloop():
     error_jobs = {'preempted': [], 'grpc': []}
-    data = read_data()
+    data = data_io.read_data()
     print(f"{PURPLE}[INFO]{NC} mainloop: checking jobs")
     for user in data["user_list"]:
         for job in data["users"][user]["job_data"]:
@@ -156,16 +157,16 @@ def mainloop():
     for error_type in error_jobs:
         for job in error_jobs[error_type]:
             user = job["user"]
-            data = read_and_lock_data()
+            data = data_io.read_and_lock_data()
             try:
                 for jb in data["users"][user]["job_data"]:
                     if jb["windows_id"] == job["windows_id"]:
                         jb["status"] = 'error'
                         jb['error'] = error_type
-                write_and_unlock_data(data)
+                data_io.write_and_unlock_data(data)
             except:
                 print(f"{RED}[ERROR]{NC} mainloop: Failed to update job {job['windows_id']} for user {user}")
-                release_lock_data()
+                data_io.release_lock_data()
 
     for error_type in error_jobs:
         for job in error_jobs[error_type]:
@@ -180,15 +181,30 @@ def mainloop():
 
 if __name__ == "__main__":
     num_loops = 0
+    last_unit_test_time = time.time()
+
+    if data_io.check_code_lock():
+        print(f"{RED}[ERROR]{NC} Code is locked for developing, please unlock it first.")
+        sys.exit(1)
     try:
         while True:
+            data = data_io.read_data()
+            checking_time, unit_test_time = data["monitor_config"]["checking_time"], data["monitor_config"]["unit_test_time"]
+
             num_loops += 1
             last_time = time.time()
             mainloop()
             cur_time = time.time()
             time_used = cur_time - last_time # in seconds
             print(f"Loop {num_loops} finished, time used: {time_used:.2f} seconds")
-            time.sleep(max(0, 600 - time_used))
+            time.sleep(max(0, checking_time - time_used))
+
+            if time.time() - last_unit_test_time > unit_test_time:
+                print(f"{PURPLE}[INFO]{NC} Running unit tests...")
+                unit_tests.sanity_check()
+                last_unit_test_time = time.time()
+
+                
     except KeyboardInterrupt:
         print("KeyboardInterrupt, exiting...")
         # kill all the processes

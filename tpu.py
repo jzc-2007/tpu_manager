@@ -11,7 +11,9 @@ import utils.logger as logger
 import utils.operate as operate
 from utils.helpers import is_integer, is_boolean, to_boolean, DATA_PATH
 import utils.error_handler as handler
-
+import utils.data_io as data_io
+import utils.unit_tests as unit_tests
+RED, GREEN, YELLOW, PURPLE, NC = "\033[1;31m", "\033[1;32m", "\033[1;33m", "\033[1;34m", "\033[0m"
 def find_user(data, args):
     for arg in args:
         if arg in data['user_list'] or arg.startswith('id=') or arg.startswith('user='):
@@ -42,6 +44,17 @@ if __name__ == '__main__':
     args = sys.argv
     cmd = args[1]
 
+    if cmd == 'lock-code' or cmd == '-lc': 
+        data_io.lock_code(args[2]) if len(args) > 2 else data_io.lock_code()
+        exit(0)
+    elif cmd == 'unlock-code' or cmd == '-ulc':
+        data_io.unlock_code(args[2]) if len(args) > 2 else data_io.unlock_code()
+        exit(0)
+
+    if data_io.check_code_lock():
+        print(f"{RED}[ERROR]{NC} Code is locked for developing, please unlock it first.")
+        sys.exit(1)
+
     ############### JOBS that don't require a user ###############
     if cmd == 'tldr': desc.tldr()
     elif cmd == 'upd-log': jobs.upd_log(args[2], args[3], args[4], args[5]) #windows, log_dir, ka, time
@@ -56,6 +69,8 @@ if __name__ == '__main__':
     elif cmd == 'init': handler.initialization()
     elif cmd == 'reapply': operate.apply_pre(args[2], delete=True)
     elif cmd == 'apply': operate.apply_pre(args[2], delete=False)
+    elif cmd == 'set-monitor-config' or cmd == '-smc': logger.set_monitor_config(args[2:])
+    elif cmd == 'get-monitor-config' or cmd == '-gmc': logger.get_monitor_config()
     else: 
     ############### JOBS that require a user ###############
         with open(DATA_PATH, 'r') as file: data = json.load(file)

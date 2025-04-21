@@ -364,3 +364,6 @@ pgrep -af python | grep 'main.py' | grep -v 'grep' | awk '{print \"sudo kill -9 
 " # &> /dev/null
 echo 'Killed jobs.'
 ```
+
+
+gcloud compute tpus describe kmh-tpuvm-v2-32-preemptible-1 --zone=us-central1-a --format='value(state)'

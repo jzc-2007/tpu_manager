@@ -1,11 +1,7 @@
 import os, random
 import subprocess
 from .data_io import read_and_lock_data, write_and_unlock_data, release_lock_data, read_data
-RED="\033[1;31m"
-GREEN="\033[1;32m"
-YELLOW="\033[1;33m"
-PURPLE="\033[1;34m"
-NC="\033[0m"
+RED, GREEN, YELLOW, PURPLE, NC = "\033[1;31m", "\033[1;32m", "\033[1;33m", "\033[1;34m", "\033[0m"
 OPERATE_PATH = "/home/jzc/zhichengjiang/working/xibo_tpu_manager"
 def get_zone_pre(tpu):
     """
@@ -99,6 +95,18 @@ def apply_pre(tpu, delete=True):
     else:
         print(f"{RED}[ERROR]{NC} apply_pre: TPU {tpu} not ready, state: {state}")
         return 'unknown'
+    
+def describe_tpu(tpu):
+    zone, pre, tpu = get_zone_pre(tpu)
+    if zone is None: return
+    cmd = f"gcloud compute tpus describe {tpu} --zone={zone} --format='value(state)'"
+    try:
+        state = subprocess.check_output(cmd, shell=True, stderr=subprocess.DEVNULL).decode().strip()
+    except subprocess.CalledProcessError:
+        print(f"{RED}[ERROR]{NC} describle_tpu: Failed to query TPU state")
+        return 'failed'
+    
+    return state
 
 
     

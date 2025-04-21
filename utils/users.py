@@ -1,11 +1,7 @@
 from .helpers import DATA_PATH
 from .data_io import read_and_lock_data, write_and_unlock_data, release_lock_data
 import os, json, time
-RED="\033[1;31m"
-GREEN="\033[1;32m"
-YELLOW="\033[1;33m"
-PURPLE="\033[1;34m"
-NC="\033[0m"
+RED, GREEN, YELLOW, PURPLE, NC = "\033[1;31m", "\033[1;32m", "\033[1;33m", "\033[1;34m", "\033[0m"
 class User():
     def __init__(self, id, name, tmux_name = None):
         self.id = id

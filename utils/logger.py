@@ -3,6 +3,27 @@ from .data_io import read_and_lock_data, write_and_unlock_data, release_lock_dat
 from .users import user_from_dict
 import json
 
+def get_monitor_config():
+    data = read_data()
+    for key, value in data['monitor_config'].items():
+        print(f"{key}: {value}")
+
+def set_monitor_config(args):
+    data = read_and_lock_data()
+    try:
+        key, value = args[0], args[1]
+        if key not in data['monitor_config']:
+            raise ValueError(f"Monitor config {key} not found")
+        if is_integer(value):
+            value = int(value)
+        elif is_boolean(value):
+            value = to_boolean(value)
+        data['monitor_config'][key] = value
+        print(f"Set {key} to {value}")
+        write_and_unlock_data(data)
+    except:
+        release_lock_data()
+
 def explain_tpu_aliases():
     data = read_data()
     for alias, name in data['tpu_aliases'].items():

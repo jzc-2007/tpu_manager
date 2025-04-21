@@ -2,11 +2,8 @@ import os, re, time, json
 from .helpers import is_integer, DATA_PATH
 from . import users
 from .data_io import read_and_lock_data, write_and_unlock_data, release_lock_data, read_data
-RED="\033[1;31m"
-GREEN="\033[1;32m"
-YELLOW="\033[1;33m"
-PURPLE="\033[1;34m"
-NC="\033[0m"
+from .operate import describe_tpu, apply_pre
+RED, GREEN, YELLOW, PURPLE, NC = "\033[1;31m", "\033[1;32m", "\033[1;33m", "\033[1;34m", "\033[0m"
 RULE_DICT ={
     'pre':{
         'preempted': 'reapply',
@@ -21,11 +18,6 @@ RULE_DICT ={
         'grpc': 'pass',
     }
 }
-def apply_run(user_obj, args):
-    raise NotImplementedError("apply_run is not implemented yet")
-
-def reapply_run(user_obj, args):
-    raise NotImplementedError("reapply_run is not implemented yet")
 
 def run(user_obj, args):
     data = read_and_lock_data()
@@ -48,6 +40,73 @@ def run(user_obj, args):
                 break
         if tpu is None:
             print('No TPU Specified, use the TPU in ka.sh instead')
+
+        # Check the status of the TPU
+        if tpu is not None:
+            print(f"{PURPLE}[INFO] {NC}Checking the status of TPU {tpu}...")
+            tpu_status = describe_tpu(tpu)
+
+            if tpu_status == 'PREEMPTED':
+                print(f"{YELLOW}[WARNING]{NC} TPU {tpu} is preempted")
+                REAPPLY = False
+                if '-apply' in args:
+                    print(f"{PURPLE}[INFO] {NC}Re-applying preempted TPU {tpu}...")
+                    REAPPLY = True
+                else:
+                    print(f"DO YOU WANT TO REAPPLY? (y/n)")
+                    res = input()
+                    if res == 'y' or res == 'Y':
+                        print(f"{PURPLE}[INFO] {NC}Re-applying preempted TPU {tpu}...")
+                        REAPPLY = True
+                    else:
+                        print(f"{PURPLE}[INFO] {NC}Quiting... {tpu}")
+                        REAPPLY = False
+                if not REAPPLY:
+                    release_lock_data()
+                    return
+                else:
+                    try:
+                        apply_pre(tpu, delete=True)
+                    except Exception as e:
+                        print(f"{RED}[ERROR]{NC} Failed to reapply TPU {tpu}: {e}")
+                        release_lock_data()
+                        return
+                    print(f"{GREEN}[INFO] {NC}Re-applying TPU {tpu} successfully")
+
+            elif tpu_status == 'READY':
+                print(f"{GREEN}[INFO] {NC}TPU {tpu} is ready, starting job...")
+
+            elif tpu_status == 'failed':
+                print(f"{YELLOW}[WARNING]{NC} Failed to query status")
+                print(f"This may indicate that this TPU is deleted, do you want to apply? (y/n)")
+                res = input()
+                if res == 'y' or res == 'Y':
+                    print(f"{PURPLE}[INFO] {NC}Re-applying TPU {tpu}...")
+                    try:
+                        apply_pre(tpu, delete=False)
+                    except Exception as e:
+                        print(f"{RED}[ERROR]{NC} Failed to reapply TPU {tpu}: {e}")
+                        release_lock_data()
+                        return
+                    print(f"{GREEN}[INFO] {NC}Applying TPU {tpu} successfully")
+                else:
+                    print(f"{PURPLE}[INFO] {NC}Quiting... {tpu}")
+                    release_lock_data()
+
+            elif tpu_status == 'RESTARTING' or tpu_status == 'CREATING' or tpu_status == 'STOPPING':
+                print(f"{YELLOW}[WARNING]{NC} TPU {tpu} is {tpu_status.lower()}")
+                print(f"{PURPLE}[INFO] {NC}Quiting... {tpu}")
+                release_lock_data()
+                return
+
+            else:
+                print(f"{YELLOW}[WARNING]{NC} TPU {tpu} is in unknown state {tpu_status}")
+                print(f"{PURPLE}[INFO] {NC}Quiting... {tpu}")
+                release_lock_data()
+                return
+
+
+
 
         # Check if there is job running using this tpu
         if tpu is not None:
