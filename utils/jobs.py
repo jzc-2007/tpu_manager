@@ -137,6 +137,7 @@ def run(user_obj, args):
                     if key in user_obj.config_aliases:
                         config_args += f" --{user_obj.config_aliases[key]}={value}"
                     else:
+                        assert key.startswith('config'), f"Unknown config key {key}"
                         config_args += f" --{key}={value}"
                 if key == 'tag':
                     tag = value
@@ -344,7 +345,9 @@ def kill_window(user_obj, args):
                 break
         data['users'][user_obj.name]['job_data'] = all_jobs
         write_and_unlock_data(data)
-    except:
+    except BaseException as e:
+        print(f"{RED}[Error] {NC} kill_window: Failed to kill window {window_num} in session {session_name}")
+        print(f"Error: {e}")
         release_lock_data()
 
 

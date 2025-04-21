@@ -77,14 +77,14 @@ def apply_pre(tpu, delete=True):
 
     if state == 'READY':
         print(f"Now, TPU VM {tpu} is good, ready to use")
-        cmd = f"source xibo_init_pre.sh {tpu} {zone}"
+        cmd = f"bash xibo_init_pre.sh {tpu} {zone}"
         try:
             subprocess.run(cmd, shell=True, timeout=600, check=True, cwd=OPERATE_PATH, stdout=subprocess.DEVNULL)
         except subprocess.TimeoutExpired:
             print("{RED}[ERROR]{NC} apply_pre: initializing preemptible TPU timed out")
             return 'init failed'
         
-        cmd = f"source test_remote_env.sh {tpu} {zone}"
+        cmd = f"bash test_remote_env.sh {tpu} {zone}"
         try:
             subprocess.run(cmd, shell=True, timeout=300, check=True, cwd=OPERATE_PATH, stdout=subprocess.DEVNULL)
         except subprocess.TimeoutExpired:
