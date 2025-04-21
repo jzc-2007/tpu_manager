@@ -32,6 +32,8 @@ tpu run v2-32-6 xibo # default run the job in working directory 1
 tpu run v2-32-p1 lyy dir=2 tag=bird # run the job in working directory 2 
 ```
 
+The `run` command will ask you whether to reapply when the TPU is preempted. You can also add flag `-apply` to avoid asks.
+
 #### monitor jobs
 If the TPU is a preemptible TPU, ``tpu run`` will **auto-rerun when GRPC**, and will **auto-reapply and rerun** when preempted. 
 The ``tpu run`` command will open a monitor window to monitor all the jobs you have, and you can also use 
