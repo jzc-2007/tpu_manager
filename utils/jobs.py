@@ -71,10 +71,10 @@ def run(user_obj, args):
                         print(f"{RED}[ERROR]{NC} Failed to reapply TPU {tpu}: {e}")
                         release_lock_data()
                         return
-                    print(f"{GREEN}[INFO] {NC}Re-applying TPU {tpu} successfully")
+                    print(f"{GREEN}[SUCCESS] {NC}Re-applying TPU {tpu} successfully")
 
             elif tpu_status == 'READY':
-                print(f"{GREEN}[INFO] {NC}TPU {tpu} is ready, starting job...")
+                print(f"{GREEN}[SUCCESS] {NC}TPU {tpu} is ready, starting job...")
 
             elif tpu_status == 'failed':
                 print(f"{YELLOW}[WARNING]{NC} Failed to query status")
@@ -88,7 +88,7 @@ def run(user_obj, args):
                         print(f"{RED}[ERROR]{NC} Failed to reapply TPU {tpu}: {e}")
                         release_lock_data()
                         return
-                    print(f"{GREEN}[INFO] {NC}Applying TPU {tpu} successfully")
+                    print(f"{GREEN}[SUCCESS] {NC}Applying TPU {tpu} successfully")
                 else:
                     print(f"{PURPLE}[INFO] {NC}Quiting... {tpu}")
                     release_lock_data()
@@ -263,7 +263,7 @@ def check_jobs(user_obj, args):
                 print('-'*40)
                 continue
             elif job_data["status"] == 'killed':
-                print(f"Status: {RED}Killed{NC}")
+                print(f"Status: {YELLOW}Killed{NC}")
                 if monitor_verbose:
                     print(f"msg: {msg}")
                 print('-'*40)
@@ -285,8 +285,7 @@ def check_jobs(user_obj, args):
                     print(f"msg: {msg}")
                 print('-'*40)
                 continue
-
-        if re.search(r'[eE]rror', last_line) or re.search(r'ERROR', last_line):
+        if re.search(r'Job failed', last_line) or re.search(r'[eE]rror', last_line) or re.search(r'ERROR', last_line):
             print(f"Status: {RED}Error{NC}")
             print(f"msg: {msg}")
         elif re.search(r'[cC]ompiling', last_line) or re.search(r'[cC]ompilation', last_line)or re.search(r'[cC]ompile', last_line):
@@ -423,6 +422,7 @@ def clear_finished_jobs(user_object):
         all_jobs = user_object.job_data
         for job in all_jobs:
             if job['status'] == 'finished':
+                print(f"{PURPLE}[INFO] {NC}clear_finished_jobs: Clearing finished job {job['windows_id']}")
                 all_jobs.remove(job)
             # delete tmux window
             os.system(f"tmux kill-window -t {user_object.tmux_name}:{job['windows_id']}")
@@ -438,7 +438,8 @@ def clear_error_jobs(user_object):
         print(f"Clearing error jobs...")
         all_jobs = user_object.job_data
         for job in all_jobs:
-            if job['status'] == 'error' or job['error'] is not None:
+            if job['status'] == 'error' or job['error'] is not None or job['status'] == 'killed':
+                print(f"{PURPLE}[INFO] {NC}clear_error_jobs: Clearing error job {job['windows_id']}")
                 all_jobs.remove(job)
             # delete tmux window
             os.system(f"tmux kill-window -t {user_object.tmux_name}:{job['windows_id']}")
@@ -470,6 +471,7 @@ def clear_zombie_jobs(user_object):
         for job in all_jobs:
             if os.system(f"tmux list-windows -t {user_object.tmux_name} | grep \" {job['windows_id']}:\"") != 0:
                 all_jobs.remove(job)
+                print(f"{PURPLE}[INFO] {NC}clear_zombie_jobs: Clearing zombie job {job['windows_id']}")
         data['users'][user_object.name]['job_data'] = all_jobs
         write_and_unlock_data(data)
     except:

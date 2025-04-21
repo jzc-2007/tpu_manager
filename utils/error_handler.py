@@ -2,6 +2,7 @@ import json
 import os, time
 from .helpers import DATA_PATH, LOCK_FILE
 from .data_io import read_and_lock_data, write_and_unlock_data, release_lock_data, read_data
+RED, GREEN, YELLOW, PURPLE, NC = "\033[1;31m", "\033[1;32m", "\033[1;33m", "\033[1;34m", "\033[0m"
 def clear_zombie_windows(user_obj):
     """
     Clean up all the windows that not appear in user's joblist, except the window 0.
@@ -18,6 +19,7 @@ def clear_zombie_windows(user_obj):
         if window_num == 0:
             continue
         if window_num not in all_windows:
+            print(f"{PURPLE}[INFO]{NC} clear_zombie_windows: killing window {user_obj.tmux_name}:{window_num}")
             os.system(f'tmux kill-window -t {user_obj.tmux_name}:{window_num}')
             time.sleep(0.5)
 

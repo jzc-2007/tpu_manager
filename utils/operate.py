@@ -84,13 +84,6 @@ def apply_pre(tpu, delete=True):
             print("{RED}[ERROR]{NC} apply_pre: initializing preemptible TPU timed out")
             return 'init failed'
         
-        cmd = f"bash test_remote_env.sh {tpu} {zone}"
-        try:
-            subprocess.run(cmd, shell=True, timeout=300, check=True, cwd=OPERATE_PATH, stdout=subprocess.DEVNULL)
-        except subprocess.TimeoutExpired:
-            print("{RED}[ERROR]{NC} apply_pre: testing remote env timed out")
-            return 'test failed'
-        
         return 'success'
     else:
         print(f"{RED}[ERROR]{NC} apply_pre: TPU {tpu} not ready, state: {state}")
@@ -108,7 +101,36 @@ def describe_tpu(tpu):
     
     return state
 
+def check_env(tpu):
+    zone, pre, tpu = get_zone_pre(tpu)
+    if zone is None: return
+    DATA_ROOT = "kmh-nfs-ssd-eu-mount" if 'eu' in zone else "kmh-nfs-ssd-us-mount"
+    CONDA_PY_PATH = "/"+DATA_ROOT+"/code/qiao/anaconda3/envs/NNX/bin/python"
+    cmd1 = "gcloud compute tpus tpu-vm ssh "+tpu+" --zone "+zone+" --worker=all --command \""+CONDA_PY_PATH+" -c 'import jax; print(jax.devices())'\""
+    cmd2 = "gcloud compute tpus tpu-vm ssh "+tpu+" --zone "+zone+" --worker=all --command \""+CONDA_PY_PATH+" -c 'import flax; print(flax.__version__)'\""
+    print(cmd1)
+    print(cmd2)
+    try:
+        # get the output of the command
+        result1 = subprocess.run(cmd1, shell=True, capture_output=True, text=True)
+        stdout1, stderr1 = result1.stdout, result1.stderr
+        result2 = subprocess.run(cmd2, shell=True, capture_output=True, text=True)
+        stdout2, stderr2 = result2.stdout, result2.stderr
+    except subprocess.CalledProcessError:
+        print(f"{RED}[ERROR]{NC} check_remote_env: Failed to query TPU state")
+        return 'failed'
 
+    if 'No such file or directory' in stderr1 or 'No such file or directory' in stderr2:
+        print(f"{RED}[ERROR]{NC} check_remote_env: No such file or directory")
+        print(f"You may need to {PURPLE}mount the NFS{NC} first")
+        return 'file error'
+
+    if "Tpudevice" in stdout1 and "linear" in stdout2:
+        print(f"{GREEN}[INFO]{NC} check_remote_env: TPU {tpu} is good")
+        return 'success'
+    else:
+        print(f"{RED}[ERROR]{NC} check_remote_env: TPU {tpu} is not good")
+        return 'failed'
     
 
 

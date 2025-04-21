@@ -65,6 +65,7 @@ if __name__ == '__main__':
     elif cmd == 'add-user': users.create_user()
     elif cmd == 'del-user': users.del_user()
     elif cmd == 'check-tpu': logger.check_tpu(args[2:])
+    elif cmd == 'check-env': operate.check_env(args[2])
     elif cmd == 'list-users' or cmd == '-lu': users.list_users()
     elif cmd == 'init': handler.initialization()
     elif cmd == 'reapply': operate.apply_pre(args[2], delete=True)
@@ -97,6 +98,7 @@ if __name__ == '__main__':
         elif cmd == 'clear-all' or cmd == 'clear': jobs.clear_all_jobs(user_object)
         elif cmd == '-czw': handler.clear_zombie_windows(user_object)
         elif cmd == '-czj': jobs.clear_zombie_jobs(user_object)
+        elif cmd == 'clean': jobs.clear_all_jobs(user_object), handler.clear_zombie_windows(user_object), jobs.clear_zombie_jobs(user_object)
         else: print(f"Unknown command {cmd}")
 
 # DATA 
