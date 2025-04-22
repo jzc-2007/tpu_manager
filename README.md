@@ -34,7 +34,12 @@ tpu run v2-32-p1 lyy dir=2 tag=bird # run the job in working directory 2
 
 The `run` command will ask you whether to reapply when the TPU is preempted. You can also add flag `-apply` to avoid asks.
 
-#### monitor jobs
+#### Kill jobs
+```bash
+tpu kill-jobs/-k/-kj tpu_name username # kill all the jobs in the TPU
+```
+
+#### Monitor jobs
 If the TPU is a preemptible TPU, ``tpu run`` will **auto-rerun when GRPC**, and will **auto-reapply and rerun** when preempted. 
 The ``tpu run`` command will open a monitor window to monitor all the jobs you have, and you can also use 
 ```bash
@@ -47,9 +52,12 @@ to get that. It will update in every 5 seconds, and for one-time check, you can 
 We support common operations for TPUs, such as
 ```bash
 tpu apply/reapply tpu_name # apply/reapply the TPU, reapply will delete the TPU and create a new one
+```
+
+There're also enviroment operations supported, such as
+```bash
 tpu mount-disk tpu_name # mount the disk for the TPU
 tpu setup-wandb tpu_name # setup wandb for the TPU
-tpu kill-jobs/-k/-kj tpu_name # kill all the jobs in the TPU
 ```
 
 Also, an automatic enviroment solver is used to solve the TPU environment. Now it is 
@@ -78,7 +86,7 @@ then,
 tpu run v2-32-6 xibo lr=0.01
 tpu run v2-32-6 xibo config.training.learning_rate=0.01 # This is also supported
 ```
-#### kill windows/jobs
+#### Kill windows
 We recommend using our kill-windows command to kill the windows instead of killing by yourself. You can use this command to kill the specific tmux window:
 ```bash
 tpu -kw/kill-window window_number username
@@ -95,11 +103,6 @@ These commands will kill the zombie windows that don't have any jobs running, or
 ```bash
 tpu -czw username # clear all the zombie windows
 tpu -czj username # clear all the zombie jobs
-```
-#### apply/re-apply TPU
-```bash
-tpu apply tpu_alias/tpu_name # apply the TPU
-tpu reapply tpu_alias/tpu_name # delete and apply the TPU
 ```
 
 #### add tags to jobs
@@ -126,19 +129,19 @@ The key data is stored in ``data.json``, and the program read and write it using
             "name": name,
             "tmux_name": tmux_name,
             "working_dir": {num: path},
-            "job_data": [ job1, job2 ],
+            "job_data": [ job1, job2 ], # key data for the job
             "config_aliases": {
                 alias: config_name
             },
             "settings": {
-                "monitor_after_run": true,
-                "monitor_upd_time": 5,
-                "monitor_length": 800,
-                "monitor_verbose": false,
-                "show_length": 300,
+                "monitor_after_run": true, # whether to do auto monitoring
+                "monitor_upd_time": 5, # how often to update the monitor
+                "monitor_length": 800, # the length of output that the monitor will capture
+                "monitor_verbose": false, # whether to show the output in the monitor when the status is known(e.g. running in epoch x, or compiling)
+                "show_length": 300, # the length of the output that will be shown in the monitor
                 "time_zone": "us"
             },
-            "windows_offset": 42,
+            "windows_offset": 42, # the tmux window number offset, to make sure that we don't have the same window number
             "logs": []
         }
     },
@@ -164,8 +167,8 @@ The key data is stored in ``data.json``, and the program read and write it using
         "preemptible": ["..."]
     },
     "monitor_config": {
-        "test_freq": 3600,
-        "checking_freq": 600
+        "test_freq": 3600, # frequency to do unit tests
+        "checking_freq": 600 # frequency to check the jobs
     }, 
     "wandb_api_key": key,
     "conda_env_name": "NNX"
@@ -191,7 +194,7 @@ and each job is described as
         "preempted": "reapply",
         "grpc": "rerun"
     }, # The rules for the job when error
-    "extra_msgs": {}, # record parent/child when rerun
+    "extra_msgs": {}, # record parent/child when rerun, and other things for future use
     "start_time": "20250420_011026"
 },
 ```
