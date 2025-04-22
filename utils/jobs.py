@@ -303,9 +303,18 @@ def check_jobs(user_obj, args):
             if monitor_verbose:
                 print(f"msg: {msg}")
         elif re.search(r'[sS]ampling ', last_line):
-            print(f"Status: {GREEN}Sampling{NC}")
+            epoch = None
+            if re.search(r'[eE]poch\s([0-9]{1,4})', last_line):
+                epoch = re.search(r'[eE]poch\s([0-9]{1,6})', last_line).group(1)
+            elif re.search(r'ep=([0-9]){1,4}\.([0-9]){1,6}', last_line):
+                epoch = re.search(r'ep=([0-9]){1,4}\.([0-9]){1,6}', last_line).group(0)[3:]
+            if epoch is not None:
+                print(f"Status: {GREEN}Sampling{NC} (in epoch {int(float(epoch))})")
+            else:
+                print(f"Status: {GREEN}Sampling{NC}")
             if monitor_verbose:
                 print(f"msg: {msg}")
+
         elif re.search(r'[eE]poch\s([0-9]{1,4})', last_line):
             epoch = re.search(r'[eE]poch\s([0-9]{1,6})', last_line).group(1)
             print(f"Status: {GREEN}Running{NC} in epoch {epoch}")
@@ -313,7 +322,7 @@ def check_jobs(user_obj, args):
                 print(f"msg: {msg}")
         elif re.search(r'ep=([0-9]){1,4}\.([0-9]){1,6}', last_line):
             epoch = re.search(r'ep=([0-9]){1,4}\.([0-9]){1,6}', last_line).group(0)[3:]
-            print(f"Status: {GREEN}Running{NC} in epoch {epoch}")
+            print(f"Status: {GREEN}Running{NC} in epoch {float(epoch):.2f}")
             if monitor_verbose:
                 print(f"msg: {msg}")
         elif re.search(r'[iI]nitializing', last_line):
