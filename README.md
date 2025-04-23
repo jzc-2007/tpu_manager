@@ -15,7 +15,7 @@ More usage in **two sentences**: Use ``tpu tldr`` to see useful commands, and ``
 ## Full docs
 
 <details>
-<summary><strong>Setup(IMPORTANT)</strong></summary>
+<summary>Setup(IMPORTANT)</summary>
 
     You should **update your scripts** to the newest version supporting command-line arguments. The newest scripts can be pulled from zhh's repo. The current finishing check is based on wandb final output, so please make sure your scripts are using wandb to log the final output.  
     Also, this script is not very robust to attack, so try not to do OOD things, for example, setting username to be `run`, `false` or Chinese characters.
@@ -25,7 +25,7 @@ More usage in **two sentences**: Use ``tpu tldr`` to see useful commands, and ``
 
 
 <details>
-<summary><strong>Set working directory & Run jobs(IMPORTANT)</strong></summary>
+<summary>Set working directory & Run jobs(IMPORTANT)</summary>
 
 ```bash
 tpu set-cur num username # Set the working directory<num> to the current directory, default directory is 1
@@ -49,7 +49,7 @@ You can also add flag `-apply` to avoid asks.
 </details>
 
 <details>
-<summary><strong>Kill jobs/windows</strong></summary>
+<summary>Kill jobs/windows</summary>
 To kill a job, you can use:
 
 ```bash
@@ -84,7 +84,7 @@ The ``clean`` command integrates them all, so we strongly suggest to use ``kill-
 </details>
 
 <details>
-<summary><strong>Monitor jobs</strong></summary>
+<summary>Monitor jobs</summary>
 
 If the TPU is a preemptible TPU, `tpu run` will **auto-resume when GRPC**, and will **auto-reapply and resume** when preempted. You can also use `tpu resume <windows_id> username` to resume jobs. 
 The `tpu run` command will open a monitor window to monitor all the jobs you have, and you can also use:
@@ -101,7 +101,7 @@ tpu check username
 </details>
 
 <details>
-<summary><strong>TPU/environment operations</strong></summary>
+<summary>TPU/environment operations</summary>
 
 We support common operations for TPUs, such as:
 
@@ -128,7 +128,7 @@ tpu solve tpu_name # integrated automatic env solver
 
 
 <details>
-<summary><strong>Pass configs</strong></summary>
+<summary>Pass configs</summary>
 We support passing configs on command line, and you can also set your own config alias by:
 
 ```bash
@@ -152,7 +152,7 @@ tpu run v2-32-6 xibo config.training.learning_rate=0.01 # This is also supported
 </details>
 
 <details>
-<summary><strong>Add tags</strong></summary>
+<summary>Add tags</summary>
 
 ```bash
 tpu add-tag window_num tag_name username # add a tag to the job
@@ -174,7 +174,7 @@ The difference between `resume` and `rerun` is that `resume` will load the job f
 </details>
 
 <details>
-<summary><strong>See docs/help</strong></summary>
+<summary>See docs/help</summary>
 
 ```bash
 tpu tldr
@@ -182,10 +182,11 @@ tpu -h command # details of the command
 ```
 
 </details>
+
 ## For Developers
 
 <details>
-<summary><strong>Code Structure</strong></summary>
+<summary>Code Structure</summary>
 
 The user interface is implemented in `tpu.py`, and the specific function implementation is in `utils/`.  
 `monitor.py` does the check and resume work, and will be run all day, it will check the jobs and do unit tests occansionally according to ``data["monitor_config"]``(You can see the full format of ``data.json`` below, which is the key matadata we maintain to manage all the jobs).
@@ -204,13 +205,13 @@ For `utils/`:
 </details>
 
 <details>
-<summary><strong>Data Format</strong></summary>
+<summary>Data Format</summary>
 
 The key data is stored in `data.json`, and the program reads and writes it using the API in `data_io.py`, which implements locking (in `lock.json`).  
 The structure of `data.json` is as follows:
 
 <details>
-<summary><strong>Full data.json structure</strong></summary>
+<summary>Full data.json structure</summary>
 
 ```json
 {
@@ -256,7 +257,7 @@ The structure of `data.json` is as follows:
 
 Each job is described as:
 <details>
-<summary><strong>Full job structure</strong></summary>
+<summary>Full job structure</summary>
 
 ```json
 {
@@ -296,7 +297,7 @@ Each job is described as:
 
 ## New Scripts
 <details>
-<summary><strong>ka.sh</strong></summary>
+<summary>ka.sh</summary>
 
 ```bash
 # ka.sh
@@ -383,7 +384,7 @@ fi
 </details>
 
 <details>
-<summary><strong>staging.sh</strong></summary>
+<summary>staging.sh</summary>
 
 ```bash
 # staging.sh
@@ -429,7 +430,7 @@ cd $HERE
 </details>
 
 <details>
-<summary><strong>run_remote.sh</strong></summary>
+<summary>run_remote.sh</summary>
 
 ```bash
 # run_remote.sh
