@@ -16,7 +16,6 @@ More usage in **two sentences**: Use ``tpu tldr`` to see useful commands, and ``
 
 <details>
 <summary>Setup(<strong>IMPORTANT</strong>)</summary>
-
     You should **update your scripts** to the newest version supporting command-line arguments. The newest scripts can be pulled from zhh's repo. The current finishing check is based on wandb final output, so please make sure your scripts are using wandb to log the final output.  
     Also, this script is not very robust to attack, so try not to do OOD things, for example, setting username to be `run`, `false` or Chinese characters.
 
@@ -26,6 +25,8 @@ More usage in **two sentences**: Use ``tpu tldr`` to see useful commands, and ``
 
 <details>
 <summary>Setting Working Directory & Running Jobs(<strong>IMPORTANT</strong>)</summary>
+The working directory is where you have your scripts and code. You can set multiple working directories, and you can choose when running code. The default working directory is 1.
+You can set the working directory and run the job by:
 
 ```bash
 tpu set-cur num username # Set the working directory<num> to the current directory, default directory is 1
