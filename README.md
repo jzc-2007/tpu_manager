@@ -87,11 +87,14 @@ to get that. It will update in every 5 seconds, and for one-time check, you can 
 tpu check username
 ```
 
-#### Resume jobs manually
+#### Resume/rerun jobs manually
 ```bash
 tpu resume windows=<windows_id> username # resume the job
 tpu resume windows=<windows_id> tpu=<tpu> username # resume the job in a new TPU
+tpu rerun windows=<windows_id> username # rerun the job
+tpu rerun windows=<windows_id> tpu=<tpu> username # rerun the job in a new TPU
 ```
+The difference between `resume` and `rerun` is that `resume` will load the job from the last checkpoint, while `rerun` will start a new job from the beginning.
 
 ---
 
@@ -377,8 +380,7 @@ fi
 PASS_KA=0
 
 if [ -n "$1" ]; then
-	echo "1st arg: $1"
-	echo "2nd arg: $2"
+	echo "1st arg(ka): $1"
 	if [[ "$1" == ka=* ]]; then
 		ka=${1#*=}
 		export VM_NAME=$ka
