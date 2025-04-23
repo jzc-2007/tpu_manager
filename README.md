@@ -49,21 +49,38 @@ You can also add flag `-apply` to avoid asks.
 </details>
 
 <details>
-<summary><strong>Kill jobs</strong></summary>
-
-We don't recommend you to kill jobs manually, but if you want to do that, you can use:
+<summary><strong>Kill jobs/windows</strong></summary>
+To kill a job, you can use:
 
 ```bash
-tpu kill-job/-k/-kj/-kw -w=<windows_id> username # kill all the jobs in the TPU
+tpu kill-job/-k/-kj -w=<windows_id>/window=<windows_id> username # kill all the jobs in the TPU
 ```
 
-The command will not kill the tmux window, but will mark the job as "killed". If you want, you can use this command to kill the windows:
+The command will not kill the tmux window, but will mark the job as "killed". If you want, you can use this integrated ``clean`` command to kill the windows:
 
 ```bash
 tpu clean username # kill all the tmux windows whose jobs are finished/error/killed
 ```
 
 Those with child jobs rerunned/resumed will be killed according to the status of their children.
+
+You can use this command to kill the specific tmux window:
+```bash
+tpu -kw/kill-window window_number username
+```
+
+After killing windows, some jobs may become "zombies"(i.e. don't have windows associated with them). There're helpers to clean all kinds of zombies:
+
+```bash
+tpu -czw username # clear all the zombie windows
+tpu -czj username # clear all the zombie jobs
+tpu clear-finished username # clear all the finished jobs
+tpu clear-error username # clear all the error jobs
+tpu clear-all username # RECOMMENDED, clear all the finished/error jobs
+```
+
+The ``clean`` command integrates them all, so we strongly suggest to use ``kill-job + clean`` instead of kill window all manually use ``tmux kill-window`` to kill the windows.
+
 </details>
 
 <details>
@@ -120,7 +137,7 @@ tpu -h command # details of the command
 </details>
 
 <details>
-<summary><strong>Pass configs(alias) on command line</strong></summary>
+<summary><strong>Pass configs</strong></summary>
 We support passing configs on command line, and you can also set your own config alias by:
 
 ```bash
@@ -155,35 +172,9 @@ tpu rerun windows=<windows_id> tpu=<tpu> username # rerun the job in a new TPU
 The difference between `resume` and `rerun` is that `resume` will load the job from the last checkpoint, while `rerun` will start a new job from the beginning.
 
 </details>
-<details>
-<summary><strong>Kill windows</strong></summary>
-
-We recommend using our kill-windows command to kill the windows instead of killing by yourself.  
-You can use this command to kill the specific tmux window:
-
-```bash
-tpu -kw/kill-window window_number username
-```
-
-Also, you can clear all the jobs that are finished/error by:
-
-```bash
-tpu clear-finished username # clear all the finished jobs
-tpu clear-error username # clear all the error jobs
-tpu clear-all username # RECOMMENDED, clear all the finished/error jobs
-```
-
-These commands will kill the zombie windows that don't have any jobs running, or zombie jobs that are not running anymore:
-
-```bash
-tpu -czw username # clear all the zombie windows
-tpu -czj username # clear all the zombie jobs
-```
-
-</details>
 
 <details>
-<summary><strong>Add tags to jobs</strong></summary>
+<summary><strong>Add tags</strong></summary>
 
 ```bash
 tpu add-tag window_num tag_name username # add a tag to the job
