@@ -126,15 +126,6 @@ tpu solve tpu_name # integrated automatic env solver
 ```
 </details>
 
-<details>
-<summary><strong>See docs/help</strong></summary>
-
-```bash
-tpu tldr
-tpu -h command # details of the command
-```
-
-</details>
 
 <details>
 <summary><strong>Pass configs</strong></summary>
@@ -159,8 +150,17 @@ tpu run v2-32-6 xibo lr=0.01
 tpu run v2-32-6 xibo config.training.learning_rate=0.01 # This is also supported
 ```
 </details>
+
 <details>
-<summary><strong>Resume/rerun jobs manually</strong></summary>
+<summary><strong>Add tags</strong></summary>
+
+```bash
+tpu add-tag window_num tag_name username # add a tag to the job
+```
+</details>
+
+<details>
+<summary>Resume/rerun jobs manually</summary>
 
 ```bash
 tpu resume windows=<windows_id> username # resume the job
@@ -174,20 +174,14 @@ The difference between `resume` and `rerun` is that `resume` will load the job f
 </details>
 
 <details>
-<summary><strong>Add tags</strong></summary>
+<summary><strong>See docs/help</strong></summary>
 
 ```bash
-tpu add-tag window_num tag_name username # add a tag to the job
+tpu tldr
+tpu -h command # details of the command
 ```
-</details>
-
-<details>
-<summary><strong>Sanity Checks</strong></summary>
-
-Some very naive sanity checks are implemented in `unit_tests.py`.
 
 </details>
-
 ## For Developers
 
 <details>
