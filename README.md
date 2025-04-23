@@ -36,8 +36,9 @@ tpu ls username # List all the working directories
 tpu run tpu_name username [dir=1] [tag=suibian] # Run the job in working directory <dir>, tag is optional and visible in the monitor window
 ```
 
-The `tpu_name` is of the format `v2-32-6`, `v2-32-p1`, or `v4-32-py2`.  
-For more details, use `tpu -lta` (list TPU aliases) or `tpu -ta alias FULL_TPU_NAME` (to add a new alias).  
+The `tpu_name` is of the format of the **pre-defined tpu aliases** , like `v2-32-6`, `v2-32-p1`, or `v4-32-py2`. You can also pass full-name such as `kmh-tpuvm-v2-32-1`.
+
+For all the aliases, use `tpu -lta` (list TPU aliases) to see. You can also add aliases by `tpu -ta alias FULL_TPU_NAME`. Please don't add aliases that may lead to contradictions to other things, for example `username` or `tag` or `config` or `s`.
 
 **Example:**
 
