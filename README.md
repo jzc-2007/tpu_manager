@@ -199,7 +199,7 @@ Some very naive sanity checks are implemented in `unit_tests.py`.
 
 </details>
 
-### For Developers
+## For Developers
 
 The user interface is implemented in `tpu.py`, and the specific detail is in `utils/`.  
 `monitor.py` does the check and resume work, and will be run all day.
@@ -266,6 +266,7 @@ The structure of `data.json` is as follows:
 Each job is described as:
 <details>
 <summary><strong>Full job structure</strong></summary>
+
 ```json
 {
     "user": "username",
@@ -291,7 +292,8 @@ Each job is described as:
 </details>
 
 </details>
-### Future Work
+
+## Future Work
 
 - [ ] More testing/docs
 - [ ] Customized monitor window
@@ -299,7 +301,7 @@ Each job is described as:
 - [ ] More auto env solvers  
 - [ ] Logging for every user so that you can check the things happen since last time  
 
-### New Scripts
+## New Scripts
 <details>
 <summary><strong>ka.sh</strong></summary>
 
