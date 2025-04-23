@@ -50,7 +50,7 @@ def kill_resume(job):
     print(f"Kill TPU {ka}...")
     operate.kill_jobs(ka)
     print("resume job...")
-    jobs.resume_job(job)
+    jobs.resume_rerun_job(job, load_ckpt=True)
 
 
 def reapply_resume(job, timeout=1800):
@@ -73,7 +73,7 @@ def reapply_resume(job, timeout=1800):
                 print(f"{RED}[ERROR] {NC}reapply_resume: Reapply TPU {ka} failed: {result}")
             else:
                 print(f"{GREEN}[SUCCESS]{NC} Reapply TPU {ka} success: {result}, start resume job")
-                jobs.resume_job(job)
+                jobs.resume_rerun_job(job, load_ckpt=True)
         else:
             print(f"{RED}[ERROR] {NC}reapply_resume: Reapply TPU {ka} failed, no result returned")
 
@@ -83,7 +83,7 @@ def mainloop():
     print(f"{PURPLE}[INFO]{NC} mainloop: checking jobs")
     for user in data["user_list"]:
         for job in data["users"][user]["job_data"]:
-            if job['status'] == 'finished' or job['status'] == 'resumed' or not job['monitor']:
+            if job['status'] == 'finished' or job['status'] == 'resumed' or job['status'] == 'rerunned' or not job['monitor']:
                 continue
             status = job['error'] if job['status'] == 'error' else check_job_status(job)
             if status == 'preempted':
