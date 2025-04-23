@@ -632,8 +632,10 @@ def clear_zombie_jobs(user_object):
         print(f"Clearing zombie jobs...")
         all_jobs = user_object.job_data
         new_jobs = []
+        all_windows = os.popen(f"tmux list-windows -t {user_object.tmux_name}").read().splitlines()
+        all_windows = [int(w.split(':')[0]) for w in all_windows]
         for job in all_jobs:
-            if os.system(f"tmux list-windows -t {user_object.tmux_name} | grep \" {job['windows_id']}:\"") != 0:
+            if int(job['windows_id']) not in all_windows:
                 print(f"{PURPLE}[INFO] {NC}clear_zombie_jobs: Clearing zombie job {job['windows_id']}")
             else:
                 new_jobs.append(job)

@@ -375,9 +375,12 @@ fi
 ```bash
 # staging.sh
 PASS_KA=0
-if [ -n "$2" ]; then
-	if [ "$2" == "ka="* ]; then
-		ka=${2#*=}
+
+if [ -n "$1" ]; then
+	echo "1st arg: $1"
+	echo "2nd arg: $2"
+	if [[ "$1" == ka=* ]]; then
+		ka=${1#*=}
 		export VM_NAME=$ka
 		export PASS_KA=1
 	fi
