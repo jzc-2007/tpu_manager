@@ -128,7 +128,7 @@ tpu solve tpu_name # integrated automatic env solver
 
 
 <details>
-<summary>Pass configs</summary>
+<summary>Pass configs/ Add tags</summary>
 We support passing configs on command line, and you can also set your own config alias by:
 
 ```bash
@@ -149,11 +149,8 @@ then,
 tpu run v2-32-6 xibo lr=0.01
 tpu run v2-32-6 xibo config.training.learning_rate=0.01 # This is also supported
 ```
-</details>
 
-<details>
-<summary>Add tags</summary>
-
+You can add tags to the existing jobs(so that they will be shown in the monitor) by:
 ```bash
 tpu add-tag window_num tag_name username # add a tag to the job
 ```
