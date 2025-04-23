@@ -19,7 +19,7 @@ def check_job_status(job):
         return None
     tpu = job["tpu"]
     if tpu == '':
-        print(f"{RED}[ERROR]{NC} check_job_status: tpu is empty")
+        print(f"{RED}[FAIL]{NC} check_job_status: tpu is empty")
         return None
     tpu_status = operate.check_tpu_status(tpu)
     if tpu_status == 'preempted':
@@ -27,7 +27,7 @@ def check_job_status(job):
     
     log_dir = job["log_dir"]+"/output.log"
     if not os.path.exists(log_dir):
-        print(f"{RED}[ERROR]{NC} check_tpu_status: log file {log_dir} not found")
+        print(f"{RED}[FAIL]{NC} check_tpu_status: log file {log_dir} not found")
         return None
     with open(log_dir, 'r') as file:
         lines = file.readlines()
@@ -42,13 +42,13 @@ def reapply_worker(ka, result_queue):
         result = operate.apply_pre(ka, delete=True)
         result_queue.put(result)
     except Exception as e:
-        print(f"{RED}[ERROR]{NC} reapply_worker: Failed to reapply TPU {ka}: {e}")
+        print(f"{RED}[FAIL]{NC} reapply_worker: Failed to reapply TPU {ka}: {e}")
         result_queue.put(e)
 
 def kill_resume(job):
     ka = job["tpu"]
     print(f"Kill TPU {ka}...")
-    operate.kill_jobs(ka)
+    operate.kill_jobs_tpu(ka)
     print("resume job...")
     jobs.resume_rerun_job(job, load_ckpt=True)
 
@@ -70,12 +70,12 @@ def reapply_resume(job, timeout=1800):
         if not result_queue.empty():
             result = result_queue.get()
             if isinstance(result, Exception):
-                print(f"{RED}[ERROR] {NC}reapply_resume: Reapply TPU {ka} failed: {result}")
+                print(f"{RED}[FAIL] {NC}reapply_resume: Reapply TPU {ka} failed: {result}")
             else:
-                print(f"{GREEN}[SUCCESS]{NC} Reapply TPU {ka} success: {result}, start resume job")
+                print(f"{GREEN}[GOOD]{NC} Reapply TPU {ka} success: {result}, start resume job")
                 jobs.resume_rerun_job(job, load_ckpt=True)
         else:
-            print(f"{RED}[ERROR] {NC}reapply_resume: Reapply TPU {ka} failed, no result returned")
+            print(f"{RED}[FAIL] {NC}reapply_resume: Reapply TPU {ka} failed, no result returned")
 
 def mainloop():
     error_jobs = {'preempted': [], 'grpc': []}
@@ -83,7 +83,7 @@ def mainloop():
     print(f"{PURPLE}[INFO]{NC} mainloop: checking jobs")
     for user in data["user_list"]:
         for job in data["users"][user]["job_data"]:
-            if job['status'] == 'finished' or job['status'] == 'resumed' or job['status'] == 'rerunned' or not job['monitor']:
+            if job['status'] in ['finished', 'rerunned', 'resumed', 'killed'] or not job['monitor']:
                 continue
             status = job['error'] if job['status'] == 'error' else check_job_status(job)
             if status == 'preempted':
@@ -104,7 +104,7 @@ def mainloop():
                         jb['error'] = error_type
                 data_io.write_and_unlock_data(data)
             except:
-                print(f"{RED}[ERROR]{NC} mainloop: Failed to update job {job['windows_id']} for user {user}")
+                print(f"{RED}[FAIL]{NC} mainloop: Failed to update job {job['windows_id']} for user {user}")
                 data_io.release_lock_data()
 
     for error_type in error_jobs:
@@ -123,7 +123,7 @@ if __name__ == "__main__":
     last_test_time = time.time()
 
     if data_io.check_code_lock():
-        print(f"{RED}[ERROR]{NC} Code is locked for developing, please unlock it first.")
+        print(f"{RED}[FAIL]{NC} Code is locked for developing, please unlock it first.")
         sys.exit(1)
     try:
         while True:
@@ -143,7 +143,7 @@ if __name__ == "__main__":
                     print(f"{PURPLE}[INFO]{NC} Running unit tests...")
                     unit_tests.sanity_check()
                 except Exception as e:
-                    print(f"{RED}[ERROR]{NC} Unit tests failed: {e}")
+                    print(f"{RED}[FAIL]{NC} Unit tests failed: {e}")
                 last_test_time = time.time()
 
                 

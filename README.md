@@ -65,10 +65,19 @@ You can also add flag `-apply` to avoid asks.
 ---
 
 #### Kill jobs
+We don't recommend you to kill jobs manually, but if you want to do that, you can use:
 
 ```bash
-tpu kill-jobs/-k/-kj tpu_name username # kill all the jobs in the TPU
+tpu kill-job/-k/-kj/-kw -w=<windows_id> username # kill all the jobs in the TPU
 ```
+
+The command will not kill the tmux window, but will mark the job as "killed". If you want, you can use this command to kill the windows:
+
+```bash
+tpu clean username # kill all the tmux windows whose jobs are finished/error/killed
+```
+
+Those with child jobs rerunned/resumed will be killed according to the status of their children.
 
 ---
 
@@ -81,7 +90,7 @@ The `tpu run` command will open a monitor window to monitor all the jobs you hav
 tpu monitor username
 ```
 
-to get that. It will update in every 5 seconds, and for one-time check, you can use:
+to get that. It will update in every 10 seconds, and for one-time check, you can use:
 
 ```bash
 tpu check username

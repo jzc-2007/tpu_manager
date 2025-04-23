@@ -22,7 +22,7 @@ def set_monitor_config(args):
         print(f"Set {key} to {value}")
         write_and_unlock_data(data)
     except:
-        print(f"{RED}[ERROR]{NC} Failed to set monitor config")
+        print(f"{RED}[FAIL]{NC} Failed to set monitor config")
         release_lock_data()
 
 def explain_tpu_aliases():
@@ -36,7 +36,7 @@ def add_tpu_alias(alias, name):
         data['tpu_aliases'][alias] = name
         write_and_unlock_data(data)
     except:
-        print(f"{RED}[ERROR]{NC} Failed to add tpu alias")
+        print(f"{RED}[FAIL]{NC} Failed to add tpu alias")
         release_lock_data()
 
 def get_settings(user_object, args):
@@ -60,7 +60,7 @@ def set_settings(user_object, args):
         print(f"Set {key} to {value}")
         write_and_unlock_data(data)
     except:
-        print(f"{RED}[ERROR]{NC} Failed to set settings")
+        print(f"{RED}[FAIL]{NC} Failed to set settings")
         release_lock_data()
 
 def add_config_alias(user_object, args):
@@ -71,7 +71,7 @@ def add_config_alias(user_object, args):
         data['users'][user_object.name] = user_object.to_dict()
         write_and_unlock_data(data)
     except:
-        print(f"{RED}[ERROR]{NC} Failed to add config alias")
+        print(f"{RED}[FAIL]{NC} Failed to add config alias")
         release_lock_data()
 
 def show_config_alias(user_object):
@@ -87,7 +87,7 @@ def del_config_alias(user_object, args):
         data['users'][user_object.name] = user_object.to_dict()
         write_and_unlock_data(data)
     except:
-        print(f"{RED}[ERROR]{NC} Failed to delete config alias")
+        print(f"{RED}[FAIL]{NC} Failed to delete config alias")
         release_lock_data()
 
 def read_user_logs(user_object, args):
@@ -101,5 +101,5 @@ def clear_user_logs(user_object):
         data['users'][user_object.name]['logs'] = user_object.logs
         write_and_unlock_data(data)
     except:
-        print(f"{RED}[ERROR]{NC} Failed to clear user logs")
+        print(f"{RED}[FAIL]{NC} Failed to clear user logs")
         release_lock_data()

@@ -109,15 +109,15 @@ def test_zombie_jobs(quiet = False):
 
 def test_has_child(quiet = False):
     """
-    Test if all the jobs with status 'resumed' have a child job.
+    Test if all the jobs with status 'resumed' and 'rerunned' have a child job.
     """
     try:
         data = data_io.read_data()
         for user, user_data in data['users'].items():
             for job in user_data['job_data']:
-                if job['status'] == 'resumed':
+                if job['status'] == 'resumed' or job['status'] == 'rerunned':
                     if 'child' not in job['extra_msgs']:
-                        raise Exception(f"Job {job['windows_id']} has status 'resumed' but no child job")
+                        raise Exception(f"Job {job['windows_id']} has status {job['status']} but no child job")
         if not quiet:
             print(f"{GREEN}[PASSED]{NC} test_has_child")
         return True

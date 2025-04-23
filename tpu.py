@@ -44,7 +44,7 @@ if __name__ == '__main__':
     args = sys.argv
 
     if len(args) < 2:
-        print(f"{RED}[ERROR]{NC} No command provided")
+        print(f"{RED}[FAIL]{NC} No command provided")
         sys.exit(1)
 
     cmd = args[1]
@@ -57,7 +57,7 @@ if __name__ == '__main__':
         exit(0)
 
     if data_io.check_code_lock():
-        print(f"{RED}[ERROR]{NC} Code is locked for developing, please unlock it first.")
+        print(f"{RED}[FAIL]{NC} Code is locked for developing, please unlock it first.")
         sys.exit(1)
     try:
         ############### JOBS that don't require a user ###############
@@ -79,7 +79,7 @@ if __name__ == '__main__':
         elif cmd == 'solve' or cmd == 'solve-env': handler.solve_env(args[2])
         elif cmd == 'mount-disk': operate.mount_disk(args[2])
         elif cmd == 'set-wandb': operate.set_wandb(args[2])
-        elif cmd == 'kill-jobs' or cmd == '-k' or cmd =='-kj': operate.kill_jobs(args[2])
+        elif cmd == 'kill-tpu' or cmd == '-kt': operate.kill_jobs_tpu(args[2])
         elif cmd == 'set-monitor-config' or cmd == '-smc': logger.set_monitor_config(args[2:])
         elif cmd == 'get-monitor-config' or cmd == '-gmc': logger.get_monitor_config()
         else: 
@@ -96,11 +96,12 @@ if __name__ == '__main__':
             elif cmd == 'get-dir': print(dirs.get_dir(user_object, args[2]))
             elif cmd == 'check': jobs.check_jobs(user_object, args[2:])
             elif cmd == 'monitor': jobs.monitor_jobs(user_object, args[2:])
+            elif cmd == 'kill-job' or cmd == '-kj' or cmd == '-k' or cmd == '-kw': jobs.kill_job(user_object, args[2:])
             elif cmd == 'run': jobs.run(user_object, args[2:])
             elif cmd == 'resume': jobs.resume(user_object, args[2:])
             elif cmd == 'rerun': jobs.rerun(user_object, args[2:])
             elif cmd == 'ls' or cmd == 'lsdir': dirs.list_dir(user_object, args[2:])
-            elif cmd == 'kill-window' or cmd == '-kw': jobs.kill_window(user_object, args[2:])
+            # elif cmd == 'kill-window' or cmd == '-kw': jobs.kill_window(user_object, args[2:])
             elif cmd == 'add-config-alias' or cmd == '-a' or cmd == '-alias': logger.add_config_alias(user_object, args[2:])
             elif cmd == 'show-config-alias' or cmd == '-sa': logger.show_config_alias(user_object)
             elif cmd == 'del-config-alias': logger.del_config_alias(user_object, args[2:])
@@ -113,7 +114,7 @@ if __name__ == '__main__':
             elif cmd == 'clean': jobs.clear_all_jobs(user_object), handler.clear_zombie_windows(user_object), jobs.clear_zombie_jobs(user_object)
             else: print(f"Unknown command {cmd}")
     except Exception as e:
-        print(f"{RED}[ERROR]{NC} {e}")
+        print(f"{RED}[FAIL]{NC} {e}")
         sys.exit(1)
 
 

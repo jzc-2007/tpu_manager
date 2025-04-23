@@ -14,7 +14,7 @@ class User():
         self.logs = []
         self.settings = {
             "monitor_after_run": True,
-            "monitor_upd_time": 5,
+            "monitor_upd_time": 10,
             "monitor_length": 500,
             "monitor_verbose": False,
             "show_length": 200,
@@ -95,9 +95,9 @@ def create_user():
         data['user_id_dict'][name] = user_id
         data['users'][name] = user.to_dict()
         write_and_unlock_data(data)
-        print(f"{GREEN}[SUCCESS]{NC} create_user: Created user {name} with id {user_id} and tmux name {tmux_name}, start working with cute TPUs!")
+        print(f"{GREEN}[GOOD]{NC} create_user: Created user {name} with id {user_id} and tmux name {tmux_name}, start working with cute TPUs!")
     except:
-        print(f"{RED}[ERROR]{NC} create_user: Creating user {name} failed")
+        print(f"{RED}[FAIL]{NC} create_user: Creating user {name} failed")
         release_lock_data()
 
     # kill the tmux session if it exists

@@ -13,7 +13,7 @@ def clear_zombie_windows(user_obj):
         output = os.popen(f'tmux list-windows -t {user_obj.tmux_name}').read().strip()
         windows = output.splitlines()
     except Exception as e:
-        print(f"{RED}[ERROR]{NC} clear_zombie_windows: Failed to list tmux windows: {e}")
+        print(f"{RED}[FAIL]{NC} clear_zombie_windows: Failed to list tmux windows: {e}")
         return
 
     valid_windows = set(int(job['windows_id']) for job in user_obj.job_data)
@@ -37,19 +37,19 @@ def solve_env(tpu):
     print(f"{PURPLE}[INFO]{NC} solve_env: Checking the environment, this may take some time...")
     state = check_env(tpu)
     if state == 'success':
-        print(f"{GREEN}[SUCCESS]{NC} solve_env: Environment in TPU {tpu} is good")
+        print(f"{GREEN}[GOOD]{NC} solve_env: Environment in TPU {tpu} is good")
         return 'success'
     elif state == 'file error':
         print(f"{PURPLE}[INFO]{NC} solve_env: Environment in TPU has file error, trying to mount disk...")
         res = mount_disk(tpu)
         if res == 'success':
-            print(f"{GREEN}[SUCCESS]{NC} solve_env: Solving environment in TPU {tpu} done")
+            print(f"{GREEN}[GOOD]{NC} solve_env: Solving environment in TPU {tpu} done")
             return 'success'
         else:
-            print(f"{RED}[ERROR]{NC} solve_env: Solving environment in TPU {tpu} failed, please contact the admin")
+            print(f"{RED}[FAIL]{NC} solve_env: Solving environment in TPU {tpu} failed, please contact the admin")
             return 'failed'
     elif state == 'unknown':
-        print(f"{RED}[ERROR]{NC} solve_env: Environment in TPU {tpu} is unknown error, please contact the admin")
+        print(f"{RED}[FAIL]{NC} solve_env: Environment in TPU {tpu} is unknown error, please contact the admin")
         return 'failed'
     
 def initialization():

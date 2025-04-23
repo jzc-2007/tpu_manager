@@ -167,7 +167,7 @@ def explain(cmd):
 
         # ========== Unknown ==========
         case _:
-            print(f"{RED}[ERROR]{NC} Unknown command '{cmd}'. Try `tpu tldr` for summary.")
+            print(f"{RED}[FAIL]{NC} Unknown command '{cmd}'. Try `tpu tldr` for summary.")
 
 def tldr():
     Usage = f"""

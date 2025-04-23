@@ -33,7 +33,7 @@ def set_cur(user_obj, args):
             suffix = " (default)" if i == "1" else ""
             print(f"{i}: {dir}{suffix}")
     except Exception as e:
-        print(f"[ERROR] set_cur: {e}")
+        print(f"[FAIL] set_cur: {e}")
     finally:
         if data is not None:
             write_and_unlock_data(data)

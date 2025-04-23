@@ -7,6 +7,7 @@ def get_zone_pre(tpu):
     """
     Get the zone of the TPU, and check if it is preemptible.
     If the input is alias, it will be replaced with the real TPU name.
+    Return zone, pre, tpu_full_name
     """
     data = read_data()
     tpu_aliases = data['tpu_aliases']
@@ -18,8 +19,8 @@ def get_zone_pre(tpu):
     if tpu in tpu_aliases:
         tpu = tpu_aliases[tpu]
     if tpu not in all_tpus:
-        print(f"{RED}[ERROR]{NC} get_zone_pre: TPU {tpu} not found")
-        return
+        print(f"{RED}[FAIL]{NC} get_zone_pre: TPU {tpu} not found")
+        return None, None, None
     all_tpus = data['all_tpus']
     zone = None
     for z, tpu_list in all_tpus.items():
@@ -29,17 +30,17 @@ def get_zone_pre(tpu):
             zone = z
             break
     if zone is None:
-        print(f"{RED}[ERROR]{NC} get_zone_pre: TPU {tpu} not found in any zone")
-        return None, None
+        print(f"{RED}[FAIL]{NC} get_zone_pre: TPU {tpu} not found in any zone")
+        return None, None, None
     return zone, tpu in data['all_tpus']['preemptible'], tpu
 
-def kill_jobs(tpu):
+def kill_jobs_tpu(tpu):
     zone, pre, tpu = get_zone_pre(tpu)
     if zone is None:
-        print("[ERROR] kill_jobs: Could not determine zone.")
+        print("[FAIL] kill_jobs_tpu: Could not determine zone.")
         return
 
-    print(f"{PURPLE}[INFO] {NC}kill_jobs: Killing jobs in TPU {tpu} in zone {zone}...")
+    print(f"{PURPLE}[INFO] {NC}kill_jobs_tpu: Killing jobs in TPU {tpu} in zone {zone}...")
 
     cmd = (
         f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --worker=all "
@@ -53,20 +54,20 @@ def kill_jobs(tpu):
         subprocess.run(cmd, shell=True, timeout=300, check=True,
                        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     except subprocess.TimeoutExpired:
-        print(f"{RED}[ERROR]{NC} kill_jobs: Killing jobs timed out")
+        print(f"{RED}[FAIL]{NC} kill_jobs_tpu: Killing jobs timed out")
         return 'timeout'
     except subprocess.CalledProcessError as e:
-        print(f"{RED}[ERROR]{NC} kill_jobs: Killing jobs failed.")
+        print(f"{RED}[FAIL]{NC} kill_jobs_tpu: Killing jobs failed.")
         print(f"{YELLOW}stdout:{NC} {e.stdout.strip()}")
         print(f"{YELLOW}stderr:{NC} {e.stderr.strip()}")
         return 'kill failed'
-    print(f"{GREEN}[SUCCESS]{NC} kill_jobs: Killing jobs done")
+    print(f"{GREEN}[GOOD]{NC} kill_jobs_tpu: Killing jobs done")
     return 'success'
 
 def set_wandb(tpu):
     zone, pre, tpu = get_zone_pre(tpu)
     if zone is None:
-        print(f"{RED}[ERROR]{NC} set_wandb: TPU {tpu} not found")
+        print(f"{RED}[FAIL]{NC} set_wandb: TPU {tpu} not found")
         return
     
     print(f"{PURPLE}[INFO]{NC} Setting up remote wandb in TPU {tpu}...")
@@ -85,22 +86,22 @@ def set_wandb(tpu):
         setup_process = subprocess.run(cmd, shell=True, timeout=300, check=True,
                                        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     except subprocess.TimeoutExpired:
-        print(f"{RED}[ERROR]{NC} set_wandb: setting wandb timed out")
+        print(f"{RED}[FAIL]{NC} set_wandb: setting wandb timed out")
         return 'timeout'
     except subprocess.CalledProcessError as e:
-        print(f"{RED}[ERROR]{NC} set_wandb: setting wandb failed.")
+        print(f"{RED}[FAIL]{NC} set_wandb: setting wandb failed.")
         print(f"{YELLOW}stdout:{NC} {e.stdout.strip()}")
         print(f"{YELLOW}stderr:{NC} {e.stderr.strip()}")
         return 'wandb failed'
 
-    print(f"{GREEN}[SUCCESS]{NC} set_wandb: Setting wandb done")
+    print(f"{GREEN}[GOOD]{NC} set_wandb: Setting wandb done")
     return 'success'
 
 def apply_pre(tpu, delete=True):
     zone, pre, tpu = get_zone_pre(tpu)
     if zone is None: return
     if not pre:
-        print(f"{RED}[ERROR]{NC} apply_pre: TPU {tpu} in zone {zone} is not preemptible")
+        print(f"{RED}[FAIL]{NC} apply_pre: TPU {tpu} in zone {zone} is not preemptible")
         return
     print(f"{PURPLE}[INFO]{NC} Re-apply in TPU {tpu} in zone {zone}...")
     acc_type = None
@@ -108,27 +109,27 @@ def apply_pre(tpu, delete=True):
     elif 'v2-32' in tpu: acc_type = 'v2-32'
     elif 'v4-32' in tpu: acc_type = 'v4-32'
     elif 'v4-8' in tpu: acc_type = 'v4-8'
-    else: raise ValueError(f"{RED}[ERROR]{NC} apply_pre: Unknown TPU type {tpu}")
+    else: raise ValueError(f"{RED}[FAIL]{NC} apply_pre: Unknown TPU type {tpu}")
     if delete:
         cmd = f"gcloud compute tpus tpu-vm delete {tpu} --zone={zone} --quiet"
         try:
             subprocess.run(cmd.split(), timeout=300, check=True, stdout=subprocess.DEVNULL)
         except subprocess.CalledProcessError as e:
-            print(f"{RED}[ERROR]{NC} apply_pre: TPU deletion failed: {e}")
+            print(f"{RED}[FAIL]{NC} apply_pre: TPU deletion failed: {e}")
             return 'delete failed'
 
     cmd = f"gcloud compute tpus tpu-vm create {tpu} --zone={zone} --accelerator-type={acc_type} --version=tpu-ubuntu2204-base --preemptible"
     try:
         subprocess.run(cmd, shell=True, timeout=600, check=True, stdout=subprocess.DEVNULL)
     except subprocess.TimeoutExpired:
-        print(f"{RED}[ERROR]{NC} apply_pre: applying preemptible TPU timed out")
+        print(f"{RED}[FAIL]{NC} apply_pre: applying preemptible TPU timed out")
         return 'timeout'
 
     cmd = f"gcloud compute tpus describe {tpu} --zone={zone} --format='value(state)'"
     try:
         state = subprocess.check_output(cmd, shell=True).decode().strip()
     except subprocess.CalledProcessError:
-        print(f"{RED}[ERROR]{NC} apply_pre: Failed to query TPU state")
+        print(f"{RED}[FAIL]{NC} apply_pre: Failed to query TPU state")
         return 'describe failed'
 
     if state == 'READY':
@@ -137,22 +138,22 @@ def apply_pre(tpu, delete=True):
         print(f"{PURPLE}[INFO]{NC} Mounting disk in TPU {tpu}...")
         res = mount_disk(tpu, quiet = True)
         if res != 'success':
-            print(f"{RED}[ERROR]{NC} apply_pre: mounting disk failed")
+            print(f"{RED}[FAIL]{NC} apply_pre: mounting disk failed")
             return 'mount failed'
-        print(f"{GREEN}[SUCCESS]{NC} apply_pre: TPU {tpu} is good, done mounting disk")
+        print(f"{GREEN}[GOOD]{NC} apply_pre: TPU {tpu} is good, done mounting disk")
 
         # setup remote wandb
         print(f"{PURPLE}[INFO]{NC} Setting up remote wandb in TPU {tpu}...")
         res = set_wandb(tpu)
         if res != 'success':
-            print(f"{RED}[ERROR]{NC} apply_pre: setting wandb failed")
+            print(f"{RED}[FAIL]{NC} apply_pre: setting wandb failed")
             return 'wandb failed'
-        print(f"{GREEN}[SUCCESS]{NC} apply_pre: Setting wandb done")
-        print(f"{GREEN}[SUCCESS]{NC} apply_pre: TPU {tpu} is good to use!")
+        print(f"{GREEN}[GOOD]{NC} apply_pre: Setting wandb done")
+        print(f"{GREEN}[GOOD]{NC} apply_pre: TPU {tpu} is good to use!")
         
         return 'success'
     else:
-        print(f"{RED}[ERROR]{NC} apply_pre: TPU {tpu} not ready, state: {state}")
+        print(f"{RED}[FAIL]{NC} apply_pre: TPU {tpu} not ready, state: {state}")
         return 'unknown'
     
 def check_tpu_status(tpu):
@@ -162,7 +163,7 @@ def check_tpu_status(tpu):
     try:
         state = subprocess.check_output(cmd, shell=True, stderr=subprocess.DEVNULL).decode().strip()
     except subprocess.CalledProcessError:
-        print(f"{RED}[ERROR]{NC} check_tpu_status: Failed to query TPU state")
+        print(f"{RED}[FAIL]{NC} check_tpu_status: Failed to query TPU state")
         return 'failed'
     
     return state
@@ -174,7 +175,7 @@ def describe_tpu(tpu, quiet = False):
     """
     zone, pre, tpu = get_zone_pre(tpu)
     if zone is None: 
-        print(f"{RED}[ERROR]{NC} describe_tpu: TPU {tpu} not found")
+        print(f"{RED}[FAIL]{NC} describe_tpu: TPU {tpu} not found")
         return 'no tpu found'
     if not quiet:
         print(f"{PURPLE}[INFO]{NC} describe_tpu: Starting to describe TPU {tpu} in zone {zone}...")
@@ -199,27 +200,27 @@ def describe_tpu(tpu, quiet = False):
         state = check_env(tpu, quiet=True)
         if state == 'success':
             if not quiet:
-                print(f"{GREEN}[SUCCESS]{NC} Environment in TPU {tpu} is good!")
+                print(f"{GREEN}[GOOD]{NC} Environment in TPU {tpu} is good!")
             return 'success'
         elif state == 'failed':
             if not quiet:
-                print(f"{RED}[ERROR]{NC} Environment in TPU {tpu} is not good")
+                print(f"{RED}[FAIL]{NC} Environment in TPU {tpu} is not good")
                 print(f"state: {state}")
                 print("Unexpected error, please check the TPU manually, or contact the admin")
             return 'failed'
         elif state == 'file error':
             if not quiet:
-                print(f"{RED}[ERROR]{NC} Environment in TPU {tpu} has file error")
+                print(f"{RED}[FAIL]{NC} Environment in TPU {tpu} has file error")
                 print(f"{PURPLE}[INFO] {NC}You may need to {PURPLE}mount the NFS{NC} by `tpu mount-disk`, or solve the env by `tpu solve`")
             return 'file error'
         elif state == 'unknown':
             if not quiet:
-                print(f"{RED}[ERROR]{NC} Environment in TPU {tpu} is getting unkown error, please contact the admin.")
+                print(f"{RED}[FAIL]{NC} Environment in TPU {tpu} is getting unkown error, please contact the admin.")
                 print(f"state: {state}")
             return 'unknown'
         else:
             if not quiet:
-                print(f"{RED}[ERROR]{NC} describe_tpu: TPU {tpu} is getting unkown error, please contact the admin.")
+                print(f"{RED}[FAIL]{NC} describe_tpu: TPU {tpu} is getting unkown error, please contact the admin.")
                 print(f"state: {state}")
             return 'unknown'
 
@@ -243,28 +244,30 @@ def check_env(tpu, quiet = False):
         stdout, stderr= result.stdout, result.stderr
     except subprocess.CalledProcessError:
         if not quiet:
-            print(f"{RED}[ERROR]{NC} check_env: Failed to query TPU state")
+            print(f"{RED}[FAIL]{NC} check_env: Failed to query TPU state")
         return 'failed'
     except subprocess.TimeoutExpired:
         if not quiet:
-            print(f"{RED}[ERROR]{NC} check_env: Timeout expired")
+            print(f"{RED}[FAIL]{NC} check_env: Timeout expired")
         return 'timeout'
 
     if 'No such file or directory' in stderr:
         if not quiet:
-            print(f"{RED}[ERROR]{NC} check_remote_env: Can't find directory")
+            print(f"{RED}[FAIL]{NC} check_remote_env: Can't find directory")
             print(f"{PURPLE}[INFO]{NC} You may need to {PURPLE}mount the NFS{NC} first")
         return 'file error'
+    
     if 'The TPU is already in use' in stderr:
         if not quiet:
-            print(f"{RED}[ERROR]{NC} check_env: TPU {tpu} is already in use")
+            print(f"{RED}[FAIL]{NC} check_env: TPU {tpu} is already in use")
         return 'occupied'
+    
     if "TpuDevice" in stdout:
-        print(f"{GREEN}[SUCCESS]{NC} check_remote_env: TPU {tpu} is good!")
+        print(f"{GREEN}[GOOD]{NC} check_remote_env: TPU {tpu} is good!")
         return 'success'
     
     else:
-        print(f"{RED}[ERROR]{NC} check_remote_env: TPU {tpu} is getting unkown error, please contact the admin.")
+        print(f"{RED}[FAIL]{NC} check_remote_env: TPU {tpu} is getting unkown error, please contact the admin.")
         print(f"stdout: {stdout}")
         print(f"stderr: {stderr}")
         return 'unknown'
@@ -315,10 +318,10 @@ def mount_disk(tpu, quiet = False):
             else subprocess.run(cmd2, shell=True, timeout=600, check=True)
 
     except subprocess.TimeoutExpired:
-        print(f"{RED}[ERROR]{NC} mount_disk: mounting disk timed out")
+        print(f"{RED}[FAIL]{NC} mount_disk: mounting disk timed out")
         return 'timeout'
     except subprocess.CalledProcessError as e:
-        print(f"{RED}[ERROR]{NC} mount_disk: {e}")
+        print(f"{RED}[FAIL]{NC} mount_disk: {e}")
         print(f"stderr: {e.stderr}")
         print(f"stdout: {e.stdout}")
         return 'failed'
@@ -328,10 +331,15 @@ def mount_disk(tpu, quiet = False):
     state = check_env(tpu)
 
     if state == 'success':
-        print(f"{GREEN}[SUCCESS]{NC} Environment in TPU {tpu} is good, done mounting disk")
+        print(f"{GREEN}[GOOD]{NC} Environment in TPU {tpu} is good, done mounting disk")
+        print(f"{PURPLE}[INFO]{NC} Setting wandb again to make sure it works...")
+        res = set_wandb(tpu)
+        if res != 'success':
+            print(f"{RED}[FAIL]{NC} mount_disk: setting wandb failed")
+            return 'wandb failed'
         return 'success'
     else:
-        print(f"{RED}[ERROR]{NC} Environment in TPU {tpu} is not good")
+        print(f"{RED}[FAIL]{NC} Environment in TPU {tpu} is not good")
         print(f"state: {state}")
         print("Unexpected error, please check the TPU manually, or contact the admin")
         return 'failed'
