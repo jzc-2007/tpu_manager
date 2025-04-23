@@ -191,6 +191,8 @@ You can pass the `rule=<rule>` to the `tpu run` command to set the rules. The av
 - `pass`: Do nothing.  
 - `rerun`: Rerun when GRPC error occurs, reapply when preempted.  
 - `pre` (default for preempted TPUs): Reapply when GRPC error occurs, resume
+
+For example, if you want a job running in preempted TPUs to be rerunned instead of resumed when grpc, you can do:
 ```bash
 tpu run v2-32-p2 xibo rule=rerun
 ```
