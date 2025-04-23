@@ -295,7 +295,8 @@ Each job is described as:
 
 ### Future Work
 
-- [ ] More testing/docs  
+- [ ] More testing/docs
+- [ ] Customized monitor window
 - [ ] Support to read the spreadsheet, then we can auto-choose the TPU to run a job  
 - [ ] More auto env solvers  
 - [ ] Logging for every user so that you can check the things happen since last time  
