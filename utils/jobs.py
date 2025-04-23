@@ -79,6 +79,7 @@ def resume_rerun_job(job, new_tpu = None, load_ckpt = True):
     If load_ckpt is False, it will rerun the job from the beginning.
     """
     if new_tpu is not None:
+        print(f"{INFO} resume_job: Using new tpu {new_tpu}")
         zone, _, new_tpu = get_zone_pre(new_tpu)
         if zone is None:
             print(f"{FAIL} resume_job: No zone found for tpu {new_tpu}")
@@ -89,6 +90,7 @@ def resume_rerun_job(job, new_tpu = None, load_ckpt = True):
         user = data['users'][job["user"]]
         user_obj = users.user_from_dict(user)
         new_stage = int(job['stage']) + 1 if load_ckpt else 0
+        print(f"{INFO} resume_job: Resuming job {job['windows_id']} for user {user_obj.name} with new stage {new_stage}")
         if new_stage > 10:
             print(f"{FAIL} resume_job: job {job['windows_id']} for user {user_obj.name} has reached max stage, cannot resume")
             release_lock_data()
@@ -113,7 +115,7 @@ def resume_rerun_job(job, new_tpu = None, load_ckpt = True):
         }
         if load_ckpt:
             assert job["log_dir"] is not None, f"Job {job['windows_id']} for user {user_obj.name} has no log dir"
-        # print(f"{PURPLE}[DEBUG]{NC} resume_job: new job {new_job}")
+        print(f"{INFO} resume_job: new job {new_job}")
         data['users'][user_obj.name]['job_data'].append(new_job)
         user_obj.windows_offset = id + 1
         data['users'][user_obj.name] = user_obj.to_dict()
