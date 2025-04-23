@@ -105,6 +105,8 @@ def resume_rerun_job(job, new_tpu = None, load_ckpt = True):
             'error': None,
             'extra_msgs': job["extra_msgs"] | {"father": job["windows_id"]},
         }
+        if load_ckpt:
+            assert job["log_dir"] is not None, f"Job {job['windows_id']} for user {user_obj.name} has no log dir"
         # print(f"{PURPLE}[DEBUG]{NC} resume_job: new job {new_job}")
         data['users'][user_obj.name]['job_data'].append(new_job)
         user_obj.windows_offset = id + 1
