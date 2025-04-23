@@ -15,7 +15,7 @@ More usage in **two sentences**: Use ``tpu tldr`` to see useful commands, and ``
 ## Full docs
 
 <details>
-<summary>Setup(IMPORTANT)</summary>
+<summary>Setup(<strong>IMPORTANT</strong>)</summary>
 
     You should **update your scripts** to the newest version supporting command-line arguments. The newest scripts can be pulled from zhh's repo. The current finishing check is based on wandb final output, so please make sure your scripts are using wandb to log the final output.  
     Also, this script is not very robust to attack, so try not to do OOD things, for example, setting username to be `run`, `false` or Chinese characters.
@@ -25,7 +25,7 @@ More usage in **two sentences**: Use ``tpu tldr`` to see useful commands, and ``
 
 
 <details>
-<summary>Set working directory & Run jobs(IMPORTANT)</summary>
+<summary>Setting Working Directory & Running Jobs(<strong>IMPORTANT</strong>)</summary>
 
 ```bash
 tpu set-cur num username # Set the working directory<num> to the current directory, default directory is 1
@@ -49,7 +49,7 @@ You can also add flag `-apply` to avoid asks.
 </details>
 
 <details>
-<summary>Kill jobs/windows</summary>
+<summary>Kill Jobs/Windows</summary>
 To kill a job, you can use:
 
 ```bash
@@ -84,7 +84,7 @@ The ``clean`` command integrates them all, so we strongly suggest to use ``kill-
 </details>
 
 <details>
-<summary>Monitor jobs</summary>
+<summary>Monitoring</summary>
 
 If the TPU is a preemptible TPU, `tpu run` will **auto-resume when GRPC**, and will **auto-reapply and resume** when preempted. You can also use `tpu resume <windows_id> username` to resume jobs. 
 The `tpu run` command will open a monitor window to monitor all the jobs you have, and you can also use:
@@ -101,7 +101,7 @@ tpu check username
 </details>
 
 <details>
-<summary>TPU/environment operations</summary>
+<summary>TPU/Environment Operations</summary>
 
 We support common operations for TPUs, such as:
 
@@ -128,7 +128,7 @@ tpu solve tpu_name # integrated automatic env solver
 
 
 <details>
-<summary>Pass configs/ Add tags</summary>
+<summary>Passing Configs/Adding Tags</summary>
 We support passing configs on command line, and you can also set your own config alias by:
 
 ```bash
@@ -157,7 +157,7 @@ tpu add-tag window_num tag_name username # add a tag to the job
 </details>
 
 <details>
-<summary>Resume/rerun jobs manually</summary>
+<summary>Resuming/Rerunning Manually</summary>
 
 ```bash
 tpu resume windows=<windows_id> username # resume the job
@@ -171,7 +171,7 @@ The difference between `resume` and `rerun` is that `resume` will load the job f
 </details>
 
 <details>
-<summary>See docs/help</summary>
+<summary>Documentation</summary>
 
 ```bash
 tpu tldr
