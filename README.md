@@ -199,19 +199,27 @@ Some very naive sanity checks are implemented in `unit_tests.py`.
 
 ## For Developers
 
-The user interface is implemented in `tpu.py`, and the specific detail is in `utils/`.  
-`monitor.py` does the check and resume work, and will be run all day.
+<details>
+<summary><strong>Code Structure</strong></summary>
+
+The user interface is implemented in `tpu.py`, and the specific function implementation is in `utils/`.  
+`monitor.py` does the check and resume work, and will be run all day, it will check the jobs and do unit tests occansionally according to ``data["monitor_config"]``(You can see the full format of ``data.json`` below, which is the key matadata we maintain to manage all the jobs).
 
 For `utils/`:  
 - `desciptions.py` does all the documentation work  
 - `operate.py` does the tpu remote operations  
-- `job.py` does the job management  
+- `jobs.py` does the job management  
 - `directories.py` deals with the user working dirs  
 - `logger.py` does most of the logging with meta-data  
+- `helpers.py` does the helper functions
+- `error_handler.py` does the error handling works
+- `unit_tests.py` does the unit tests (sanity checks)
 (see more in next paragraph)
 
+</details>
 
-### Data Format
+<details>
+<summary><strong>Data Format</strong></summary>
 
 The key data is stored in `data.json`, and the program reads and writes it using the API in `data_io.py`, which implements locking (in `lock.json`).  
 The structure of `data.json` is as follows:
@@ -287,6 +295,8 @@ Each job is described as:
     "start_time": "20250420_011026"
 }
 ```
+</details>
+
 </details>
 
 </details>
