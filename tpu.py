@@ -77,6 +77,8 @@ if __name__ == '__main__':
         elif cmd == 'init': handler.initialization()
         elif cmd == 'reapply': operate.apply_pre(args[2], delete=True)
         elif cmd == 'apply': operate.apply_pre(args[2], delete=False)
+        elif cmd == 'apply-norm': operate.apply_norm(args[2], delete=False)
+        elif cmd == 'reapply-norm': operate.apply_norm(args[2], delete=True)
         elif cmd == 'solve' or cmd == 'solve-env': handler.solve_env(args[2])
         elif cmd == 'mount-disk': operate.mount_disk(args[2])
         elif cmd == 'set-wandb': operate.set_wandb(args[2])

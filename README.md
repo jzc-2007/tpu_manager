@@ -6,7 +6,7 @@ This is an automatic job manager for running TPU jobs. It supports auto-resuming
 
 Tldr usage in **two sentences**: Use ``tpu add-user`` to add your username, then go to your working directory and use ``tpu set-cur 1 username`` to set the working directory. Use ``tpu run <tpu> username``(e.g. ``tpu run v2-32-p2 xibo``) to run the job, and use ``tpu monitor/check username`` to see the status of all your jobs. (The ``tpu run`` command will auto-resume the job when preempted/grpc for preempted TPUs, you don't have to set it.)
 
-More usage in **one sentence**: Use ``tpu tldr`` to see useful commands, and ``tpu clear`` to clear the finished/crashed jobs; use ``tpu -a alias_name full_name username``(e.g. ``tpu -a lr config.training.learning_rate``) to add a new alias, then you can pass the configs such as ``tpu run v2-32-6 xibo lr=0.01``.
+More usage in **two sentences**: Use ``tpu tldr`` to see useful commands, and ``tpu clear`` to clear the finished/crashed jobs; use ``tpu -a alias_name full_name username``(e.g. ``tpu -a lr config.training.learning_rate``) to add a new alias, then you can pass the configs such as ``tpu run v2-32-6 xibo lr=0.01``. Use ``tpu describe <tpu>`` to check the environment of the TPU, and ``tpu solve <tpu>`` to solve the environment automatically.
 
 **REMEMBER TO UPDATE YOUR SCRIPTS!**
 
@@ -115,14 +115,15 @@ We support common operations for TPUs, such as:
 tpu apply/reapply tpu_name # apply/reapply the TPU, reapply will delete the TPU and create a new one
 ```
 
-There're also enviroment operations supported, such as:
+There're also environment operations supported, such as:
 
 ```bash
-tpu mount-disk tpu_name # mount the disk for the TPU
-tpu setup-wandb tpu_name # setup wandb for the TPU
+tpu mount-disk tpu_name # mount the disk and setup wandb for the TPU
+tpu describe tpu_name # describe the environment of the TPU
+tpu check-status tpu_name # check the status of the TPU, e.g. PREEMPTED, READY, CREATING, etc.
 ```
 
-Also, an automatic enviroment solver is used to solve the TPU environment.  
+Also, an automatic environment solver is used to solve the TPU environment.  
 Now it is very simple and can only deal with mounting issue.  
 But you are **very welcome** to contribute to it when facing **every environment issue**, to make it a **powerful automatic one-line tool** for solving the complicated TPU environment issue, then we will only need to face same issue **once**!
 
@@ -456,9 +457,13 @@ pwd
 $CONDA_PY_PATH main.py --workdir=${LOGDIR} --mode=remote_run --config=configs/load_config.py:remote_run "
 
 # add all the configs pass in to cmd
-for arg in "$@"; do
-    export cmd="$cmd $arg"
-done
+# add all the configs pass in to cmd
+for arg in "$@"; 
+    do
+        if [[ $arg == --config* ]]; then
+            export cmd="$cmd $arg"
+        fi
+    done
 
 echo "Running command: $cmd"
 

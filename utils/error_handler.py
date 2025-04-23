@@ -1,8 +1,8 @@
 import json
 import os, time
 from .helpers import DATA_PATH, LOCK_FILE
-from .data_io import read_and_lock_data, write_and_unlock_data, release_lock_data, read_data
-from .operate import get_zone_pre, check_env, mount_disk
+from .data_io import read_and_lock_data, write_and_unlock_data, release_lock_data, read_data, write_data
+from .operate import get_zone_pre, check_env, mount_disk, check_tpu_status, apply_pre
 RED, GREEN, YELLOW, PURPLE, NC = "\033[1;31m", "\033[1;32m", "\033[1;33m", "\033[1;34m", "\033[0m"
 GOOD, INFO, WARNING, FAIL = f"{GREEN}[GOOD]{NC}", f"{PURPLE}[INFO]{NC}", f"{YELLOW}[WARNING]{NC}", f"{RED}[FAIL]{NC}"
 def clear_zombie_windows(user_obj):
@@ -32,7 +32,20 @@ def clear_zombie_windows(user_obj):
 
 def solve_env(tpu):
     zone, pre, tpu = get_zone_pre(tpu)
-    if zone is None: return
+    if zone is None:
+        print(f"{FAIL} solve_env: TPU {tpu} not found")
+        return 'failed'
+    print(f"{INFO} solve_env: TPU {tpu} is in zone {zone}, preemptible: {pre}")
+    print(f"{INFO} solve_env: Checking the status of TPU {tpu}...")
+    tpu_status = check_tpu_status(tpu)
+    if tpu_status == 'preempted':
+        print(f"{INFO} solve_env: TPU {tpu} is preempted, trying to reapply...")
+        res = apply_pre(tpu, delete=True)
+        if res == 'success':
+            print(f"{GOOD} solve_env: Reapply TPU {tpu} done")
+            return 'success'
+        else:
+            print(f"{FAIL} solve_env: Reapply TPU {tpu} failed, please contact the admin")
     print(f"{INFO} solve_env: Trying to solve the environment in TPU {tpu}...")
     print(f"{INFO} solve_env: Checking the environment, this may take some time...")
     state = check_env(tpu)
@@ -59,4 +72,18 @@ def initialization():
     data = read_data()
     for user in data['users']:
         data['users'][user]['job_data'] = []
+    write_data(data)
+    # kill and recreate all the tmux sessions
+    for user in data['users']:
+        # kill the tmux session
+        print(f"{INFO} initialization: Killing tmux session {data['users'][user]['tmux_name']}")
+        os.system(f'tmux kill-session -t {data["users"][user]["tmux_name"]}')
+        time.sleep(5)
+        print(f"{INFO} initialization: Recreating tmux session {data['users'][user]['tmux_name']}")
+        # create the tmux session
+        os.system(f'tmux new-session -d -s {data["users"][user]["tmux_name"]}')
+    # set windows offset to 1
+    data = read_and_lock_data()
+    for user in data['users']:
+        data['users'][user]['windows_offset'] = 1
     write_and_unlock_data(data)

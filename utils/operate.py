@@ -104,7 +104,10 @@ def apply_pre(tpu, delete=True):
     if not pre:
         print(f"{FAIL} apply_pre: TPU {tpu} in zone {zone} is not preemptible")
         return
-    print(f"{INFO} Re-apply in TPU {tpu} in zone {zone}...")
+    if not delete:
+        print(f"{INFO} Apply TPU {tpu} in zone {zone}...")
+    else:
+        print(f"{INFO} Re-apply TPU {tpu} in zone {zone}...")
     acc_type = None
     if 'v3-32' in tpu: acc_type = 'v3-32'
     elif 'v2-32' in tpu: acc_type = 'v2-32'
@@ -155,6 +158,68 @@ def apply_pre(tpu, delete=True):
         return 'success'
     else:
         print(f"{FAIL} apply_pre: TPU {tpu} not ready, state: {state}")
+        return 'unknown'
+
+def apply_norm(tpu, delete=True):
+    zone, pre, tpu = get_zone_pre(tpu)
+    if zone is None: return
+    if pre:
+        print(f"{FAIL} apply_norm: TPU {tpu} in zone {zone} is preemptible")
+        return
+    if not delete:
+        print(f"{INFO} Apply TPU {tpu} in zone {zone}...")
+    else:
+        print(f"{INFO} Re-apply TPU {tpu} in zone {zone}...")
+    acc_type = None
+    if 'v3-32' in tpu: acc_type = 'v3-32'
+    elif 'v2-32' in tpu: acc_type = 'v2-32'
+    elif 'v4-32' in tpu: acc_type = 'v4-32'
+    elif 'v4-8' in tpu: acc_type = 'v4-8'
+    else: raise ValueError(f"{FAIL} apply_pre: Unknown TPU type {tpu}")
+    if delete:
+        cmd = f"gcloud compute tpus tpu-vm delete {tpu} --zone={zone} --quiet"
+        try:
+            subprocess.run(cmd.split(), timeout=300, check=True, stdout=subprocess.DEVNULL)
+        except subprocess.CalledProcessError as e:
+            print(f"{FAIL} apply_pre: TPU deletion failed: {e}")
+            return 'delete failed'
+
+    cmd = f"gcloud compute tpus tpu-vm create {tpu} --zone={zone} --accelerator-type={acc_type} --version=tpu-ubuntu2204-base"
+    try:
+        subprocess.run(cmd, shell=True, timeout=600, check=True, stdout=subprocess.DEVNULL)
+    except subprocess.TimeoutExpired:
+        print(f"{FAIL} apply_norm: applying TPU timed out")
+        return 'timeout'
+
+    cmd = f"gcloud compute tpus describe {tpu} --zone={zone} --format='value(state)'"
+    try:
+        state = subprocess.check_output(cmd, shell=True).decode().strip()
+    except subprocess.CalledProcessError:
+        print(f"{FAIL} apply_norm: Failed to query TPU state")
+        return 'describe failed'
+
+    if state == 'READY':
+        print(f"Now, TPU VM {tpu} is good, ready to use")
+        # mount the disk
+        print(f"{INFO} Mounting disk in TPU {tpu}...")
+        res = mount_disk(tpu, quiet = True)
+        if res != 'success':
+            print(f"{FAIL} apply_norm: mounting disk failed")
+            return 'mount failed'
+        print(f"{GOOD} apply_norm: TPU {tpu} is good, done mounting disk")
+
+        # setup remote wandb
+        print(f"{INFO} Setting up remote wandb in TPU {tpu}...")
+        res = set_wandb(tpu)
+        if res != 'success':
+            print(f"{FAIL} apply_norm: setting wandb failed")
+            return 'wandb failed'
+        print(f"{GOOD} apply_norm: Setting wandb done")
+        print(f"{GOOD} apply_norm: TPU {tpu} is good to use!")
+        
+        return 'success'
+    else:
+        print(f"{FAIL} apply_norm: TPU {tpu} not ready, state: {state}")
         return 'unknown'
     
 def check_tpu_status(tpu):

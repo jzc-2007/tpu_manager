@@ -44,10 +44,17 @@ def reapply_worker(ka, result_queue):
 
 def kill_resume(job):
     ka = job["tpu"]
-    print(f"{INFO} kill_resume:Kill TPU {ka}...")
+    # print(f"{INFO} kill_resume: Killing jobs  TPU {ka}...")
     operate.kill_jobs_tpu(ka)
     print(f"{INFO} resume job...")
     jobs.resume_rerun_job(job, load_ckpt=True)
+
+def kill_rerun(job):
+    ka = job["tpu"]
+    # print(f"{INFO} kill_rerun: Killing jobs  TPU {ka}...")
+    operate.kill_jobs_tpu(ka)
+    print(f"{INFO} rerun job...")
+    jobs.resume_rerun_job(job, load_ckpt=False)
 
 
 def reapply_resume(job, timeout=1800):
@@ -113,6 +120,8 @@ def mainloop():
                 reapply_resume(job, timeout=1800)
             elif rule == 'resume':
                 kill_resume(job)
+            elif rule == 'rerun':
+                kill_rerun(job) 
     
 
 if __name__ == "__main__":

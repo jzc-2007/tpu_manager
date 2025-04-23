@@ -17,6 +17,14 @@ RULE_DICT ={
     'pass':{
         'preempted': 'pass',
         'grpc': 'pass',
+    },
+    'reapply':{
+        'preempted': 'reapply',
+        'grpc': 'reapply',
+    },
+    'rerun':{
+        'preempted': 'reapply',
+        'grpc': 'rerun',
     }
 }
 def parse_args_resume_rerun(args):
@@ -78,21 +86,22 @@ def resume_rerun_job(job, new_tpu = None, load_ckpt = True):
     If load_ckpt is True, it will resume the job from the checkpoint.
     If load_ckpt is False, it will rerun the job from the beginning.
     """
+    operation = 'resume' if load_ckpt else 'rerun'
+    operationing = 'Resuming' if load_ckpt else 'Rerunning'
     if new_tpu is not None:
-        print(f"{INFO} resume_job: Using new tpu {new_tpu}")
+        print(f"{INFO} {operation}_job: Using new tpu {new_tpu}")
         zone, _, new_tpu = get_zone_pre(new_tpu)
         if zone is None:
-            print(f"{FAIL} resume_job: No zone found for tpu {new_tpu}")
+            print(f"{FAIL} {operation}_job: No zone found for tpu {new_tpu}")
             return
-    operation = 'resume' if load_ckpt else 'rerun'
     data = read_and_lock_data()
     try:
         user = data['users'][job["user"]]
         user_obj = users.user_from_dict(user)
         new_stage = int(job['stage']) + 1 if load_ckpt else 0
-        print(f"{INFO} resume_job: Resuming job {job['windows_id']} for user {user_obj.name} with new stage {new_stage}")
+        print(f"{INFO} {operation}_job: {operationing} job {job['windows_id']} for user {user_obj.name} with new stage {new_stage}")
         if new_stage > 10:
-            print(f"{FAIL} resume_job: job {job['windows_id']} for user {user_obj.name} has reached max stage, cannot resume")
+            print(f"{FAIL} {operation}_job: job {job['windows_id']} for user {user_obj.name} has reached max stage, cannot {operation}")
             release_lock_data()
             return
         id = user_obj.windows_offset
@@ -115,7 +124,7 @@ def resume_rerun_job(job, new_tpu = None, load_ckpt = True):
         }
         if load_ckpt:
             assert job["log_dir"] is not None, f"Job {job['windows_id']} for user {user_obj.name} has no log dir"
-        print(f"{INFO} resume_job: new job {new_job}")
+        print(f"{INFO} {operation}_job: new job {new_job}")
         data['users'][user_obj.name]['job_data'].append(new_job)
         user_obj.windows_offset = id + 1
         data['users'][user_obj.name] = user_obj.to_dict()
@@ -157,7 +166,7 @@ def resume_rerun_job(job, new_tpu = None, load_ckpt = True):
 
 
     except Exception as e:
-        print(f"{FAIL} resume_job: Failed to resume job {job['windows_id']} for user {user_obj.name}, error: {e}")
+        print(f"{FAIL} {operation}_job: Failed to {operation} job {job['windows_id']} for user {user_obj.name}, error: {e}")
         release_lock_data()
 
 def kill_job(user_obj, args):
