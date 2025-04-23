@@ -16,121 +16,127 @@ More usage in **two sentences**: Use ``tpu tldr`` to see useful commands, and ``
 
 <details>
 <summary>Setup(<strong>IMPORTANT</strong>)</summary>
-    You should **update your scripts** to the newest version supporting command-line arguments. The newest scripts can be pulled from zhh's repo. The current finishing check is based on wandb final output, so please make sure your scripts are using wandb to log the final output.  
-    Also, this script is not very robust to attack, so try not to do OOD things, for example, setting username to be `run`, `false` or Chinese characters.
 
-    Use ``tpu add-user``and follow the instructions to add your username.
+You should **update your scripts** to the newest version supporting command-line arguments. The newest scripts can be pulled from zhh's repo. The current finishing check is based on wandb final output, so please make sure your scripts are using wandb to log the final output.  
+Also, this script is not very robust to attack, so try not to do OOD things, for example, setting username to be `run`, `false` or Chinese characters.
+
+Use ``tpu add-user`` and follow the instructions to add your username.
+
 </details>
 
-
 <details>
-<summary>Setting Working Directory & Running Jobs(<strong>IMPORTANT</strong>)</summary>
-The working directory is where you have your scripts and code. You can set multiple working directories, and you can choose when running code. The default working directory is 1.
+<summary>Setting Working Directory & Running Jobs (<strong>IMPORTANT</strong>)</summary>
+
+The working directory is where you have your scripts and code. You can set multiple working directories and choose one when running code. The default working directory is `1`.  
 You can set the working directory and run the job by:
 
 ```bash
-tpu set-cur num username # Set the working directory<num> to the current directory, default directory is 1
+tpu set-cur num username # Set the working directory <num> to the current directory, default directory is 1
 tpu ls username # List all the working directories
-tpu run tpu_name username [dir=1] [tag=suibian] # Run the job in working directory<dir>, tag is optional and you can see it in the monitor window
+tpu run tpu_name username [dir=1] [tag=suibian] # Run the job in working directory <dir>, tag is optional and visible in the monitor window
 ```
 
-The `tpu_name` is of the format `v2-32-6` or `v2-32-p1` or `v4-32-py2`.  
-For more detail use `tpu -lta` (list tpu aliases), or `tpu -ta alias FULL_TPU_NAME` (to add a new alias).  
+The `tpu_name` is of the format `v2-32-6`, `v2-32-p1`, or `v4-32-py2`.  
+For more details, use `tpu -lta` (list TPU aliases) or `tpu -ta alias FULL_TPU_NAME` (to add a new alias).  
 
 **Example:**
 
 ```bash
-tpu run v2-32-6 xibo # default run the job in working directory 1
-tpu run v2-32-p1 lyy dir=2 tag=bird # run the job in working directory 2 
+tpu run v2-32-6 xibo # Default: run the job in working directory 1
+tpu run v2-32-p1 lyy dir=2 tag=bird # Run the job in working directory 2 
 ```
 
-The `run` command will ask you whether to reapply when the TPU is preempted.  
-You can also add flag `-apply` to avoid asks.
+The `run` command will ask whether to reapply when the TPU is preempted.  
+You can also add the flag `-apply` to skip the prompt.
 
 </details>
 
 <details>
 <summary>Kill Jobs/Windows</summary>
-To kill a job, you can use:
+
+To kill a job, use:
 
 ```bash
-tpu kill-job/-k/-kj -w=<windows_id>/window=<windows_id> username # kill all the jobs in the TPU
+tpu kill-job/-k/-kj -w=<windows_id>/window=<windows_id> username # Kill all the jobs in the TPU
 ```
 
-The command will not kill the tmux window, but will mark the job as "killed". If you want, you can use this integrated ``clean`` command to kill the windows:
+This command will not kill the tmux window but will mark the job as "killed." To clean up, use the integrated `clean` command:
 
 ```bash
-tpu clean username # kill all the tmux windows whose jobs are finished/error/killed
+tpu clean username # Kill all tmux windows whose jobs are finished/error/killed
 ```
 
-Those with child jobs rerunned/resumed will be killed according to the status of their children.
+Jobs with child jobs that were rerun/resumed will be killed based on the status of their children.
 
-You can use this command to kill the specific tmux window:
+To kill a specific tmux window:
+
 ```bash
 tpu -kw/kill-window window_number username
 ```
 
-After killing windows, some jobs may become "zombies"(i.e. don't have windows associated with them). There're helpers to clean all kinds of zombies:
+After killing windows, some jobs may become "zombies" (i.e., jobs without associated windows). Use these helpers to clean zombies:
 
 ```bash
-tpu -czw username # clear all the zombie windows
-tpu -czj username # clear all the zombie jobs
-tpu clear-finished username # clear all the finished jobs
-tpu clear-error username # clear all the error jobs
-tpu clear-all username # RECOMMENDED, clear all the finished/error jobs
+tpu -czw username # Clear all zombie windows
+tpu -czj username # Clear all zombie jobs
+tpu clear-finished username # Clear all finished jobs
+tpu clear-error username # Clear all error jobs
+tpu clear-all username # RECOMMENDED: Clear all finished/error jobs
 ```
 
-The ``clean`` command integrates them all, so we strongly suggest to use ``kill-job + clean`` instead of kill window all manually use ``tmux kill-window`` to kill the windows.
+The `clean` command integrates these actions, so using `kill-job + clean` is strongly recommended instead of manually killing windows with `tmux kill-window`.
 
 </details>
 
 <details>
 <summary>Monitoring</summary>
 
-If the TPU is a preemptible TPU, `tpu run` will **auto-resume when GRPC**, and will **auto-reapply and resume** when preempted. You can also use `tpu resume <windows_id> username` to resume jobs. 
-The `tpu run` command will open a monitor window to monitor all the jobs you have, and you can also use:
+If the TPU is preemptible, `tpu run` will **auto-resume on GRPC errors** and **auto-reapply and resume** when preempted. You can also use `tpu resume <windows_id> username` to resume jobs.  
+The `tpu run` command opens a monitor window to track all your jobs. Alternatively, you can use:
 
 ```bash
 tpu monitor username
 ```
 
-to get that. It will update in every 10 seconds, and for one-time check, you can use:
+This updates every 10 seconds. For a one-time check, use:
 
 ```bash
 tpu check username
 ```
+
 </details>
 
 <details>
 <summary>TPU/Environment Operations</summary>
 
-We support common operations for TPUs, such as:
+We support common TPU operations, such as:
 
 ```bash
-tpu apply/reapply tpu_name # apply/reapply the TPU, reapply will delete the TPU and create a new one
+tpu apply/reapply tpu_name # Apply/reapply the TPU; reapply deletes and recreates the TPU
 ```
 
-There're also environment operations supported, such as:
+Environment operations are also supported:
 
 ```bash
-tpu mount-disk tpu_name # mount the disk and setup wandb for the TPU
-tpu describe tpu_name # describe the environment of the TPU
-tpu check-status tpu_name # check the status of the TPU, e.g. PREEMPTED, READY, CREATING, etc.
+tpu mount-disk tpu_name # Mount the disk and set up wandb for the TPU
+tpu describe tpu_name # Describe the TPU environment
+tpu check-status tpu_name # Check the TPU status (e.g., PREEMPTED, READY, CREATING, etc.)
 ```
 
-Also, an automatic environment solver is used to solve the TPU environment.  
-Now it is very simple and can only deal with mounting issue.  
-But you are **very welcome** to contribute to it when facing **every environment issue**, to make it a **powerful automatic one-line tool** for solving the complicated TPU environment issue, then we will only need to face same issue **once**!
+An automatic environment solver is available to address TPU environment issues.  
+Currently, it handles mounting issues, but contributions are welcome to enhance it into a **powerful one-line tool** for solving complex TPU environment problems. This way, each issue is resolved **once** for all users.
 
 ```bash
-tpu solve tpu_name # integrated automatic env solver
+tpu solve tpu_name # Integrated automatic environment solver
 ```
+
 </details>
 
 
 <details>
 <summary>Passing Configs/Adding Tags</summary>
-We support passing configs on command line, and you can also set your own config alias by:
+
+We support passing configs on the command line, and you can also set your own config alias by:
 
 ```bash
 tpu -a/-alias your_alias FULL_NAME username # add a new alias
@@ -144,17 +150,19 @@ For example, you can do:
 tpu -a lr config.training.learning_rate xibo
 ```
 
-then,
+Then:
 
 ```bash
 tpu run v2-32-6 xibo lr=0.01
 tpu run v2-32-6 xibo config.training.learning_rate=0.01 # This is also supported
 ```
 
-You can add tags to the existing jobs(so that they will be shown in the monitor) by:
+You can add tags to the existing jobs (so that they will be shown in the monitor) by:
+
 ```bash
 tpu add-tag window_num tag_name username # add a tag to the job
 ```
+
 </details>
 
 <details>
@@ -199,9 +207,6 @@ For `utils/`:
 - `error_handler.py` does the error handling works
 - `unit_tests.py` does the unit tests (sanity checks)
 (see more in next paragraph)
-
-</details>
-
 <details>
 <summary>Data Format</summary>
 
@@ -254,6 +259,7 @@ The structure of `data.json` is as follows:
 ```
 
 Each job is described as:
+
 <details>
 <summary>Full job structure</summary>
 
@@ -279,6 +285,12 @@ Each job is described as:
     "start_time": "20250420_011026"
 }
 ```
+
+</details>
+
+</details>
+
+</details>
 </details>
 
 </details>
