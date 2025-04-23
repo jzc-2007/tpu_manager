@@ -124,7 +124,7 @@ tpu check-status tpu_name # Check the TPU status (e.g., PREEMPTED, READY, CREATI
 ```
 
 An automatic environment solver is available to address TPU environment issues.  
-Currently, it handles mounting issues, but contributions are welcome to enhance it into a **powerful one-line tool** for solving complex TPU environment problems. This way, each issue is resolved **once** for all users.
+Currently, it handles mounting issues, but contributions are welcome to enhance it into a **powerful one-line tool** for solving complex TPU environment problems you have encountered. This way, ideally we only need to manully fix every possible issue **once**!
 
 ```bash
 tpu solve tpu_name # Integrated automatic environment solver
