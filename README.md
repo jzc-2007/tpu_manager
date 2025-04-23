@@ -6,37 +6,28 @@ This is an automatic job manager for running TPU jobs. It supports auto-resuming
 
 Tldr usage in **two sentences**: Use ``tpu add-user`` to add your username, then go to your working directory and use ``tpu set-cur 1 username`` to set the working directory. Use ``tpu run <tpu> username``(e.g. ``tpu run v2-32-p2 xibo``) to run the job, and use ``tpu monitor/check username`` to see the status of all your jobs. (The ``tpu run`` command will auto-resume the job when preempted/grpc for preempted TPUs, you don't have to set it.)
 
-More usage in **two sentences**: Use ``tpu tldr`` to see useful commands, and ``tpu clear`` to clear the finished/crashed jobs; use ``tpu -a alias_name full_name username``(e.g. ``tpu -a lr config.training.learning_rate``) to add a new alias, then you can pass the configs such as ``tpu run v2-32-6 xibo lr=0.01``. Use ``tpu describe <tpu>`` to check the environment of the TPU, and ``tpu solve <tpu>`` to solve the environment automatically.
+More usage in **two sentences**: Use ``tpu tldr`` to see useful commands, and ``tpu clear username`` to clear the finished/crashed jobs; use ``tpu -a alias_name full_name username``(e.g. ``tpu -a lr config.training.learning_rate``) to add a new alias, then you can pass the configs such as ``tpu run v2-32-6 xibo lr=0.01``. Use ``tpu describe <tpu>`` to check the environment of the TPU, and ``tpu solve <tpu>`` to solve the environment automatically.
 
 **REMEMBER TO UPDATE YOUR SCRIPTS!**
 
 ## Full docs
-
-
-### Basic Usage
 
 - **IMPORTANT**:  
   You should **update your scripts** to the newest version supporting command-line arguments. The newest scripts can be pulled from zhh's repo. The current finishing check is based on wandb final output, so please make sure your scripts are using wandb to log the final output.  
   Also, this script is not very robust to attack, so try not to do OOD things, for example, setting username to be `run`, `false` or Chinese characters.
 
 
-#### Setup
+<details>
+<summary><strong>Setup</strong></summary>
 
 ```bash
 tpu add-user # Then follow the guide
 ```
-
-#### Read common commands
-
-```bash
-tpu tldr
-tpu -h command # details of the command
-```
-
-The documentation is not very complete now, please refer README as the main source of truth. (Or, look at the code lol)
+</details>
 
 
-#### Run jobs
+<details>
+<summary><strong>Set working directory & Run jobs(IMPORTANT)</strong></summary>
 
 ```bash
 tpu set-cur num username # Set the working directory<num> to the current directory, default directory is 1
@@ -57,7 +48,11 @@ tpu run v2-32-p1 lyy dir=2 tag=bird # run the job in working directory 2
 The `run` command will ask you whether to reapply when the TPU is preempted.  
 You can also add flag `-apply` to avoid asks.
 
-#### Kill jobs
+</details>
+
+<details>
+<summary><strong>Kill jobs</strong></summary>
+
 We don't recommend you to kill jobs manually, but if you want to do that, you can use:
 
 ```bash
@@ -71,9 +66,10 @@ tpu clean username # kill all the tmux windows whose jobs are finished/error/kil
 ```
 
 Those with child jobs rerunned/resumed will be killed according to the status of their children.
+</details>
 
-
-#### Monitor jobs
+<details>
+<summary><strong>Monitor jobs</strong></summary>
 
 If the TPU is a preemptible TPU, `tpu run` will **auto-resume when GRPC**, and will **auto-reapply and resume** when preempted. You can also use `tpu resume <windows_id> username` to resume jobs. 
 The `tpu run` command will open a monitor window to monitor all the jobs you have, and you can also use:
@@ -87,17 +83,10 @@ to get that. It will update in every 10 seconds, and for one-time check, you can
 ```bash
 tpu check username
 ```
+</details>
 
-#### Resume/rerun jobs manually
-```bash
-tpu resume windows=<windows_id> username # resume the job
-tpu resume windows=<windows_id> tpu=<tpu> username # resume the job in a new TPU
-tpu rerun windows=<windows_id> username # rerun the job
-tpu rerun windows=<windows_id> tpu=<tpu> username # rerun the job in a new TPU
-```
-The difference between `resume` and `rerun` is that `resume` will load the job from the last checkpoint, while `rerun` will start a new job from the beginning.
-
-### TPU/environment operations
+<details>
+<summary><strong>TPU/environment operations</strong></summary>
 
 We support common operations for TPUs, such as:
 
@@ -120,11 +109,20 @@ But you are **very welcome** to contribute to it when facing **every environment
 ```bash
 tpu solve tpu_name # integrated automatic env solver
 ```
+</details>
 
-### More Functions
+<details>
+<summary><strong>See docs/help</strong></summary>
 
-#### Pass configs(alias) on command line
+```bash
+tpu tldr
+tpu -h command # details of the command
+```
 
+</details>
+
+<details>
+<summary><strong>Pass configs(alias) on command line</strong></summary>
 We support passing configs on command line, and you can also set your own config alias by:
 
 ```bash
@@ -145,9 +143,22 @@ then,
 tpu run v2-32-6 xibo lr=0.01
 tpu run v2-32-6 xibo config.training.learning_rate=0.01 # This is also supported
 ```
+</details>
+<details>
+<summary><strong>Resume/rerun jobs manually</strong></summary>
 
+```bash
+tpu resume windows=<windows_id> username # resume the job
+tpu resume windows=<windows_id> tpu=<tpu> username # resume the job in a new TPU
+tpu rerun windows=<windows_id> username # rerun the job
+tpu rerun windows=<windows_id> tpu=<tpu> username # rerun the job in a new TPU
+```
 
-#### Kill windows
+The difference between `resume` and `rerun` is that `resume` will load the job from the last checkpoint, while `rerun` will start a new job from the beginning.
+
+</details>
+<details>
+<summary><strong>Kill windows</strong></summary>
 
 We recommend using our kill-windows command to kill the windows instead of killing by yourself.  
 You can use this command to kill the specific tmux window:
@@ -171,16 +182,22 @@ tpu -czw username # clear all the zombie windows
 tpu -czj username # clear all the zombie jobs
 ```
 
+</details>
 
-#### Add tags to jobs
+<details>
+<summary><strong>Add tags to jobs</strong></summary>
 
 ```bash
 tpu add-tag window_num tag_name username # add a tag to the job
 ```
+</details>
 
-#### Sanity check and tests
+<details>
+<summary><strong>Sanity Checks</strong></summary>
 
 Some very naive sanity checks are implemented in `unit_tests.py`.
+
+</details>
 
 ### For Developers
 
@@ -202,7 +219,7 @@ The key data is stored in `data.json`, and the program reads and writes it using
 The structure of `data.json` is as follows:
 
 <details>
-<summary><strong>Click to expand full data.json structure</strong></summary>
+<summary><strong>Full data.json structure</strong></summary>
 
 ```json
 {
@@ -249,7 +266,8 @@ The structure of `data.json` is as follows:
 </details>
 
 Each job is described as:
-
+<details>
+<summary><strong>Full job structure</strong></summary>
 ```json
 {
     "user": "username",
@@ -272,6 +290,7 @@ Each job is described as:
     "start_time": "20250420_011026"
 }
 ```
+</details>
 
 ### Future Work
 
@@ -282,6 +301,9 @@ Each job is described as:
 - [ ] Logging for every user so that you can check the things happen since last time  
 
 ### New Scripts
+<details>
+<summary><strong>ka.sh</strong></summary>
+
 ```bash
 # ka.sh
 source config.sh
@@ -364,6 +386,11 @@ fi
 
 ```
 
+</details>
+
+<details>
+<summary><strong>staging.sh</strong></summary>
+
 ```bash
 # staging.sh
 PASS_KA=0
@@ -404,6 +431,11 @@ fi
 
 cd $HERE
 ```
+
+</details>
+
+<details>
+<summary><strong>run_remote.sh</strong></summary>
 
 ```bash
 # run_remote.sh
@@ -455,3 +487,5 @@ else
     echo "Job failed"
 fi
 ```
+
+</details>
