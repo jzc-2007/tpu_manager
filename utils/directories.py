@@ -15,34 +15,31 @@ def get_dir(user_obj, num):
 
 
 def set_cur(user_obj, args):
-    data = read_and_lock_data()
+    data = None
     try:
+        data = read_and_lock_data()
         current_dir = os.getcwd()
-        if len(args) == 0:
-            print("Please specify a number")
-            release_lock_data()
+        if len(args) == 0 or not is_integer(args[0]):
+            print("Please specify a valid directory number")
             return
-        if not is_integer(args[0]):
-            print("Please specify a number")
-            release_lock_data()
-            return
+
         dir_num = int(args[0])
-        assert dir_num >= 1 and dir_num <= 100, "Directory number must be between 1 and 100"
+        assert 1 <= dir_num <= 100, "Directory number must be between 1 and 100"
         data['users'][user_obj.name]['working_dir'][str(dir_num)] = current_dir
 
         print(f"Set directory {dir_num} to {current_dir}")
         print("Current directories:")
         for i, dir in data['users'][user_obj.name]['working_dir'].items():
-            print(f"{i}: {dir}", end='')
-            if i == "1":
-                print("(default)")
-            else:
-                print()
+            suffix = " (default)" if i == "1" else ""
+            print(f"{i}: {dir}{suffix}")
+    except Exception as e:
+        print(f"[ERROR] set_cur: {e}")
+    finally:
+        if data is not None:
+            write_and_unlock_data(data)
+        else:
+            release_lock_data()
 
-        write_and_unlock_data(data)
-    except:
-        print("Error setting directory")
-        release_lock_data()
 
 def set_dir(user_obj, args):
     data = read_and_lock_data()

@@ -44,12 +44,22 @@ class User():
 
 def user_from_dict(config_dict):
     user = User(config_dict['id'], config_dict['name'], config_dict['tmux_name'])
-    user.working_dir = config_dict['working_dir']
-    user.config_aliases = config_dict['config_aliases']
-    user.settings = config_dict['settings']
-    user.job_data = config_dict['job_data']
-    user.windows_offset = config_dict['windows_offset']
-    user.logs = config_dict['logs']
+
+    user.config_aliases = config_dict.get('config_aliases', {})
+    user.logs = config_dict.get('logs', [])
+    user.windows_offset = config_dict.get('windows_offset', 1)
+    user.job_data = config_dict.get('job_data', [])
+    user.working_dir = config_dict.get('working_dir', {})
+    user.settings = config_dict.get('settings', {
+        "monitor_after_run": True,
+        "monitor_upd_time": 5,
+        "monitor_length": 500,
+        "monitor_verbose": False,
+        "show_length": 200,
+        "time_zone": "us"
+    })
+
+
     return user
 
 def create_user():
@@ -87,10 +97,12 @@ def create_user():
         write_and_unlock_data(data)
         print(f"{GREEN}[SUCCESS]{NC} create_user: Created user {name} with id {user_id} and tmux name {tmux_name}, start working with cute TPUs!")
     except:
+        print(f"{RED}[ERROR]{NC} create_user: Creating user {name} failed")
         release_lock_data()
 
     # kill the tmux session if it exists
-    if tmux_name in os.popen('tmux list-sessions').read():
+    existing_sessions = [line.split(':')[0] for line in os.popen('tmux list-sessions').read().splitlines()]
+    if tmux_name in existing_sessions:
         print(f"Killing tmux session {tmux_name}")
         os.system(f"tmux kill-session -t {tmux_name}")
         time.sleep(1)

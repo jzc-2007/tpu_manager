@@ -2,164 +2,225 @@
 
 This is an automatic job manager for running TPU jobs. It supports auto-resuming the preempted/grpc TPUs, and monitoring the jobs status.
 
-### Basic Usage
-- **IMPORTANT**:
-You should **update your scripts** to the newest version supporting command-line arguments. The newest scripts can be pulled from zhh's repo. The current finishing check is based on wandb final output, so please make sure your scripts are using wandb to log the final output.
+---
 
-Also, this script is not very robust to attack, so try not to do OOD things, for example, setting username to be `run`, `false` or Chinese characters.
+### Basic Usage
+
+- **IMPORTANT**:  
+  You should **update your scripts** to the newest version supporting command-line arguments. The newest scripts can be pulled from zhh's repo. The current finishing check is based on wandb final output, so please make sure your scripts are using wandb to log the final output.  
+  Also, this script is not very robust to attack, so try not to do OOD things, for example, setting username to be `run`, `false` or Chinese characters.
+
+---
 
 #### Setup
+
 ```bash
 tpu add-user # Then follow the guide
 ```
+
+---
+
 #### Read common commands
+
 ```bash
 tpu tldr
 tpu -h command # details of the command
 ```
+
 The documentation is not very complete now, please refer README as the main source of truth. (Or, look at the code lol)
+
+---
+
 #### Run jobs
+
 ```bash
 tpu set-cur num username # Set the working directory<num> to the current directory, default directory is 1
 tpu ls username # List all the working directories
 tpu run tpu_name username [dir=1] [tag=suibian] # Run the job in working directory<dir>, tag is optional and you can see it in the monitor window
 ```
-The ``tpu_name`` is of the format ``v2-32-6``or ``v2-32-p1`` or ``v4-32-py2``. For more detail use ``tpu -lta``(list tpu aliases), or ``tpu -ta alias FULL_TPU_NAME``(to add a new alias). 
 
-Example:
+The `tpu_name` is of the format `v2-32-6` or `v2-32-p1` or `v4-32-py2`.  
+For more detail use `tpu -lta` (list tpu aliases), or `tpu -ta alias FULL_TPU_NAME` (to add a new alias).  
+
+**Example:**
+
 ```bash
 tpu run v2-32-6 xibo # default run the job in working directory 1
 tpu run v2-32-p1 lyy dir=2 tag=bird # run the job in working directory 2 
 ```
 
-The `run` command will ask you whether to reapply when the TPU is preempted. You can also add flag `-apply` to avoid asks.
+The `run` command will ask you whether to reapply when the TPU is preempted.  
+You can also add flag `-apply` to avoid asks.
+
+---
 
 #### Kill jobs
+
 ```bash
 tpu kill-jobs/-k/-kj tpu_name username # kill all the jobs in the TPU
 ```
 
+---
+
 #### Monitor jobs
-If the TPU is a preemptible TPU, ``tpu run`` will **auto-rerun when GRPC**, and will **auto-reapply and rerun** when preempted. 
-The ``tpu run`` command will open a monitor window to monitor all the jobs you have, and you can also use 
+
+If the TPU is a preemptible TPU, `tpu run` will **auto-rerun when GRPC**, and will **auto-reapply and rerun** when preempted.  
+The `tpu run` command will open a monitor window to monitor all the jobs you have, and you can also use:
+
 ```bash
 tpu monitor username
-``` 
-to get that. It will update in every 5 seconds, and for one-time check, you can use ``tpu check username``.
+```
 
-#### TPU/environment operations
+to get that. It will update in every 5 seconds, and for one-time check, you can use:
 
-We support common operations for TPUs, such as
+```bash
+tpu check username
+```
+
+---
+
+### TPU/environment operations
+
+We support common operations for TPUs, such as:
+
 ```bash
 tpu apply/reapply tpu_name # apply/reapply the TPU, reapply will delete the TPU and create a new one
 ```
 
-There're also enviroment operations supported, such as
+There're also enviroment operations supported, such as:
+
 ```bash
 tpu mount-disk tpu_name # mount the disk for the TPU
 tpu setup-wandb tpu_name # setup wandb for the TPU
 ```
 
-Also, an automatic enviroment solver is used to solve the TPU environment. Now it is 
-very simple and can only deal with mounting issue. But you are **very welcome** to contribute
-to it when facing **every environment issue**, to make it a **powerful automatic one-line tool** for 
-solving the complicated TPU environment issue, then we will only need to face same issue **once**!
+Also, an automatic enviroment solver is used to solve the TPU environment.  
+Now it is very simple and can only deal with mounting issue.  
+But you are **very welcome** to contribute to it when facing **every environment issue**, to make it a **powerful automatic one-line tool** for solving the complicated TPU environment issue, then we will only need to face same issue **once**!
+
 ```bash
 tpu solve tpu_name # integrated automatic env solver
 ```
 
+---
+
 ### More Functions
 
 #### Pass configs(alias) on command line
-We support passing configs on command line, and you can also set your own config alias by
+
+We support passing configs on command line, and you can also set your own config alias by:
+
 ```bash
 tpu -a/-alias your_alias FULL_NAME username # add a new alias
 tpu -sa username # list all the aliases
 tpu del-config-alias your_alias username # delete the alias
 ```
-For example, you can do
+
+For example, you can do:
+
 ```bash
 tpu -a lr config.training.learning_rate xibo
 ```
+
 then,
+
 ```bash
 tpu run v2-32-6 xibo lr=0.01
 tpu run v2-32-6 xibo config.training.learning_rate=0.01 # This is also supported
 ```
+
+---
+
 #### Kill windows
-We recommend using our kill-windows command to kill the windows instead of killing by yourself. You can use this command to kill the specific tmux window:
+
+We recommend using our kill-windows command to kill the windows instead of killing by yourself.  
+You can use this command to kill the specific tmux window:
+
 ```bash
 tpu -kw/kill-window window_number username
 ```
 
-Also, you can clear all the jobs that are finished/error by
+Also, you can clear all the jobs that are finished/error by:
+
 ```bash
 tpu clear-finished username # clear all the finished jobs
 tpu clear-error username # clear all the error jobs
 tpu clear-all username # RECOMMENDED, clear all the finished/error jobs
 ```
 
-These commands will kill the zombie windows that don't have any jobs running, or zombie jobs that are not running anymore.
+These commands will kill the zombie windows that don't have any jobs running, or zombie jobs that are not running anymore:
+
 ```bash
 tpu -czw username # clear all the zombie windows
 tpu -czj username # clear all the zombie jobs
 ```
 
-#### add tags to jobs
+---
+
+#### Add tags to jobs
+
 ```bash
 tpu add-tag window_num tag_name username # add a tag to the job
 ```
 
-#### Sanity check and tests
-Some very naive sanity checks are implemented in ``unit_tests.py``.
+---
 
+#### Sanity check and tests
+
+Some very naive sanity checks are implemented in `unit_tests.py`.
+
+---
 
 ### For Developers
 
-The user interface is implemented in ``tpu.py``, and the specific detail is in ``utils/``. ``monitor.py`` does the check and rerun work, and will be run all day.
+The user interface is implemented in `tpu.py`, and the specific detail is in `utils/`.  
+`monitor.py` does the check and rerun work, and will be run all day.
 
-For ``utils/``,``desciptions.py`` does all the documentation work,``operate.py`` does the tpu remote operations, and ``job.py`` does the job management. ``directories.py`` deals with the user working dirs, and ``logger.py`` does most of the logging with meta-data.(see more in next paragraph)
+For `utils/`:  
+- `desciptions.py` does all the documentation work  
+- `operate.py` does the tpu remote operations  
+- `job.py` does the job management  
+- `directories.py` deals with the user working dirs  
+- `logger.py` does most of the logging with meta-data  
+(see more in next paragraph)
 
-The key data is stored in ``data.json``, and the program read and write it using the API in ``data_io.py``, which implements locking(in ``lock.json``). The structure of ``data.json`` is of the following:
-```bash
+---
+
+### Data Format
+
+The key data is stored in `data.json`, and the program reads and writes it using the API in `data_io.py`, which implements locking (in `lock.json`).  
+The structure of `data.json` is as follows:
+
+<details>
+<summary><strong>Click to expand full data.json structure</strong></summary>
+
+```json
 {
     "users": {
-        username: {
-            "id": id,
-            "name": name,
-            "tmux_name": tmux_name,
-            "working_dir": {num: path},
-            "job_data": [ job1, job2 ], # key data for the job
-            "config_aliases": {
-                alias: config_name
-            },
+        "username": {
+            "id": 0,
+            "name": "username",
+            "tmux_name": "username",
+            "working_dir": {"1": "/path"},
+            "job_data": [],
+            "config_aliases": {"lr": "config.training.lr"},
             "settings": {
-                "monitor_after_run": true, # whether to do auto monitoring
-                "monitor_upd_time": 5, # how often to update the monitor
-                "monitor_length": 800, # the length of output that the monitor will capture
-                "monitor_verbose": false, # whether to show the output in the monitor when the status is known(e.g. running in epoch x, or compiling)
-                "show_length": 300, # the length of the output that will be shown in the monitor
+                "monitor_after_run": true,
+                "monitor_upd_time": 5,
+                "monitor_length": 800,
+                "monitor_verbose": false,
+                "show_length": 300,
                 "time_zone": "us"
             },
-            "windows_offset": 42, # the tmux window number offset, to make sure that we don't have the same window number
+            "windows_offset": 42,
             "logs": []
         }
     },
-    "user_list": [
-        username
-    ],
-    "id_list": [
-        id
-    ],
-    "id_user_dict": {
-        id: username
-    },
-    "user_id_dict": {
-        username: id
-    },
-    "tpu_aliases": {
-        "alias": "kmh-tpu-name"
-    },
+    "user_list": ["username"],
+    "id_list": [0],
+    "id_user_dict": {"0": "username"},
+    "user_id_dict": {"username": 0},
+    "tpu_aliases": {"v2-1": "kmh-tpuvm-v2-32-1"},
     "all_tpus": {
         "europe-west4-a": ["..."],
         "us-central1-a": ["..."],
@@ -167,44 +228,51 @@ The key data is stored in ``data.json``, and the program read and write it using
         "preemptible": ["..."]
     },
     "monitor_config": {
-        "test_freq": 3600, # frequency to do unit tests
-        "checking_freq": 600 # frequency to check the jobs
-    }, 
-    "wandb_api_key": key,
+        "test_freq": 3600,
+        "checking_freq": 600
+    },
+    "wandb_api_key": "...",
     "conda_env_name": "NNX"
 }
 ```
 
-and each job is described as
-```bash
+</details>
+
+Each job is described as:
+
+```json
 {
-    "user": username,
-    "windows_id": windows_id,
-    "job_dir_id": NUM_CODE_DIRECTORY,
-    "job_dir": CODE_DIRECTORY,
+    "user": "username",
+    "windows_id": 1,
+    "job_dir_id": 1,
+    "job_dir": "/your/code/path",
     "tpu": "kmh-tpuvm-v2-32-preemptible-1",
     "job_tags": null,
-    "log_dir": LOG_DIR,
-    "extra_configs": EXTRA_COMMAND_FOR_CONFIG, # e.g." --config.training.grpc=True"
-    "status": status, # "running", "finished", "error", "rerunned"
+    "log_dir": "/your/log/path",
+    "extra_configs": "--lr=0.01",
+    "status": "running",
     "error": null,
-    "stage": 0, # The number of times the job has been rerunned
-    "monitor": true, # whether to monitor the job
+    "stage": 0,
+    "monitor": true,
     "rules": {
         "preempted": "reapply",
         "grpc": "rerun"
-    }, # The rules for the job when error
-    "extra_msgs": {}, # record parent/child when rerun, and other things for future use
+    },
+    "extra_msgs": {},
     "start_time": "20250420_011026"
-},
+}
 ```
 
-Future work:
-- [ ] More testing/docs
-- [ ] Support to read the spreadsheet, then we can auto-choose the TPU to run a job
-- [ ] More auto env solvers
-- [ ] Logging for every user so that you can check the things happen since last time
+---
 
+### Future Work
+
+- [ ] More testing/docs  
+- [ ] Support to read the spreadsheet, then we can auto-choose the TPU to run a job  
+- [ ] More auto env solvers  
+- [ ] Logging for every user so that you can check the things happen since last time  
+
+---
 ### New Scripts
 ```bash
 # ka.sh
@@ -373,26 +441,3 @@ else
     echo "Job failed"
 fi
 ```
-
-```bash
-# kill_remote.sh
-if [ -n "$1" ]; then
-	export VM_NAME=$1
-	source ka.sh $1
-else
-	source ka.sh
-fi
-
-echo 'To kill jobs in: '$VM_NAME 'in' $ZONE' after 2s...'
-sleep 2s
-
-echo 'Killing jobs...'
-gcloud compute tpus tpu-vm ssh $VM_NAME --zone $ZONE --worker=all \
-    --command "
-pgrep -af python | grep 'main.py' | grep -v 'grep' | awk '{print \"sudo kill -9 \" \$1}' | sh
-" # &> /dev/null
-echo 'Killed jobs.'
-```
-
-
-gcloud compute tpus describe kmh-tpuvm-v2-32-preemptible-1 --zone=us-central1-a --format='value(state)'

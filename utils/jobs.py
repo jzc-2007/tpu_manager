@@ -1,4 +1,4 @@
-import os, re, time, json
+import os, re, time, json, copy
 from .helpers import is_integer, DATA_PATH
 from . import users
 from .data_io import read_and_lock_data, write_and_unlock_data, release_lock_data, read_data
@@ -122,7 +122,6 @@ def run(user_obj, args):
                             return
                         # change the status of this job to 'killed'
                         job['status'] = 'killed'
-                        data['users'][user]['job_data'] = job
 
         config_args = ""
         tag, rule = None, None
@@ -157,8 +156,6 @@ def run(user_obj, args):
             rule = 'pass' if not preemptible else 'pre'
             print(f"Using rule {rule} instead")
         
-        rule = RULE_DICT[rule]
-        
 
         # kill all the windows that uses the same tpu
         session_name = user_obj.tmux_name
@@ -180,7 +177,7 @@ def run(user_obj, args):
             'error': None,
             'stage': 0,
             'monitor': monitor,
-            'rules': rule,
+            'rules': copy.deepcopy(RULE_DICT[rule]),
             'extra_msgs': {},
         })
         data['users'][user_obj.name]['job_data'] = all_jobs
@@ -230,7 +227,7 @@ def check_jobs(user_obj, args):
         # Find that in the job_data
         job_data = None
         for job in user_obj.job_data:
-            if job['windows_id'] == int(window_id):
+            if str(job['windows_id']) == str(window_id):
                 job_data = job
                 break
         if job_data is None:
@@ -341,30 +338,35 @@ def check_jobs(user_obj, args):
 def kill_window(user_obj, args):
     data = read_and_lock_data()
     try:
+ 
         window_num = args[0]
         if not is_integer(window_num):
             raise ValueError(f"Window number {window_num} is not an integer")
         window_num = int(window_num)
         if window_num < 0:
             raise ValueError(f"Window number {window_num} is not valid")
-        # Get the tmux session name
+
+        # Kill tmux window
         session_name = user_obj.tmux_name
-        # Get all the windows in the tmux session
         print(f"Killing window {window_num} in session {session_name}")
         os.system(f"tmux kill-window -t {session_name}:{window_num}")
         time.sleep(0.5)
-        # remove the job from the job data
+
+        # Remove job from job data safely
         all_jobs = user_obj.job_data
-        for job in all_jobs:
-            if job['windows_id'] == window_num:
-                all_jobs.remove(job)
-                break
-        data['users'][user_obj.name]['job_data'] = all_jobs
+        new_jobs = [job for job in all_jobs if str(job.get('windows_id')) != str(window_num)]
+        if len(new_jobs) < len(all_jobs):
+            print(f"{PURPLE}[INFO]{NC} Removed job with window_id {window_num}")
+        else:
+            print(f"{YELLOW}[WARNING]{NC} No job found with window_id {window_num}")
+
+        data['users'][user_obj.name]['job_data'] = new_jobs
         write_and_unlock_data(data)
     except BaseException as e:
         print(f"{RED}[Error] {NC} kill_window: Failed to kill window {window_num} in session {session_name}")
         print(f"Error: {e}")
         release_lock_data()
+
 
 
 def finish_job(window):
@@ -384,15 +386,19 @@ def finish_job(window):
         release_lock_data()
     
 def monitor_jobs(user_obj, args):
-    while True:
-        check_jobs(user_obj, args)
-        time.sleep(user_obj.settings['monitor_upd_time'])
-        # clear the screen
-        os.system('clear' if os.name == 'posix' else 'cls')
-        # Update user object
-        data = read_data()
-        user_obj = data['users'][user_obj.name]
-        user_obj = users.user_from_dict(user_obj)
+    try:
+        while True:
+            check_jobs(user_obj, args)
+            time.sleep(user_obj.settings['monitor_upd_time'])
+            # clear the screen
+            os.system('clear' if os.name == 'posix' else 'cls')
+            # Update user object
+            data = read_data()
+            user_obj = data['users'][user_obj.name]
+            user_obj = users.user_from_dict(user_obj)
+    except KeyboardInterrupt:
+        print(f"{PURPLE}[INFO]{NC} Stopping monitor...")
+        return
 
 
 def upd_log(window, log_dir, ka, start_time):
@@ -438,28 +444,38 @@ def clear_finished_jobs(user_object):
     try:
         print(f"{PURPLE}[INFO]{NC} clear_finished_jobs: Clearing jobs...")
         all_jobs = user_object.job_data
+        jobs_to_remove = []
+
         for job in all_jobs:
             if job['status'] == 'finished':
                 print(f"{PURPLE}[INFO] {NC}clear_finished_jobs: Clearing finished job {job['windows_id']}")
-                all_jobs.remove(job)
-                # delete tmux window
                 os.system(f"tmux kill-window -t {user_object.tmux_name}:{job['windows_id']}")
+                jobs_to_remove.append(job)
 
-            if job['status'] == 'rerunned':
-                all_job_list = [job]
+            elif job['status'] == 'rerunned':
+                # 跟踪 rerun chain
                 cur_job = job
-                while cur_job['status'] == 'rerunned':
-                    for jb in all_jobs:
-                        if jb['windows_id'] == job['extra_msgs']['child']:
-                            cur_job = jb
-                            all_job_list.append(cur_job)
-                if cur_job['status'] == 'finished':
-                    for jb in all_job_list:
-                        all_jobs.remove(jb)
-                        os.system(f"tmux kill-window -t {user_object.tmux_name}:{jb['windows_id']}")
+                rerun_chain = [cur_job]
+                try:
+                    while cur_job['status'] == 'rerunned':
+                        next_id = cur_job['extra_msgs']['child']
+                        next_job = next(jb for jb in all_jobs if jb['windows_id'] == next_id)
+                        rerun_chain.append(next_job)
+                        cur_job = next_job
+                except (StopIteration, KeyError):
+                    continue  # 如果找不到 child 或格式有误就跳过
 
-        data['users'][user_object.name]['job_data'] = all_jobs
+                if cur_job['status'] == 'finished':
+                    for jb in rerun_chain:
+                        print(f"{PURPLE}[DEBUG] {NC}clear_finished_jobs: Killing tmux window {user_object.tmux_name}:{jb['windows_id']}")
+                        os.system(f"tmux kill-window -t {user_object.tmux_name}:{jb['windows_id']}")
+                        jobs_to_remove.append(jb)
+
+        # 构造新列表
+        new_jobs = [job for job in all_jobs if job not in jobs_to_remove]
+        data['users'][user_object.name]['job_data'] = new_jobs
         write_and_unlock_data(data)
+
     except:
         print(f"{RED}[Error] {NC}clear_finished_jobs: Failed to clear finished jobs")
         release_lock_data()
@@ -469,14 +485,21 @@ def clear_error_jobs(user_object):
     try:
         print(f"{PURPLE}[INFO]{NC} clear_error_jobs: Clearing jobs...")
         all_jobs = user_object.job_data
+        new_jobs = []
+
         for job in all_jobs:
-            if job['status'] == 'error' or job['status'] == 'killed':
+            if job['status'] in ['error', 'killed']:
                 print(f"{PURPLE}[INFO] {NC}clear_error_jobs: Clearing error job {job['windows_id']}")
-                all_jobs.remove(job)
-            # delete tmux window
-                os.system(f"tmux kill-window -t {user_object.tmux_name}:{job['windows_id']}")
-        data['users'][user_object.name]['job_data'] = all_jobs
+                print(f"{PURPLE}[DEBUG] {NC}clear_error_jobs: Killing tmux window {user_object.tmux_name}:{job['windows_id']}")
+                ret = os.system(f"tmux kill-window -t {user_object.tmux_name}:{job['windows_id']}")
+                if ret != 0:
+                    print(f"{RED}[WARNING]{NC} clear_error_jobs: Failed to kill tmux window {user_object.tmux_name}:{job['windows_id']}")
+            else:
+                new_jobs.append(job)
+
+        data['users'][user_object.name]['job_data'] = new_jobs
         write_and_unlock_data(data)
+
     except:
         print(f"{RED}[Error] {NC}clear_error_jobs: Failed to clear error jobs")
         release_lock_data()
@@ -499,12 +522,15 @@ def clear_zombie_jobs(user_object):
     try:
         print(f"Clearing zombie jobs...")
         all_jobs = user_object.job_data
+        new_jobs = []
         for job in all_jobs:
             if os.system(f"tmux list-windows -t {user_object.tmux_name} | grep \" {job['windows_id']}:\"") != 0:
-                all_jobs.remove(job)
                 print(f"{PURPLE}[INFO] {NC}clear_zombie_jobs: Clearing zombie job {job['windows_id']}")
-        data['users'][user_object.name]['job_data'] = all_jobs
+            else:
+                new_jobs.append(job)
+        data['users'][user_object.name]['job_data'] = new_jobs
         write_and_unlock_data(data)
+
     except:
         print(f"{RED}[Error] {NC}clear_zombie_jobs: Failed to clear zombie jobs")
         release_lock_data()

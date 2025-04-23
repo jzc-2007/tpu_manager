@@ -71,6 +71,7 @@ def set_wandb(tpu):
         return 'wandb failed'
 
     print(f"{GREEN}[SUCCESS]{NC} set_wandb: Setting wandb done")
+    return 'success'
 
 def apply_pre(tpu, delete=True):
     zone, pre, tpu = get_zone_pre(tpu)
@@ -97,14 +98,14 @@ def apply_pre(tpu, delete=True):
     try:
         subprocess.run(cmd, shell=True, timeout=600, check=True, stdout=subprocess.DEVNULL)
     except subprocess.TimeoutExpired:
-        print("{RED}[ERROR]{NC} apply_pre: applying preemptible TPU timed out")
+        print(f"{RED}[ERROR]{NC} apply_pre: applying preemptible TPU timed out")
         return 'timeout'
 
     cmd = f"gcloud compute tpus describe {tpu} --zone={zone} --format='value(state)'"
     try:
         state = subprocess.check_output(cmd, shell=True).decode().strip()
     except subprocess.CalledProcessError:
-        print("{RED}[ERROR]{NC} apply_pre: Failed to query TPU state")
+        print(f"{RED}[ERROR]{NC} apply_pre: Failed to query TPU state")
         return 'describe failed'
 
     if state == 'READY':

@@ -13,9 +13,10 @@ def is_boolean(string):
     return False
 
 def to_boolean(string):
-    if string.lower() == 'true':
+    s = string.strip().lower()
+    if s in ['true', 'yes', '1', 'y']:
         return True
-    elif string.lower() == 'false':
+    elif s in ['false', 'no', '0', 'n']:
         return False
     else:
         raise ValueError(f"Cannot convert {string} to boolean")

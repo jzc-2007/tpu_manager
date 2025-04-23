@@ -111,49 +111,4 @@ if __name__ == '__main__':
         elif cmd == 'clean': jobs.clear_all_jobs(user_object), handler.clear_zombie_windows(user_object), jobs.clear_zombie_jobs(user_object)
         else: print(f"Unknown command {cmd}")
 
-# DATA 
-# {
-#     "users":{
-#        "user1": {
-#             "id": 1,
-#             "name": "user1",
-#             "tmux_name": "user1",
-#             "working_dir": "/home/user1",
-#             "config_aliases": {
-#                 "lr": "config.training.learning_rate",
-#                 "bs": "config.training.batch_size"
-#             },
-#             "settings": {
-#                 "auto attach": True,
-#             }
-#             "job_data":[
-#                 {
-#                     "windows_id": 1,
-#                     "job_dir_id": 1,
-#                     "job_dir": "/home/user1/job1",
-#                     "tpu": "v2-32-1",
-#                     "job_tags": "residual",
-#                     "log_dir": "/home/user1/job1/logs",
-#                     "extra_configs": "--config1=value1 --config2=value2",
-#                     "finished": false
-#                 }
-#             ]
-#         }
-#     },
-#     "tpu_aliases": {
-#     },
-#     "user_list": [
-#         "user1",
-#     ],
-#     "id_list": [
-#         1,
-#     ],
-#     "id_user_dict": {
-#         1: "user1",
-#     },
-#     "user_id_dict": {
-#         "user1": 1,
-#     },
-# }
-
 

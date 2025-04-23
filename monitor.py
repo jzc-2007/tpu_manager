@@ -56,7 +56,6 @@ def rerun_job(job):
             'job_tags': job["job_tags"],
             'log_dir': None,
             'extra_configs': job["extra_configs"],
-            'finished': False,
             'status': None,
             'stage': new_stage,
             'monitor': job["monitor"],
@@ -208,8 +207,11 @@ if __name__ == "__main__":
             time.sleep(max(0, checking_freq - time_used))
 
             if time.time() - last_test_time > test_freq:
-                print(f"{PURPLE}[INFO]{NC} Running unit tests...")
-                unit_tests.sanity_check()
+                try:
+                    print(f"{PURPLE}[INFO]{NC} Running unit tests...")
+                    unit_tests.sanity_check()
+                except Exception as e:
+                    print(f"{RED}[ERROR]{NC} Unit tests failed: {e}")
                 last_test_time = time.time()
 
                 
