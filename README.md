@@ -12,7 +12,6 @@ More usage in **two sentences**: Use ``tpu tldr`` to see useful commands, and ``
 
 ## Full docs
 
----
 
 ### Basic Usage
 
@@ -20,15 +19,12 @@ More usage in **two sentences**: Use ``tpu tldr`` to see useful commands, and ``
   You should **update your scripts** to the newest version supporting command-line arguments. The newest scripts can be pulled from zhh's repo. The current finishing check is based on wandb final output, so please make sure your scripts are using wandb to log the final output.  
   Also, this script is not very robust to attack, so try not to do OOD things, for example, setting username to be `run`, `false` or Chinese characters.
 
----
 
 #### Setup
 
 ```bash
 tpu add-user # Then follow the guide
 ```
-
----
 
 #### Read common commands
 
@@ -39,7 +35,6 @@ tpu -h command # details of the command
 
 The documentation is not very complete now, please refer README as the main source of truth. (Or, look at the code lol)
 
----
 
 #### Run jobs
 
@@ -62,8 +57,6 @@ tpu run v2-32-p1 lyy dir=2 tag=bird # run the job in working directory 2
 The `run` command will ask you whether to reapply when the TPU is preempted.  
 You can also add flag `-apply` to avoid asks.
 
----
-
 #### Kill jobs
 We don't recommend you to kill jobs manually, but if you want to do that, you can use:
 
@@ -79,7 +72,6 @@ tpu clean username # kill all the tmux windows whose jobs are finished/error/kil
 
 Those with child jobs rerunned/resumed will be killed according to the status of their children.
 
----
 
 #### Monitor jobs
 
@@ -105,8 +97,6 @@ tpu rerun windows=<windows_id> tpu=<tpu> username # rerun the job in a new TPU
 ```
 The difference between `resume` and `rerun` is that `resume` will load the job from the last checkpoint, while `rerun` will start a new job from the beginning.
 
----
-
 ### TPU/environment operations
 
 We support common operations for TPUs, such as:
@@ -130,8 +120,6 @@ But you are **very welcome** to contribute to it when facing **every environment
 ```bash
 tpu solve tpu_name # integrated automatic env solver
 ```
-
----
 
 ### More Functions
 
@@ -158,7 +146,6 @@ tpu run v2-32-6 xibo lr=0.01
 tpu run v2-32-6 xibo config.training.learning_rate=0.01 # This is also supported
 ```
 
----
 
 #### Kill windows
 
@@ -184,7 +171,6 @@ tpu -czw username # clear all the zombie windows
 tpu -czj username # clear all the zombie jobs
 ```
 
----
 
 #### Add tags to jobs
 
@@ -192,13 +178,9 @@ tpu -czj username # clear all the zombie jobs
 tpu add-tag window_num tag_name username # add a tag to the job
 ```
 
----
-
 #### Sanity check and tests
 
 Some very naive sanity checks are implemented in `unit_tests.py`.
-
----
 
 ### For Developers
 
@@ -213,7 +195,6 @@ For `utils/`:
 - `logger.py` does most of the logging with meta-data  
 (see more in next paragraph)
 
----
 
 ### Data Format
 
@@ -292,8 +273,6 @@ Each job is described as:
 }
 ```
 
----
-
 ### Future Work
 
 - [ ] More testing/docs
@@ -302,7 +281,6 @@ Each job is described as:
 - [ ] More auto env solvers  
 - [ ] Logging for every user so that you can check the things happen since last time  
 
----
 ### New Scripts
 ```bash
 # ka.sh
