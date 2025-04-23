@@ -2,6 +2,7 @@ from .helpers import DATA_PATH
 from .data_io import read_and_lock_data, write_and_unlock_data, release_lock_data
 import os, json, time
 RED, GREEN, YELLOW, PURPLE, NC = "\033[1;31m", "\033[1;32m", "\033[1;33m", "\033[1;34m", "\033[0m"
+GOOD, INFO, WARNING, FAIL = f"{GREEN}[GOOD]{NC}", f"{PURPLE}[INFO]{NC}", f"{YELLOW}[WARNING]{NC}", f"{RED}[FAIL]{NC}"
 class User():
     def __init__(self, id, name, tmux_name = None):
         self.id = id
@@ -95,9 +96,9 @@ def create_user():
         data['user_id_dict'][name] = user_id
         data['users'][name] = user.to_dict()
         write_and_unlock_data(data)
-        print(f"{GREEN}[GOOD]{NC} create_user: Created user {name} with id {user_id} and tmux name {tmux_name}, start working with cute TPUs!")
+        print(f"{GOOD} create_user: Created user {name} with id {user_id} and tmux name {tmux_name}, start working with cute TPUs!")
     except:
-        print(f"{RED}[FAIL]{NC} create_user: Creating user {name} failed")
+        print(f"{FAIL} create_user: Creating user {name} failed")
         release_lock_data()
 
     # kill the tmux session if it exists

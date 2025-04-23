@@ -3,6 +3,7 @@ from .data_io import read_and_lock_data, write_and_unlock_data, release_lock_dat
 from .users import user_from_dict
 import json
 RED, GREEN, YELLOW, PURPLE, NC = "\033[1;31m", "\033[1;32m", "\033[1;33m", "\033[1;34m", "\033[0m"
+GOOD, INFO, WARNING, FAIL = f"{GREEN}[GOOD]{NC}", f"{PURPLE}[INFO]{NC}", f"{YELLOW}[WARNING]{NC}", f"{RED}[FAIL]{NC}"
 def get_monitor_config():
     data = read_data()
     for key, value in data['monitor_config'].items():
@@ -22,7 +23,7 @@ def set_monitor_config(args):
         print(f"Set {key} to {value}")
         write_and_unlock_data(data)
     except:
-        print(f"{RED}[FAIL]{NC} Failed to set monitor config")
+        print(f"{FAIL} Failed to set monitor config")
         release_lock_data()
 
 def explain_tpu_aliases():
@@ -36,7 +37,7 @@ def add_tpu_alias(alias, name):
         data['tpu_aliases'][alias] = name
         write_and_unlock_data(data)
     except:
-        print(f"{RED}[FAIL]{NC} Failed to add tpu alias")
+        print(f"{FAIL} Failed to add tpu alias")
         release_lock_data()
 
 def get_settings(user_object, args):
@@ -60,7 +61,7 @@ def set_settings(user_object, args):
         print(f"Set {key} to {value}")
         write_and_unlock_data(data)
     except:
-        print(f"{RED}[FAIL]{NC} Failed to set settings")
+        print(f"{FAIL} Failed to set settings")
         release_lock_data()
 
 def add_config_alias(user_object, args):
@@ -71,7 +72,7 @@ def add_config_alias(user_object, args):
         data['users'][user_object.name] = user_object.to_dict()
         write_and_unlock_data(data)
     except:
-        print(f"{RED}[FAIL]{NC} Failed to add config alias")
+        print(f"{FAIL} Failed to add config alias")
         release_lock_data()
 
 def show_config_alias(user_object):
@@ -87,7 +88,7 @@ def del_config_alias(user_object, args):
         data['users'][user_object.name] = user_object.to_dict()
         write_and_unlock_data(data)
     except:
-        print(f"{RED}[FAIL]{NC} Failed to delete config alias")
+        print(f"{FAIL} Failed to delete config alias")
         release_lock_data()
 
 def read_user_logs(user_object, args):
@@ -101,5 +102,5 @@ def clear_user_logs(user_object):
         data['users'][user_object.name]['logs'] = user_object.logs
         write_and_unlock_data(data)
     except:
-        print(f"{RED}[FAIL]{NC} Failed to clear user logs")
+        print(f"{FAIL} Failed to clear user logs")
         release_lock_data()

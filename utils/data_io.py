@@ -1,8 +1,9 @@
 from .helpers import DATA_PATH, LOCK_FILE
 import json, time
 RED, GREEN, YELLOW, PURPLE, NC = "\033[1;31m", "\033[1;32m", "\033[1;33m", "\033[1;34m", "\033[0m"
+GOOD, INFO, WARNING, FAIL = f"{GREEN}[GOOD]{NC}", f"{PURPLE}[INFO]{NC}", f"{YELLOW}[WARNING]{NC}", f"{RED}[FAIL]{NC}"
 def lock_code(username = None):
-    print(f"{PURPLE}[INFO]{NC} lock_code: locking code for user {username}")
+    print(f"{INFO} lock_code: locking code for user {username}")
     with open(LOCK_FILE, 'r') as file:
         lock = json.load(file)
     if lock['code']['status'] == False:
@@ -12,24 +13,24 @@ def lock_code(username = None):
         with open(LOCK_FILE, 'w') as file:
             json.dump(lock, file, indent=4)
     else:
-        print(f"{RED}[FAIL]{NC} lock_code: the code is locked now.")
+        print(f"{FAIL} lock_code: the code is locked now.")
         raise Exception("Lock not released.")
     
 def unlock_code(username = None):
     with open(LOCK_FILE, 'r') as file:
         lock = json.load(file)
     if lock['code']['status'] == False:
-        print(f"{YELLOW}[WARNING]{NC} unlock_code: the code is not locked.")
+        print(f"{WARNING} unlock_code: the code is not locked.")
         return
     if username and lock['code']['user'] != username and lock['code']['user'] is not None:
-        print(f"{RED}[FAIL]{NC} unlock_code: the code is locked by {lock['code']['user']}, you cannot unlock it.")
+        print(f"{FAIL} unlock_code: the code is locked by {lock['code']['user']}, you cannot unlock it.")
         print(f"If you believe this is a mistake, please contact {lock['code']['user']}.")
         return
     lock['code']['status'] = False
     lock['code']['user'] = None
     with open(LOCK_FILE, 'w') as file:
         json.dump(lock, file, indent=4)
-    print(f"{PURPLE}[INFO]{NC} unlock_code: code unlocked by {username}.")
+    print(f"{INFO} unlock_code: code unlocked by {username}.")
 
 def check_code_lock():
     with open(LOCK_FILE, 'r') as file:
@@ -59,7 +60,7 @@ def read_and_lock_data():
         else:
             time.sleep(5)
         if num_ack > 120:
-            print(f"{RED}[FAIL]{NC} read_and_lock_data: Lock not released after 10 mins, this may indicate a deadlock. Please check the lock file and release it manually.")
+            print(f"{FAIL} read_and_lock_data: Lock not released after 10 mins, this may indicate a deadlock. Please check the lock file and release it manually.")
             raise Exception("Lock not released after 10 mins, this may indicate a deadlock. Please check the lock file and release it manually.")
     with open(DATA_PATH, 'r') as file:
         data = json.load(file)

@@ -3,12 +3,8 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from utils import operate, data_io
 from utils import directories as dirs
 
-RED="\033[1;31m"
-GREEN="\033[1;32m"
-YELLOW="\033[1;33m"
-PURPLE="\033[1;34m"
-NC="\033[0m"
-
+RED, GREEN, YELLOW, PURPLE, NC = "\033[1;31m", "\033[1;32m", "\033[1;33m", "\033[1;34m", "\033[0m"
+GOOD, INFO, WARNING, FAIL = f"{GREEN}[GOOD]{NC}", f"{PURPLE}[INFO]{NC}", f"{YELLOW}[WARNING]{NC}", f"{RED}[FAIL]{NC}"
 def test_get_zone_pre(quiet = False):
     try:
         assert operate.get_zone_pre("kmh-tpuvm-v2-32-preemptible-2") == ("europe-west4-a", True, "kmh-tpuvm-v2-32-preemptible-2"), f"T1, Expected ('europe-west4-a', True, 'kmh-tpuvm-v2-32-preemptible-2'), got {operate.get_zone_pre('kmh-tpuvm-v2-32-preemptible-2')}"
@@ -148,9 +144,9 @@ def test_check_tpu_status():
 
 def sanity_check():
     if data_io.check_code_lock():
-        print(f"{YELLOW}[WARNING]{NC} Code is locked for developing, skipping sanity checks.")
+        print(f"{WARNING} Code is locked for developing, skipping sanity checks.")
         return
-    print(f"{PURPLE}[INFO]{NC} Running sanity checks...")
+    print(f"{INFO} Running sanity checks...")
     all_tests = [
         test_get_zone_pre,
         test_no_same_window,

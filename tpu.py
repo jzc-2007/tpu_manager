@@ -14,6 +14,7 @@ import utils.error_handler as handler
 import utils.data_io as data_io
 import utils.unit_tests as unit_tests
 RED, GREEN, YELLOW, PURPLE, NC = "\033[1;31m", "\033[1;32m", "\033[1;33m", "\033[1;34m", "\033[0m"
+GOOD, INFO, WARNING, FAIL = f"{GREEN}[GOOD]{NC}", f"{PURPLE}[INFO]{NC}", f"{YELLOW}[WARNING]{NC}", f"{RED}[FAIL]{NC}"
 def find_user(data, args):
     for arg in args:
         if arg in data['user_list'] or arg.startswith('id=') or arg.startswith('user='):
@@ -44,7 +45,7 @@ if __name__ == '__main__':
     args = sys.argv
 
     if len(args) < 2:
-        print(f"{RED}[FAIL]{NC} No command provided")
+        print(f"{FAIL} No command provided")
         sys.exit(1)
 
     cmd = args[1]
@@ -57,7 +58,7 @@ if __name__ == '__main__':
         exit(0)
 
     if data_io.check_code_lock():
-        print(f"{RED}[FAIL]{NC} Code is locked for developing, please unlock it first.")
+        print(f"{FAIL} Code is locked for developing, please unlock it first.")
         sys.exit(1)
     try:
         ############### JOBS that don't require a user ###############
@@ -114,7 +115,7 @@ if __name__ == '__main__':
             elif cmd == 'clean': jobs.clear_all_jobs(user_object), handler.clear_zombie_windows(user_object), jobs.clear_zombie_jobs(user_object)
             else: print(f"Unknown command {cmd}")
     except Exception as e:
-        print(f"{RED}[FAIL]{NC} {e}")
+        print(f"{FAIL} {e}")
         sys.exit(1)
 
 

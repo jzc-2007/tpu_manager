@@ -1,6 +1,7 @@
 RED, GREEN, YELLOW, PURPLE, NC = "\033[1;31m", "\033[1;32m", "\033[1;33m", "\033[1;34m", "\033[0m"
+GOOD, INFO, WARNING, FAIL = f"{GREEN}[GOOD]{NC}", f"{PURPLE}[INFO]{NC}", f"{YELLOW}[WARNING]{NC}", f"{RED}[FAIL]{NC}"
 def explain(cmd):
-    print(f"{PURPLE}[INFO]{NC} Help for command: {cmd}")
+    print(f"{INFO} Help for command: {cmd}")
     
     match cmd:
         # ========== Core Job Commands ==========
@@ -167,7 +168,7 @@ def explain(cmd):
 
         # ========== Unknown ==========
         case _:
-            print(f"{RED}[FAIL]{NC} Unknown command '{cmd}'. Try `tpu tldr` for summary.")
+            print(f"{FAIL} Unknown command '{cmd}'. Try `tpu tldr` for summary.")
 
 def tldr():
     Usage = f"""

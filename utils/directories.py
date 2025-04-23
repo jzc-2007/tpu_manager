@@ -2,7 +2,8 @@ import json
 import os
 from .data_io import read_and_lock_data, write_and_unlock_data, release_lock_data
 from .helpers import is_integer, DATA_PATH
-
+GREEN, RED, YELLOW, PURPLE, NC = "\033[1;32m", "\033[1;31m", "\033[1;33m", "\033[1;34m", "\033[0m"
+GOOD, INFO, WARNING, FAIL = f"{GREEN}[GOOD]{NC}", f"{PURPLE}[INFO]{NC}", f"{YELLOW}[WARNING]{NC}", f"{RED}[FAIL]{NC}"
 def get_dir(user_obj, num):
     if not is_integer(num):
         raise ValueError(f"Directory number {num} is not an integer")

@@ -4,6 +4,7 @@ from . import users
 from .data_io import read_and_lock_data, write_and_unlock_data, release_lock_data, read_data
 from .operate import check_tpu_status, apply_pre, kill_jobs_tpu, get_zone_pre
 RED, GREEN, YELLOW, PURPLE, NC = "\033[1;31m", "\033[1;32m", "\033[1;33m", "\033[1;34m", "\033[0m"
+GOOD, INFO, WARNING, FAIL = f"{GREEN}[GOOD]{NC}", f"{PURPLE}[INFO]{NC}", f"{YELLOW}[WARNING]{NC}", f"{RED}[FAIL]{NC}"
 RULE_DICT ={
     'pre':{
         'preempted': 'reapply',
@@ -30,10 +31,10 @@ def parse_args_resume_rerun(args):
         if arg.startswith('window=') or arg.startswith('-w='):
             windows_id = arg.split('=')[1]
     if windows_id is None:
-        print(f"{RED}[FAIL]{NC} No window id provided")
+        print(f"{FAIL} No window id provided")
         return None, None
     if not is_integer(windows_id):
-        print(f"{RED}[FAIL]{NC} Window id {windows_id} is not an integer")
+        print(f"{FAIL} Window id {windows_id} is not an integer")
         return None, None
     return windows_id, new_tpu
 
@@ -46,12 +47,12 @@ def resume(user_obj, args):
         if data['users'][user]['tmux_name'] == user_obj.tmux_name:
             for job in data['users'][user]['job_data']:
                 if str(job['windows_id']) == str(windows_id):
-                    print(f"{PURPLE}[INFO]{NC} Resuming job {windows_id} for user {user}")
+                    print(f"{INFO} Resuming job {windows_id} for user {user}")
                     # check the status of the job
                     resume_rerun_job(job, new_tpu, load_ckpt=True)
                     return
     else:
-        print(f"{RED}[FAIL]{NC} resume: Job {windows_id} not found")
+        print(f"{FAIL} resume: Job {windows_id} not found")
         return
 
 def rerun(user_obj, args):
@@ -63,12 +64,12 @@ def rerun(user_obj, args):
         if data['users'][user]['tmux_name'] == user_obj.tmux_name:
             for job in data['users'][user]['job_data']:
                 if str(job['windows_id']) == str(windows_id):
-                    print(f"{PURPLE}[INFO]{NC} Rerunning job {windows_id} for user {user}")
+                    print(f"{INFO} Rerunning job {windows_id} for user {user}")
                     # check the status of the job
                     resume_rerun_job(job, new_tpu, load_ckpt=False)
                     return
     else:
-        print(f"{RED}[FAIL]{NC} rerun: Job {windows_id} not found")
+        print(f"{FAIL} rerun: Job {windows_id} not found")
         return
 
 def resume_rerun_job(job, new_tpu = None, load_ckpt = True):
@@ -77,10 +78,11 @@ def resume_rerun_job(job, new_tpu = None, load_ckpt = True):
     If load_ckpt is True, it will resume the job from the checkpoint.
     If load_ckpt is False, it will rerun the job from the beginning.
     """
-    zone, _, new_tpu = get_zone_pre(new_tpu)
-    if zone is None:
-        print(f"{RED}[FAIL]{NC} resume_job: No zone found for tpu {new_tpu}")
-        return
+    if new_tpu is not None:
+        zone, _, new_tpu = get_zone_pre(new_tpu)
+        if zone is None:
+            print(f"{FAIL} resume_job: No zone found for tpu {new_tpu}")
+            return
     operation = 'resume' if load_ckpt else 'rerun'
     data = read_and_lock_data()
     try:
@@ -88,7 +90,7 @@ def resume_rerun_job(job, new_tpu = None, load_ckpt = True):
         user_obj = users.user_from_dict(user)
         new_stage = int(job['stage']) + 1 if load_ckpt else 0
         if new_stage > 10:
-            print(f"{RED}[FAIL]{NC} resume_job: job {job['windows_id']} for user {user_obj.name} has reached max stage, cannot resume")
+            print(f"{FAIL} resume_job: job {job['windows_id']} for user {user_obj.name} has reached max stage, cannot resume")
             release_lock_data()
             return
         id = user_obj.windows_offset
@@ -98,7 +100,7 @@ def resume_rerun_job(job, new_tpu = None, load_ckpt = True):
             'windows_id': id,
             'job_dir_id': job["job_dir_id"],
             'job_dir': job["job_dir"],
-            'tpu': job["tpu"],
+            'tpu': job["tpu"] if new_tpu is None else new_tpu,
             'job_tags': job["job_tags"],
             'log_dir': None,
             'extra_configs': job["extra_configs"],
@@ -127,12 +129,7 @@ def resume_rerun_job(job, new_tpu = None, load_ckpt = True):
         tags = job["job_tags"]
         job_dir = job["job_dir"]
         log_dir = job["log_dir"]
-        print(f"{PURPLE}[INFO]{NC} {operation} job {job['windows_id']} for user {user_obj.name} with new windows id {id}")
-
-        if os.system(f"tmux list-windows -t {session_name} | grep {id}") == 0:
-            print(f"Killing tmux window {session_name}:{id}")
-            os.system(f"tmux kill-window -t {session_name}:{id}")
-            time.sleep(1.5)
+        print(f"{INFO} {operation} job {job['windows_id']} for user {user_obj.name} with new windows id {id}")
 
         # make sure that the tpu is ready
         if tpu is not None:
@@ -151,14 +148,14 @@ def resume_rerun_job(job, new_tpu = None, load_ckpt = True):
         else:
             os.system(f"tmux send-keys -t {session_name}:{id} 'source staging.sh ka={tpu} {config_args}' Enter")
         
-        print(f"{GREEN}[GOOD]{NC} {operation}_job: Successfully created job in tmux window {session_name}:{id}")
+        print(f"{GOOD} {operation}_job: Successfully created job in tmux window {session_name}:{id}")
 
         
         write_and_unlock_data(data)
 
 
     except Exception as e:
-        print(f"{RED}[FAIL]{NC} resume_job: Failed to resume job {job['windows_id']} for user {user_obj.name}, error: {e}")
+        print(f"{FAIL} resume_job: Failed to resume job {job['windows_id']} for user {user_obj.name}, error: {e}")
         release_lock_data()
 
 def kill_job(user_obj, args):
@@ -167,10 +164,10 @@ def kill_job(user_obj, args):
         if arg.startswith('window=') or arg.startswith('-w='):
             windows_id = arg.split('=')[1]
     if windows_id is None:
-        print(f"{RED}[FAIL]{NC} kill_job:No window id provided")
+        print(f"{FAIL} kill_job:No window id provided")
         return
     if not is_integer(windows_id):
-        print(f"{RED}[FAIL]{NC} kill_job: Window id {windows_id} is not an integer")
+        print(f"{FAIL} kill_job: Window id {windows_id} is not an integer")
         return
     # mark the associated job as killed, and kill the job in the tmux session
     data = read_and_lock_data()
@@ -179,17 +176,17 @@ def kill_job(user_obj, args):
             if data['users'][user]['tmux_name'] == user_obj.tmux_name:
                 for job in data['users'][user]['job_data']:
                     if str(job['windows_id']) == str(windows_id):
-                        print(f"{PURPLE}[INFO]{NC} kill_job: Killing job {windows_id} for user {user}")
+                        print(f"{INFO} kill_job: Killing job {windows_id} for user {user}")
                         # check the status of the job
                         job['status'] = 'killed'
                         break
                 break
         else:
-            print(f"{RED}[FAIL]{NC} kill_job: Job {windows_id} not found")
+            print(f"{FAIL} kill_job: Job {windows_id} not found")
             return
         write_and_unlock_data(data)
     except Exception as e:
-        print(f"{RED}[FAIL]{NC} kill_job: Failed to kill job {windows_id} for user {user_obj.name}, error: {e}")
+        print(f"{FAIL} kill_job: Failed to kill job {windows_id} for user {user_obj.name}, error: {e}")
         release_lock_data()
 
 def run(user_obj, args):
@@ -216,23 +213,23 @@ def run(user_obj, args):
 
         # Check the status of the TPU
         if tpu is not None:
-            print(f"{PURPLE}[INFO] {NC}Checking the status of TPU {tpu}...")
+            print(f"{INFO} Checking the status of TPU {tpu}...")
             tpu_status = check_tpu_status(tpu)
 
             if tpu_status == 'PREEMPTED':
-                print(f"{YELLOW}[WARNING]{NC} TPU {tpu} is preempted")
+                print(f"{WARNING} TPU {tpu} is preempted")
                 REAPPLY = False
                 if '-apply' in args:
-                    print(f"{PURPLE}[INFO] {NC}Re-applying preempted TPU {tpu}...")
+                    print(f"{INFO} Re-applying preempted TPU {tpu}...")
                     REAPPLY = True
                 else:
                     print(f"DO YOU WANT TO REAPPLY? (y/n)")
                     res = input()
                     if res == 'y' or res == 'Y':
-                        print(f"{PURPLE}[INFO] {NC}Re-applying preempted TPU {tpu}...")
+                        print(f"{INFO} Re-applying preempted TPU {tpu}...")
                         REAPPLY = True
                     else:
-                        print(f"{PURPLE}[INFO] {NC}Quiting... {tpu}")
+                        print(f"{INFO} Quiting... {tpu}")
                         REAPPLY = False
                 if not REAPPLY:
                     release_lock_data()
@@ -241,40 +238,40 @@ def run(user_obj, args):
                     try:
                         apply_pre(tpu, delete=True)
                     except Exception as e:
-                        print(f"{RED}[FAIL]{NC} Failed to reapply TPU {tpu}: {e}")
+                        print(f"{FAIL} Failed to reapply TPU {tpu}: {e}")
                         release_lock_data()
                         return
-                    print(f"{GREEN}[GOOD] {NC}Re-applying TPU {tpu} successfully")
+                    print(f"{GOOD} Re-applying TPU {tpu} successfully")
 
             elif tpu_status == 'READY':
-                print(f"{GREEN}[GOOD] {NC}TPU {tpu} is ready, starting job...")
+                print(f"{GOOD} TPU {tpu} is ready, starting job...")
 
             elif tpu_status == 'failed':
-                print(f"{YELLOW}[WARNING]{NC} Failed to query status")
+                print(f"{WARNING} Failed to query status")
                 print(f"This may indicate that this TPU is deleted, do you want to apply? (y/n)")
                 res = input()
                 if res == 'y' or res == 'Y':
-                    print(f"{PURPLE}[INFO] {NC}Re-applying TPU {tpu}...")
+                    print(f"{INFO} Re-applying TPU {tpu}...")
                     try:
                         apply_pre(tpu, delete=False)
                     except Exception as e:
-                        print(f"{RED}[FAIL]{NC} Failed to reapply TPU {tpu}: {e}")
+                        print(f"{FAIL} Failed to reapply TPU {tpu}: {e}")
                         release_lock_data()
                         return
-                    print(f"{GREEN}[GOOD] {NC}Applying TPU {tpu} successfully")
+                    print(f"{GOOD} Applying TPU {tpu} successfully")
                 else:
-                    print(f"{PURPLE}[INFO] {NC}Quiting... {tpu}")
+                    print(f"{INFO} Quiting... {tpu}")
                     release_lock_data()
 
             elif tpu_status == 'RESTARTING' or tpu_status == 'CREATING' or tpu_status == 'STOPPING':
-                print(f"{YELLOW}[WARNING]{NC} TPU {tpu} is {tpu_status.lower()}")
-                print(f"{PURPLE}[INFO] {NC}Quiting... {tpu}")
+                print(f"{WARNING} TPU {tpu} is {tpu_status.lower()}")
+                print(f"{INFO} Quiting... {tpu}")
                 release_lock_data()
                 return
 
             else:
-                print(f"{YELLOW}[WARNING]{NC} TPU {tpu} is in unknown state {tpu_status}")
-                print(f"{PURPLE}[INFO] {NC}Quiting... {tpu}")
+                print(f"{WARNING} TPU {tpu} is in unknown state {tpu_status}")
+                print(f"{INFO} Quiting... {tpu}")
                 release_lock_data()
                 return
 
@@ -286,7 +283,7 @@ def run(user_obj, args):
             for user in data['users']:
                 for job in data['users'][user]['job_data']:
                     if job['tpu'] == tpu and job['status'] == 'running':
-                        print(f"{YELLOW}[WARNING]{NC} There is a job running using tpu {tpu}, by user {user}")
+                        print(f"{WARNING} There is a job running using tpu {tpu}, by user {user}")
                         print(f"DO YOU WANT TO CONTINUE? (y/n)")
                         res = input()
                         if res != 'y' and res != 'Y':
@@ -355,11 +352,6 @@ def run(user_obj, args):
         })
         data['users'][user_obj.name]['job_data'] = all_jobs
 
-        if os.system(f"tmux list-windows -t {session_name} | grep {id}") == 0:
-            print(f"Killing tmux window {session_name}:{id}")
-            os.system(f"tmux kill-window -t {session_name}:{id}")
-            time.sleep(0.5)
-
         kill_jobs_tpu(tpu)
         # make sure that the tpu is ready
         if tpu is not None:
@@ -375,7 +367,7 @@ def run(user_obj, args):
         else:
             os.system(f"tmux send-keys -t {session_name}:{id} 'source staging.sh ka={tpu} {config_args}' Enter") 
         
-        print(f"{GREEN}[GOOD]{NC} run: Successfully created job in tmux window {session_name}:{id}")
+        print(f"{GOOD} run: Successfully created job in tmux window {session_name}:{id}")
 
         write_and_unlock_data(data)
 
@@ -536,9 +528,9 @@ def kill_window(user_obj, args):
         all_jobs = user_obj.job_data
         new_jobs = [job for job in all_jobs if str(job.get('windows_id')) != str(window_num)]
         if len(new_jobs) < len(all_jobs):
-            print(f"{PURPLE}[INFO]{NC} Removed job with window_id {window_num}")
+            print(f"{INFO} Removed job with window_id {window_num}")
         else:
-            print(f"{YELLOW}[WARNING]{NC} No job found with window_id {window_num}")
+            print(f"{WARNING} No job found with window_id {window_num}")
 
         data['users'][user_obj.name]['job_data'] = new_jobs
         write_and_unlock_data(data)
@@ -577,7 +569,7 @@ def monitor_jobs(user_obj, args):
             user_obj = data['users'][user_obj.name]
             user_obj = users.user_from_dict(user_obj)
     except KeyboardInterrupt:
-        print(f"\n{PURPLE}[INFO]{NC} Stopping monitor...")
+        print(f"\n{INFO} Stopping monitor...")
         return
 
 
@@ -622,13 +614,13 @@ def add_tag(user_object, job_window_id, tag):
 def clear_finished_jobs(user_object):
     data = read_and_lock_data()
     try:
-        print(f"{PURPLE}[INFO]{NC} clear_finished_jobs: Clearing jobs...")
+        print(f"{INFO} clear_finished_jobs: Clearing jobs...")
         all_jobs = user_object.job_data
         jobs_to_remove = []
 
         for job in all_jobs:
             if job['status'] == 'finished':
-                print(f"{PURPLE}[INFO] {NC}clear_finished_jobs: Clearing finished job {job['windows_id']}")
+                print(f"{INFO} clear_finished_jobs: Clearing finished job {job['windows_id']}")
                 os.system(f"tmux kill-window -t {user_object.tmux_name}:{job['windows_id']}")
                 jobs_to_remove.append(job)
 
@@ -661,17 +653,17 @@ def clear_finished_jobs(user_object):
 def clear_error_jobs(user_object):
     data = read_and_lock_data()
     try:
-        print(f"{PURPLE}[INFO]{NC} clear_error_jobs: Clearing jobs...")
+        print(f"{INFO} clear_error_jobs: Clearing jobs...")
         all_jobs = user_object.job_data
         new_jobs = []
 
         for job in all_jobs:
             if job['status'] in ['error', 'killed']:
-                print(f"{PURPLE}[INFO] {NC}clear_error_jobs: Clearing error job {job['windows_id']}")
+                print(f"{INFO} clear_error_jobs: Clearing error job {job['windows_id']}")
                 # print(f"{PURPLE}[DEBUG] {NC}clear_error_jobs: Killing tmux window {user_object.tmux_name}:{job['windows_id']}")
                 ret = os.system(f"tmux kill-window -t {user_object.tmux_name}:{job['windows_id']}")
                 if ret != 0:
-                    print(f"{RED}[WARNING]{NC} clear_error_jobs: Failed to kill tmux window {user_object.tmux_name}:{job['windows_id']}")
+                    print(f"{WARNING} clear_error_jobs: Failed to kill tmux window {user_object.tmux_name}:{job['windows_id']}")
             elif job['status'] == 'resumed' or job['status'] == 'rerunned':
                 cur_job = job
                 resume_chain = [cur_job]
@@ -685,11 +677,11 @@ def clear_error_jobs(user_object):
                     continue
                 if cur_job['status'] in ['error', 'killed']:
                     for jb in resume_chain:
-                        print(f"{PURPLE}[INFO] {NC}clear_error_jobs: Clearing error job {jb['windows_id']}")
+                        print(f"{INFO} clear_error_jobs: Clearing error job {jb['windows_id']}")
                         # print(f"{PURPLE}[DEBUG] {NC}clear_error_jobs: Killing tmux window {user_object.tmux_name}:{jb['windows_id']}")
                         ret = os.system(f"tmux kill-window -t {user_object.tmux_name}:{jb['windows_id']}")
                         if ret != 0:
-                            print(f"{RED}[WARNING]{NC} clear_error_jobs: Failed to kill tmux window {user_object.tmux_name}:{jb['windows_id']}")
+                            print(f"{WARNING} clear_error_jobs: Failed to kill tmux window {user_object.tmux_name}:{jb['windows_id']}")
                     continue
             else:
                 new_jobs.append(job)
@@ -717,14 +709,14 @@ def clear_zombie_jobs(user_object):
     """
     data = read_and_lock_data()
     try:
-        print(f"{PURPLE}[INFO] {NC}clear_zombie_jobs: Clearing zombie jobs...")
+        print(f"{INFO} clear_zombie_jobs: Clearing zombie jobs...")
         all_jobs = user_object.job_data
         new_jobs = []
         all_windows = os.popen(f"tmux list-windows -t {user_object.tmux_name}").read().splitlines()
         all_windows = [int(w.split(':')[0]) for w in all_windows]
         for job in all_jobs:
             if int(job['windows_id']) not in all_windows:
-                print(f"{PURPLE}[INFO] {NC}clear_zombie_jobs: Clearing zombie job {job['windows_id']}")
+                print(f"{INFO} clear_zombie_jobs: Clearing zombie job {job['windows_id']}")
             else:
                 new_jobs.append(job)
         data['users'][user_object.name]['job_data'] = new_jobs
