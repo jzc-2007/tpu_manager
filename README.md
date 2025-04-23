@@ -263,8 +263,6 @@ The structure of `data.json` is as follows:
 }
 ```
 
-</details>
-
 Each job is described as:
 <details>
 <summary><strong>Full job structure</strong></summary>
@@ -292,6 +290,7 @@ Each job is described as:
 ```
 </details>
 
+</details>
 ### Future Work
 
 - [ ] More testing/docs
