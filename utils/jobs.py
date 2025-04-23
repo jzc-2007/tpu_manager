@@ -18,21 +18,36 @@ RULE_DICT ={
         'grpc': 'pass',
     }
 }
-def resume(user_obj, windows_id):
+def resume(user_obj, args):
     # Check if the window is in the job data, if it is, then resume the job
+    windows_id = None
+    new_tpu = None
+    for arg in args:
+        if arg.startswith('tpu='):
+            new_tpu = args[1].split('=')[1]
+        if arg.startswith('window=') or arg.startswith('-w='):
+            windows_id = arg.split('=')[1]
+    if windows_id is None:
+        print(f"{RED}[ERROR]{NC} resume: No window id provided")
+        return
+    if not is_integer(windows_id):
+        print(f"{RED}[ERROR]{NC} resume: Window id {windows_id} is not an integer")
+        return
+    # print(f"{PURPLE}DEBUG{NC} resume: Window id {windows_id}, new tpu {new_tpu}")
+
     data = read_data()
     for user in data['users']:
         if data['users'][user]['tmux_name'] == user_obj.tmux_name:
             for job in data['users'][user]['job_data']:
-                if job['windows_id'] == windows_id:
+                if str(job['windows_id']) == str(windows_id):
                     print(f"{PURPLE}[INFO]{NC} Resuming job {windows_id} for user {user}")
                     # check the status of the job
-                    resume_job(job)
+                    resume_job(job, new_tpu)
                     return
     else:
         print(f"{RED}[ERROR]{NC} resume: Job {windows_id} not found")
 
-def resume_job(job):
+def resume_job(job, new_tpu = None):
     data = read_and_lock_data()
     try:
         user = data['users'][job["user"]]
@@ -60,6 +75,7 @@ def resume_job(job):
             'error': None,
             'extra_msgs': job["extra_msgs"] | {"father": job["windows_id"]},
         }
+        # print(f"{PURPLE}[DEBUG]{NC} resume_job: new job {new_job}")
         data['users'][user_obj.name]['job_data'].append(new_job)
         user_obj.windows_offset = id + 1
         data['users'][user_obj.name] = user_obj.to_dict()
@@ -70,12 +86,13 @@ def resume_job(job):
                 jb["extra_msgs"].update({"child": id})
         
         session_name = user_obj.tmux_name
-        tpu = job["tpu"]
+        tpu = job["tpu"] if new_tpu is None else new_tpu
         config_args = job["extra_configs"]
         tags = job["job_tags"]
         job_dir = job["job_dir"]
         log_dir = job["log_dir"]
         print(f"{PURPLE}[INFO]{NC} resume job {job['windows_id']} for user {user_obj.name} with new windows id {id}")
+
         if os.system(f"tmux list-windows -t {session_name} | grep {id}") == 0:
             print(f"Killing tmux window {session_name}:{id}")
             os.system(f"tmux kill-window -t {session_name}:{id}")
@@ -95,7 +112,7 @@ def resume_job(job):
         os.system(f"tmux send-keys -t {session_name}:{id} 'cd {job_dir}' Enter")
         os.system(f"tmux send-keys -t {session_name}:{id} 'source staging.sh ka={tpu} {config_args} --config.load_from={log_dir} ' Enter") 
         
-        print(f"Successfully created job in tmux window {session_name}:{id}")
+        print(f"{GREEN}[SUCCESS]{NC} resume_job: Successfully created job in tmux window {session_name}:{id}")
 
         
         write_and_unlock_data(data)
@@ -273,16 +290,22 @@ def run(user_obj, args):
             os.system(f"tmux kill-window -t {session_name}:{id}")
             time.sleep(0.5)
 
+        kill_jobs(tpu)
+        # make sure that the tpu is ready
+        if tpu is not None:
+            tpu_status = check_tpu_status(tpu)
+            assert tpu_status == 'READY', f"TPU {tpu} is not ready, status: {tpu_status}"
+
         # create the tmux window
         os.system(f"tmux new-window -t {session_name}:{id} -n {tag}")
         time.sleep(0.5)
         os.system(f"tmux send-keys -t {session_name}:{id} 'cd {dir_path}' Enter")
         if tpu is None:
-            os.system(f"tmux send-keys -t {session_name}:{id} 'source kill_remote.sh; source staging.sh {config_args}' Enter")
+            os.system(f"tmux send-keys -t {session_name}:{id} 'source staging.sh {config_args}' Enter")
         else:
-            os.system(f"tmux send-keys -t {session_name}:{id} 'source kill_remote.sh {tpu}; source staging.sh ka={tpu} {config_args}' Enter") 
+            os.system(f"tmux send-keys -t {session_name}:{id} 'source staging.sh ka={tpu} {config_args}' Enter") 
         
-        print(f"Successfully created job in tmux window {session_name}:{id}")
+        print(f"{GREEN}[SUCCESS]{NC} run: Successfully created job in tmux window {session_name}:{id}")
 
         write_and_unlock_data(data)
 
@@ -553,7 +576,7 @@ def clear_finished_jobs(user_object):
 
                 if cur_job['status'] == 'finished':
                     for jb in resume_chain:
-                        print(f"{PURPLE}[DEBUG] {NC}clear_finished_jobs: Killing tmux window {user_object.tmux_name}:{jb['windows_id']}")
+                        # print(f"{PURPLE}[DEBUG] {NC}clear_finished_jobs: Killing tmux window {user_object.tmux_name}:{jb['windows_id']}")
                         os.system(f"tmux kill-window -t {user_object.tmux_name}:{jb['windows_id']}")
                         jobs_to_remove.append(jb)
 
@@ -576,7 +599,7 @@ def clear_error_jobs(user_object):
         for job in all_jobs:
             if job['status'] in ['error', 'killed']:
                 print(f"{PURPLE}[INFO] {NC}clear_error_jobs: Clearing error job {job['windows_id']}")
-                print(f"{PURPLE}[DEBUG] {NC}clear_error_jobs: Killing tmux window {user_object.tmux_name}:{job['windows_id']}")
+                # print(f"{PURPLE}[DEBUG] {NC}clear_error_jobs: Killing tmux window {user_object.tmux_name}:{job['windows_id']}")
                 ret = os.system(f"tmux kill-window -t {user_object.tmux_name}:{job['windows_id']}")
                 if ret != 0:
                     print(f"{RED}[WARNING]{NC} clear_error_jobs: Failed to kill tmux window {user_object.tmux_name}:{job['windows_id']}")

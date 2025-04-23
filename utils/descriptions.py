@@ -175,7 +175,7 @@ def tldr():
 - `tpu run <tpu> dir=<n> [tag=<tag>] [key=value ...]`: Run a job in the specified directory on a TPU.
 e.g. `tpu run v2-32-6 dir=1 tag=baseline lr=3e-4`
 - `tpu monitor/check user=<name_or_id>`: Continuously(one-time) monitor jobs for a user.
-- `tpu resume <window_id> user=<name_or_id>`: Resume a job in a tmux window.
+- `tpu resume window=<window_id> [tpu=<tpu>] user=<name_or_id>`: Resume a job in a tmux window.
 {YELLOW}== Directory Management =={NC}
 - `tpu ls user=<name_or_id>` or `tpu list-dir user=<name_or_id>`: List all working directories.
 - `tpu set-cur <n> user=<name_or_id>`: Set current working directory (pwd) to slot `<n>`.

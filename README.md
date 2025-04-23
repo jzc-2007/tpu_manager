@@ -87,6 +87,12 @@ to get that. It will update in every 5 seconds, and for one-time check, you can 
 tpu check username
 ```
 
+#### Resume jobs manually
+```bash
+tpu resume windows=<windows_id> username # resume the job
+tpu resume windows=<windows_id> tpu=<tpu> username # resume the job in a new TPU
+```
+
 ---
 
 ### TPU/environment operations
@@ -368,7 +374,7 @@ fi
 
 ```bash
 # staging.sh
-local PASS_KA=0
+PASS_KA=0
 if [ -n "$2" ]; then
 	if [ "$2" == "ka="* ]; then
 		ka=${2#*=}

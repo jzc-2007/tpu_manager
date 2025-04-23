@@ -35,10 +35,33 @@ def get_zone_pre(tpu):
 
 def kill_jobs(tpu):
     zone, pre, tpu = get_zone_pre(tpu)
-    if zone is None: return
-    print(f"Killing jobs in TPU {tpu} in zone {zone}...")
-    cmd = "gcloud compute tpus tpu-vm ssh "+tpu+" --zone "+zone+" --worker=all --command \"pgrep -af python | grep 'main.py' | grep -v 'grep' | awk '{print \\\"sudo kill -9 \\\" $1}' | sh\""
-    os.system(cmd)
+    if zone is None:
+        print("[ERROR] kill_jobs: Could not determine zone.")
+        return
+
+    print(f"{PURPLE}[INFO] {NC}kill_jobs: Killing jobs in TPU {tpu} in zone {zone}...")
+
+    cmd = (
+        f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --worker=all "
+        "--command \"pids=$(pgrep -af python | grep 'main.py' | grep -v 'grep' | awk '{print $1}'); "
+        "if [ ! -z \\\"$pids\\\" ]; then "
+        "for pid in $pids; do echo Killing $pid; sudo kill -9 $pid; done; "
+        "else echo 'No main.py processes found.'; fi\""
+    )
+
+    try:
+        subprocess.run(cmd, shell=True, timeout=300, check=True,
+                       stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    except subprocess.TimeoutExpired:
+        print(f"{RED}[ERROR]{NC} kill_jobs: Killing jobs timed out")
+        return 'timeout'
+    except subprocess.CalledProcessError as e:
+        print(f"{RED}[ERROR]{NC} kill_jobs: Killing jobs failed.")
+        print(f"{YELLOW}stdout:{NC} {e.stdout.strip()}")
+        print(f"{YELLOW}stderr:{NC} {e.stderr.strip()}")
+        return 'kill failed'
+    print(f"{GREEN}[SUCCESS]{NC} kill_jobs: Killing jobs done")
+    return 'success'
 
 def set_wandb(tpu):
     zone, pre, tpu = get_zone_pre(tpu)
