@@ -181,6 +181,34 @@ The difference between `resume` and `rerun` is that `resume` will load the job f
 </details>
 
 <details>
+<summary> <strong>More Resuming/Rerunning Rules</strong></summary>
+
+Our default rules for resuming/rerunning are as follows:  
+For preempted TPUs, we will reapply the TPU and resume the job when the job is preempted, and resume the job when the job encounters a GRPC error. For non-preempted TPUs, we will not perform any operations.  
+
+You can pass the `rule=<rule>` to the `tpu run` command to set the rules. The available rules are:  
+- `reapply`: Reapply when GRPC error occurs or when preempted.  
+- `pass`: Do nothing.  
+- `rerun`: Rerun when GRPC error occurs, reapply when preempted.  
+- `pre` (default for preempted TPUs): Reapply when GRPC error occurs, resume
+```bash
+tpu run v2-32-p2 xibo rule=rerun
+```
+
+If you want a job running in non-preempted TPUs to be resumed when grpc, you can do:
+
+```bash
+tpu run v2-32-2 xibo rule=resume
+```
+
+You can see all the rules using
+
+```bash
+tpu check-rules
+```
+
+</details>
+<details>
 <summary> <strong>Documentation </strong></summary>
 
 ```bash

@@ -10,10 +10,6 @@ RULE_DICT ={
         'preempted': 'reapply',
         'grpc': 'resume',
     },
-    'resume':{
-        'preempted': 'pass',
-        'grpc': 'resume',
-    },
     'pass':{
         'preempted': 'pass',
         'grpc': 'pass',
@@ -25,8 +21,18 @@ RULE_DICT ={
     'rerun':{
         'preempted': 'reapply',
         'grpc': 'rerun',
+    },
+    'resume':{
+        'preempted': 'pass',
+        'grpc': 'resume',
     }
 }
+
+def check_rules():
+    print(f"AVAILABLE RULES:")
+    for rule in RULE_DICT:
+        print(f"-> {rule}:".ljust(13) + f"{RULE_DICT[rule]}")
+
 def parse_args_resume_rerun(args):
     """
     Parse the arguments for resume and rerun commands.

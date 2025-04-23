@@ -75,6 +75,7 @@ if __name__ == '__main__':
         elif cmd == 'check-env': operate.check_env(args[2])
         elif cmd == 'list-users' or cmd == '-lu': users.list_users()
         elif cmd == 'init': handler.initialization()
+        elif cmd == 'check-rules': jobs.check_rules()
         elif cmd == 'reapply': operate.apply_pre(args[2], delete=True)
         elif cmd == 'apply': operate.apply_pre(args[2], delete=False)
         elif cmd == 'apply-norm': operate.apply_norm(args[2], delete=False)
