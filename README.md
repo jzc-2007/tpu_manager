@@ -6,7 +6,7 @@ This is an automatic job manager for running TPU jobs. It supports auto-resuming
 
 Here is a quick guide of the common usage, and you can find more details in the full docs below.
 
-Tldr usage in **two sentences**: Use ``tpu add-user`` to add your username, then go to your working directory and use ``tpu set-cur 1 username`` to set the working directory. Use ``tpu run <tpu> username``(e.g. ``tpu run v2-32-p2 xibo``) to run the job, and use ``tpu monitor/check username`` to see the status of all your jobs. (The ``tpu run`` command will auto-resume the job when preempted/grpc for preempted TPUs, you don't have to set it.)
+Tldr usage in **two sentences**: Use ``tpu add-user`` to add your username, then go to your working directory(where you have your scripts and code) and use ``tpu set-cur 1 username`` to set the working directory. Use ``tpu run <tpu> username``(e.g. ``tpu run v2-32-p2 xibo``) to run the job, and use ``tpu monitor/check username`` to see the status of all your jobs. (The ``tpu run`` command will auto-resume the job when preempted/grpc for preempted TPUs, you don't have to set it.)
 
 More usage in **two sentences**: Use ``tpu tldr`` to see useful commands, and ``tpu clear username`` to clear the finished/crashed jobs; use ``tpu -a alias_name full_name username``(e.g. ``tpu -a lr config.training.learning_rate``) to add a new alias, then you can pass the configs such as ``tpu run v2-32-6 xibo lr=0.01``. Use ``tpu describe <tpu>`` to check the environment of the TPU, and ``tpu solve <tpu>`` to solve the environment automatically.
 
