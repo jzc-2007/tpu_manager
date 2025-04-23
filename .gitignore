@@ -3,3 +3,4 @@ data.json
 lock.json
 config.sh
 test*
+**__pycache__**

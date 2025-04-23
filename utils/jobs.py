@@ -436,13 +436,28 @@ def add_tag(user_object, job_window_id, tag):
 def clear_finished_jobs(user_object):
     data = read_and_lock_data()
     try:
+        print(f"{PURPLE}[INFO]{NC} clear_finished_jobs: Clearing jobs...")
         all_jobs = user_object.job_data
         for job in all_jobs:
             if job['status'] == 'finished':
                 print(f"{PURPLE}[INFO] {NC}clear_finished_jobs: Clearing finished job {job['windows_id']}")
                 all_jobs.remove(job)
-            # delete tmux window
-            os.system(f"tmux kill-window -t {user_object.tmux_name}:{job['windows_id']}")
+                # delete tmux window
+                os.system(f"tmux kill-window -t {user_object.tmux_name}:{job['windows_id']}")
+
+            if job['status'] == 'rerunned':
+                all_job_list = [job]
+                cur_job = job
+                while cur_job['status'] == 'rerunned':
+                    for jb in all_jobs:
+                        if jb['windows_id'] == job['extra_msgs']['child']:
+                            cur_job = jb
+                            all_job_list.append(cur_job)
+                if cur_job['status'] == 'finished':
+                    for jb in all_job_list:
+                        all_jobs.remove(jb)
+                        os.system(f"tmux kill-window -t {user_object.tmux_name}:{jb['windows_id']}")
+
         data['users'][user_object.name]['job_data'] = all_jobs
         write_and_unlock_data(data)
     except:
@@ -452,14 +467,14 @@ def clear_finished_jobs(user_object):
 def clear_error_jobs(user_object):
     data = read_and_lock_data()
     try:
-        print(f"Clearing error jobs...")
+        print(f"{PURPLE}[INFO]{NC} clear_error_jobs: Clearing jobs...")
         all_jobs = user_object.job_data
         for job in all_jobs:
-            if job['status'] == 'error' or job['error'] is not None or job['status'] == 'killed':
+            if job['status'] == 'error' or job['status'] == 'killed':
                 print(f"{PURPLE}[INFO] {NC}clear_error_jobs: Clearing error job {job['windows_id']}")
                 all_jobs.remove(job)
             # delete tmux window
-            os.system(f"tmux kill-window -t {user_object.tmux_name}:{job['windows_id']}")
+                os.system(f"tmux kill-window -t {user_object.tmux_name}:{job['windows_id']}")
         data['users'][user_object.name]['job_data'] = all_jobs
         write_and_unlock_data(data)
     except:
@@ -467,7 +482,6 @@ def clear_error_jobs(user_object):
         release_lock_data()
 
 def clear_all_jobs(user_object):
-    print(f"Clearing all jobs...")
     try:
         clear_finished_jobs(user_object)
     except:

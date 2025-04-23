@@ -96,7 +96,7 @@ Also, you can clear all the jobs that are finished/error by
 ```bash
 tpu clear-finished username # clear all the finished jobs
 tpu clear-error username # clear all the error jobs
-tpu clear-all username # clear all the jobs
+tpu clear-all username # RECOMMENDED, clear all the finished/error jobs
 ```
 
 These commands will kill the zombie windows that don't have any jobs running, or zombie jobs that are not running anymore.
