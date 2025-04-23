@@ -2,6 +2,16 @@
 
 This is an automatic job manager for running TPU jobs. It supports auto-resuming the preempted/grpc TPUs, and monitoring the jobs status.
 
+## Quickstart in 2 mins
+
+Tldr usage in **two sentences**: Use ``tpu add-user`` to add your username, then go to your working directory and use ``tpu set-cur 1 username`` to set the working directory. Use ``tpu run <tpu> username``(e.g. ``tpu run v2-32-p2 xibo``) to run the job, and use ``tpu monitor/check username`` to see the status of all your jobs. This command will auto-resume the job when preempted/grpc.
+
+More usage in **one sentence**: Use ``tpu tldr`` to see useful commands, and ``tpu clear`` to clear the finished/crashed jobs, use ``tpu -a alias_name full_name username``(e.g. ``tpu -a lr config.training.learning_rate``) to add a new alias, then you can pass the configs such as ``tpu run v2-32-6 xibo lr=0.01``.
+
+**REMEMBER TO UPDATE YOUR SCRIPTS!**
+
+## Full docs
+
 ---
 
 ### Basic Usage
@@ -64,7 +74,7 @@ tpu kill-jobs/-k/-kj tpu_name username # kill all the jobs in the TPU
 
 #### Monitor jobs
 
-If the TPU is a preemptible TPU, `tpu run` will **auto-rerun when GRPC**, and will **auto-reapply and rerun** when preempted.  
+If the TPU is a preemptible TPU, `tpu run` will **auto-resume when GRPC**, and will **auto-reapply and resume** when preempted. You can also use `tpu resume <windows_id> username` to resume jobs. 
 The `tpu run` command will open a monitor window to monitor all the jobs you have, and you can also use:
 
 ```bash
@@ -174,7 +184,7 @@ Some very naive sanity checks are implemented in `unit_tests.py`.
 ### For Developers
 
 The user interface is implemented in `tpu.py`, and the specific detail is in `utils/`.  
-`monitor.py` does the check and rerun work, and will be run all day.
+`monitor.py` does the check and resume work, and will be run all day.
 
 For `utils/`:  
 - `desciptions.py` does all the documentation work  
@@ -256,7 +266,7 @@ Each job is described as:
     "monitor": true,
     "rules": {
         "preempted": "reapply",
-        "grpc": "rerun"
+        "grpc": "resume"
     },
     "extra_msgs": {},
     "start_time": "20250420_011026"

@@ -6,6 +6,7 @@ import utils.users as users
 import utils.data_io as data_io
 import utils.operate as operate
 import utils.unit_tests as unit_tests
+import utils.jobs as jobs
 DATA_PATH="/home/jzc/zhichengjiang/working/xibo_tpu_manager/data.json"
 running_processes = []
 RED="\033[1;31m"
@@ -35,75 +36,6 @@ def check_job_status(job):
             return 'grpc'
     return None
 
-def rerun_job(job):
-    data = data_io.read_and_lock_data()
-    try:
-        user = data['users'][job["user"]]
-        user_obj = users.user_from_dict(user)
-        new_stage = int(job['stage']) + 1
-        if new_stage > 10:
-            print(f"{RED}[ERROR]{NC} rerun_job: job {job['windows_id']} for user {user_obj.name} has reached max stage, cannot rerun")
-            data_io.release_lock_data()
-            return
-        id = user_obj.windows_offset
-        data['users'][user_obj.name]['windows_offset'] = id + 1
-        new_job = {
-            'user': user_obj.name,
-            'windows_id': id,
-            'job_dir_id': job["job_dir_id"],
-            'job_dir': job["job_dir"],
-            'tpu': job["tpu"],
-            'job_tags': job["job_tags"],
-            'log_dir': None,
-            'extra_configs': job["extra_configs"],
-            'status': None,
-            'stage': new_stage,
-            'monitor': job["monitor"],
-            'rules': job["rules"],
-            'error': None,
-            'extra_msgs': job["extra_msgs"] | {"father": job["windows_id"]},
-        }
-        data['users'][user_obj.name]['job_data'].append(new_job)
-        user_obj.windows_offset = id + 1
-        data['users'][user_obj.name] = user_obj.to_dict()
-        # find the current job in the job_data list and set its status to 'rerunned'
-        for jb in data["users"][user_obj.name]["job_data"]:
-            if jb["windows_id"] == job["windows_id"]:
-                jb["status"] = 'rerunned'
-                jb["extra_msgs"].update({"child": id})
-        
-        session_name = user_obj.tmux_name
-        tpu = job["tpu"]
-        config_args = job["extra_configs"]
-        tags = job["job_tags"]
-        job_dir = job["job_dir"]
-        log_dir = job["log_dir"]
-        print(f"{PURPLE}[INFO]{NC} Rerun job {job['windows_id']} for user {user_obj.name} with new windows id {id}")
-        if os.system(f"tmux list-windows -t {session_name} | grep {id}") == 0:
-            print(f"Killing tmux window {session_name}:{id}")
-            os.system(f"tmux kill-window -t {session_name}:{id}")
-            time.sleep(1.5)
-
-        # kill the old job
-        operate.kill_jobs(tpu)
-
-        # create the tmux window
-        os.system(f"tmux new-window -t {session_name}:{id} -n {tags}")
-        time.sleep(0.5)
-        os.system(f"tmux send-keys -t {session_name}:{id} 'cd {job_dir}' Enter")
-        os.system(f"tmux send-keys -t {session_name}:{id} 'source staging.sh ka={tpu} {config_args} --config.load_from={log_dir} ' Enter") 
-        
-        print(f"Successfully created job in tmux window {session_name}:{id}")
-
-        
-        data_io.write_and_unlock_data(data)
-
-
-    except Exception as e:
-        print(f"{RED}[ERROR]{NC} rerun_job: Failed to rerun job {job['windows_id']} for user {user_obj.name}, error: {e}")
-        data_io.release_lock_data()
-
-
 def reapply_worker(ka, result_queue):
     sys.stdout = open(os.devnull, 'w')
     try:
@@ -113,15 +45,15 @@ def reapply_worker(ka, result_queue):
         print(f"{RED}[ERROR]{NC} reapply_worker: Failed to reapply TPU {ka}: {e}")
         result_queue.put(e)
 
-def kill_rerun(job):
+def kill_resume(job):
     ka = job["tpu"]
     print(f"Kill TPU {ka}...")
     operate.kill_jobs(ka)
-    print("Rerun job...")
-    rerun_job(job)
+    print("resume job...")
+    jobs.resume_job(job)
 
 
-def reapply_rerun(job, timeout=1800):
+def reapply_resume(job, timeout=1800):
     ka = job["tpu"]
     result_queue = multiprocessing.Queue()
     process = multiprocessing.Process(target=reapply_worker, args=(ka, result_queue))
@@ -133,17 +65,17 @@ def reapply_rerun(job, timeout=1800):
         process.terminate()
         process.join()
         running_processes.remove(process)
-        print(f"{YELLOW}[WARNING] {NC}reapply_rerun: Reapply TPU {ka} failed, process killed")
+        print(f"{YELLOW}[WARNING] {NC}reapply_resume: Reapply TPU {ka} failed, process killed")
     else:
         if not result_queue.empty():
             result = result_queue.get()
             if isinstance(result, Exception):
-                print(f"{RED}[ERROR] {NC}reapply_rerun: Reapply TPU {ka} failed: {result}")
+                print(f"{RED}[ERROR] {NC}reapply_resume: Reapply TPU {ka} failed: {result}")
             else:
-                print(f"{GREEN}[SUCCESS]{NC} Reapply TPU {ka} success: {result}, start rerun job")
-                rerun_job(job)
+                print(f"{GREEN}[SUCCESS]{NC} Reapply TPU {ka} success: {result}, start resume job")
+                jobs.resume_job(job)
         else:
-            print(f"{RED}[ERROR] {NC}reapply_rerun: Reapply TPU {ka} failed, no result returned")
+            print(f"{RED}[ERROR] {NC}reapply_resume: Reapply TPU {ka} failed, no result returned")
 
 def mainloop():
     error_jobs = {'preempted': [], 'grpc': []}
@@ -151,7 +83,7 @@ def mainloop():
     print(f"{PURPLE}[INFO]{NC} mainloop: checking jobs")
     for user in data["user_list"]:
         for job in data["users"][user]["job_data"]:
-            if job['status'] == 'finished' or job['status'] == 'rerunned' or not job['monitor']:
+            if job['status'] == 'finished' or job['status'] == 'resumed' or not job['monitor']:
                 continue
             status = job['error'] if job['status'] == 'error' else check_job_status(job)
             if status == 'preempted':
@@ -181,9 +113,9 @@ def mainloop():
             if rule == 'pass':
                 continue
             elif rule == 'reapply':
-                reapply_rerun(job, timeout=1800)
-            elif rule == 'rerun':
-                kill_rerun(job)
+                reapply_resume(job, timeout=1800)
+            elif rule == 'resume':
+                kill_resume(job)
     
 
 if __name__ == "__main__":

@@ -2,22 +2,108 @@ import os, re, time, json, copy
 from .helpers import is_integer, DATA_PATH
 from . import users
 from .data_io import read_and_lock_data, write_and_unlock_data, release_lock_data, read_data
-from .operate import check_tpu_status, apply_pre
+from .operate import check_tpu_status, apply_pre, kill_jobs
 RED, GREEN, YELLOW, PURPLE, NC = "\033[1;31m", "\033[1;32m", "\033[1;33m", "\033[1;34m", "\033[0m"
 RULE_DICT ={
     'pre':{
         'preempted': 'reapply',
-        'grpc': 'rerun',
+        'grpc': 'resume',
     },
-    'rerun':{
+    'resume':{
         'preempted': 'pass',
-        'grpc': 'rerun',
+        'grpc': 'resume',
     },
     'pass':{
         'preempted': 'pass',
         'grpc': 'pass',
     }
 }
+def resume(user_obj, windows_id):
+    # Check if the window is in the job data, if it is, then resume the job
+    data = read_data()
+    for user in data['users']:
+        if data['users'][user]['tmux_name'] == user_obj.tmux_name:
+            for job in data['users'][user]['job_data']:
+                if job['windows_id'] == windows_id:
+                    print(f"{PURPLE}[INFO]{NC} Resuming job {windows_id} for user {user}")
+                    # check the status of the job
+                    resume_job(job)
+                    return
+    else:
+        print(f"{RED}[ERROR]{NC} resume: Job {windows_id} not found")
+
+def resume_job(job):
+    data = read_and_lock_data()
+    try:
+        user = data['users'][job["user"]]
+        user_obj = users.user_from_dict(user)
+        new_stage = int(job['stage']) + 1
+        if new_stage > 10:
+            print(f"{RED}[ERROR]{NC} resume_job: job {job['windows_id']} for user {user_obj.name} has reached max stage, cannot resume")
+            release_lock_data()
+            return
+        id = user_obj.windows_offset
+        data['users'][user_obj.name]['windows_offset'] = id + 1
+        new_job = {
+            'user': user_obj.name,
+            'windows_id': id,
+            'job_dir_id': job["job_dir_id"],
+            'job_dir': job["job_dir"],
+            'tpu': job["tpu"],
+            'job_tags': job["job_tags"],
+            'log_dir': None,
+            'extra_configs': job["extra_configs"],
+            'status': None,
+            'stage': new_stage,
+            'monitor': job["monitor"],
+            'rules': job["rules"],
+            'error': None,
+            'extra_msgs': job["extra_msgs"] | {"father": job["windows_id"]},
+        }
+        data['users'][user_obj.name]['job_data'].append(new_job)
+        user_obj.windows_offset = id + 1
+        data['users'][user_obj.name] = user_obj.to_dict()
+        # find the current job in the job_data list and set its status to 'resumed'
+        for jb in data["users"][user_obj.name]["job_data"]:
+            if jb["windows_id"] == job["windows_id"]:
+                jb["status"] = 'resumed'
+                jb["extra_msgs"].update({"child": id})
+        
+        session_name = user_obj.tmux_name
+        tpu = job["tpu"]
+        config_args = job["extra_configs"]
+        tags = job["job_tags"]
+        job_dir = job["job_dir"]
+        log_dir = job["log_dir"]
+        print(f"{PURPLE}[INFO]{NC} resume job {job['windows_id']} for user {user_obj.name} with new windows id {id}")
+        if os.system(f"tmux list-windows -t {session_name} | grep {id}") == 0:
+            print(f"Killing tmux window {session_name}:{id}")
+            os.system(f"tmux kill-window -t {session_name}:{id}")
+            time.sleep(1.5)
+
+        # make sure that the tpu is ready
+        if tpu is not None:
+            tpu_status = check_tpu_status(tpu)
+            assert tpu_status == 'READY', f"TPU {tpu} is not ready, status: {tpu_status}"
+
+        # kill the old job
+        kill_jobs(tpu)
+
+        # create the tmux window
+        os.system(f"tmux new-window -t {session_name}:{id} -n {tags}")
+        time.sleep(0.5)
+        os.system(f"tmux send-keys -t {session_name}:{id} 'cd {job_dir}' Enter")
+        os.system(f"tmux send-keys -t {session_name}:{id} 'source staging.sh ka={tpu} {config_args} --config.load_from={log_dir} ' Enter") 
+        
+        print(f"Successfully created job in tmux window {session_name}:{id}")
+
+        
+        write_and_unlock_data(data)
+
+
+    except Exception as e:
+        print(f"{RED}[ERROR]{NC} resume_job: Failed to resume job {job['windows_id']} for user {user_obj.name}, error: {e}")
+        release_lock_data()
 
 def run(user_obj, args):
     data = read_and_lock_data()
@@ -242,7 +328,7 @@ def check_jobs(user_obj, args):
             except Exception as e:
                 father_job = None
             if father_job is not None:
-                print(f"Window {window_id} (tag: {job_data["job_tags"]}, rerun: Window {father_job}, stage {job_data['stage']+1})")
+                print(f"Window {window_id} (tag: {job_data["job_tags"]}, resume: Window {father_job}, stage {job_data['stage']+1})")
             else:
                 print(f'Window {window_id} (tag: {job_data["job_tags"]})')
             print(f"DIR: {job_data['job_dir'].split('/')[-1]}\nTPU: {job_data['tpu']}")
@@ -272,13 +358,13 @@ def check_jobs(user_obj, args):
                     print(f"msg: {msg}")
                 print('-'*40)
                 continue
-            elif job_data["status"] == 'rerunned':
+            elif job_data["status"] == 'resumed':
                 try:
                     child = job_data['extra_msgs']['child']
                 except Exception as e:
                     print(f"{RED}Failed to get child window id{NC}")
                     child = None
-                print(f"Status: {YELLOW}Rerunned({job_data['error']}){NC} in window {child}")
+                print(f"Status: {YELLOW}resumed({job_data['error']}){NC} in window {child}")
                 if monitor_verbose:
                     print(f"msg: {msg}")
                 print('-'*40)
@@ -397,7 +483,7 @@ def monitor_jobs(user_obj, args):
             user_obj = data['users'][user_obj.name]
             user_obj = users.user_from_dict(user_obj)
     except KeyboardInterrupt:
-        print(f"{PURPLE}[INFO]{NC} Stopping monitor...")
+        print(f"\n{PURPLE}[INFO]{NC} Stopping monitor...")
         return
 
 
@@ -452,21 +538,21 @@ def clear_finished_jobs(user_object):
                 os.system(f"tmux kill-window -t {user_object.tmux_name}:{job['windows_id']}")
                 jobs_to_remove.append(job)
 
-            elif job['status'] == 'rerunned':
-                # 跟踪 rerun chain
+            elif job['status'] == 'resumed':
+                # 跟踪 resume chain
                 cur_job = job
-                rerun_chain = [cur_job]
+                resume_chain = [cur_job]
                 try:
-                    while cur_job['status'] == 'rerunned':
+                    while cur_job['status'] == 'resumed':
                         next_id = cur_job['extra_msgs']['child']
                         next_job = next(jb for jb in all_jobs if jb['windows_id'] == next_id)
-                        rerun_chain.append(next_job)
+                        resume_chain.append(next_job)
                         cur_job = next_job
                 except (StopIteration, KeyError):
                     continue  # 如果找不到 child 或格式有误就跳过
 
                 if cur_job['status'] == 'finished':
-                    for jb in rerun_chain:
+                    for jb in resume_chain:
                         print(f"{PURPLE}[DEBUG] {NC}clear_finished_jobs: Killing tmux window {user_object.tmux_name}:{jb['windows_id']}")
                         os.system(f"tmux kill-window -t {user_object.tmux_name}:{jb['windows_id']}")
                         jobs_to_remove.append(jb)
