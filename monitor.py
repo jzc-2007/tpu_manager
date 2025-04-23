@@ -4,7 +4,7 @@ import time
 import multiprocessing
 import utils.users as users
 import utils.data_io as data_io
-from utils.operate import apply_pre, kill_jobs
+import utils.operate as operate
 import utils.unit_tests as unit_tests
 DATA_PATH="/home/jzc/zhichengjiang/working/xibo_tpu_manager/data.json"
 running_processes = []
@@ -13,18 +13,24 @@ GREEN="\033[1;32m"
 YELLOW="\033[1;33m"
 PURPLE="\033[1;34m"
 NC="\033[0m"
-def check_status(job):
+def check_job_status(job):
     if job["log_dir"] == '' or job["log_dir"] is None:
         return None
+    tpu = job["tpu"]
+    if tpu == '':
+        print(f"{RED}[ERROR]{NC} check_job_status: tpu is empty")
+        return None
+    tpu_status = operate.check_tpu_status(tpu)
+    if tpu_status == 'preempted':
+        return 'preempted'
+    
     log_dir = job["log_dir"]+"/output.log"
     if not os.path.exists(log_dir):
-        print(f"{RED}[ERROR]{NC} check_status: log file {log_dir} not found")
+        print(f"{RED}[ERROR]{NC} check_tpu_status: log file {log_dir} not found")
         return None
     with open(log_dir, 'r') as file:
         lines = file.readlines()
     for line in lines:
-        if "This TPU has terminal state \"PREEMPTED\"" in line:
-            return 'preempted'
         if "GRPC error" in line:
             return 'grpc'
     return None
@@ -73,18 +79,20 @@ def rerun_job(job):
         tags = job["job_tags"]
         job_dir = job["job_dir"]
         log_dir = job["log_dir"]
-        print(f"job:{job}, new_job:{new_job}")
-        print(f"Rerun job {job['windows_id']} for user {user_obj.name} with new windows id {id}")
+        print(f"{PURPLE}[INFO]{NC} Rerun job {job['windows_id']} for user {user_obj.name} with new windows id {id}")
         if os.system(f"tmux list-windows -t {session_name} | grep {id}") == 0:
             print(f"Killing tmux window {session_name}:{id}")
             os.system(f"tmux kill-window -t {session_name}:{id}")
             time.sleep(1.5)
 
-                # create the tmux window
+        # kill the old job
+        operate.kill_jobs(tpu)
+
+        # create the tmux window
         os.system(f"tmux new-window -t {session_name}:{id} -n {tags}")
         time.sleep(0.5)
         os.system(f"tmux send-keys -t {session_name}:{id} 'cd {job_dir}' Enter")
-        os.system(f"tmux send-keys -t {session_name}:{id} 'source kill_remote.sh {tpu}; source staging.sh ka={tpu} {config_args} --config.load_from={log_dir}' Enter") 
+        os.system(f"tmux send-keys -t {session_name}:{id} 'source staging.sh ka={tpu} {config_args} --config.load_from={log_dir} ' Enter") 
         
         print(f"Successfully created job in tmux window {session_name}:{id}")
 
@@ -100,7 +108,7 @@ def rerun_job(job):
 def reapply_worker(ka, result_queue):
     sys.stdout = open(os.devnull, 'w')
     try:
-        result = apply_pre(ka, delete=True)
+        result = operate.apply_pre(ka, delete=True)
         result_queue.put(result)
     except Exception as e:
         print(f"{RED}[ERROR]{NC} reapply_worker: Failed to reapply TPU {ka}: {e}")
@@ -109,7 +117,7 @@ def reapply_worker(ka, result_queue):
 def kill_rerun(job):
     ka = job["tpu"]
     print(f"Kill TPU {ka}...")
-    kill_jobs(ka)
+    operate.kill_jobs(ka)
     print("Rerun job...")
     rerun_job(job)
 
@@ -146,7 +154,7 @@ def mainloop():
         for job in data["users"][user]["job_data"]:
             if job['status'] == 'finished' or job['status'] == 'rerunned' or not job['monitor']:
                 continue
-            status = job['error'] if job['status'] == 'error' else check_status(job)
+            status = job['error'] if job['status'] == 'error' else check_job_status(job)
             if status == 'preempted':
                 error_jobs['preempted'].append(job)
             elif status == 'grpc':

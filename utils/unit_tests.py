@@ -137,14 +137,14 @@ def test_code_locked(quiet = False):
     else:
         print(f"{RED}[FAILED]{NC} test_code_locked")
 
-def test_describe_tpu():
+def test_check_tpu_status():
     """
-    Test if the describe_tpu function works as expected.
+    Test if the check_tpu_status function works as expected.
     """
-    # print(operate.describe_tpu("kmh-tpuvm-v2-32-preemptible-2"))
-    # print(operate.describe_tpu("kmh-tpuvm-v2-32-1"))
-    # print(operate.describe_tpu("v2-32-p2"))
-    print(operate.describe_tpu("v4-32-py2"))
+    # print(operate.check_tpu_status("kmh-tpuvm-v2-32-preemptible-2"))
+    # print(operate.check_tpu_status("kmh-tpuvm-v2-32-1"))
+    # print(operate.check_tpu_status("v2-32-p2"))
+    print(operate.check_tpu_status("v4-32-py2"))
 
 def sanity_check():
     if data_io.check_code_lock():
@@ -159,7 +159,7 @@ def sanity_check():
         test_zombie_jobs,
         test_has_child,
         test_code_locked,
-        # test_describe_tpu,
+        # test_check_tpu_status,
     ]
     passed, failed = 0, 0
     failed_list = []

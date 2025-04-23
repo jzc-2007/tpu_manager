@@ -66,6 +66,8 @@ if __name__ == '__main__':
     elif cmd == 'finish-job': jobs.finish_job(args[2])
     elif cmd == 'help' or cmd == '-h': desc.explain(args[2])
     elif cmd == 'add-tpu-alias' or cmd == '-ta': logger.add_tpu_alias(args[2], args[3])
+    elif cmd == 'check-status' or cmd == '-cktpu': print(operate.check_tpu_status(args[2]))
+    elif cmd == 'describe' or cmd == '-dtpu': operate.describe_tpu(args[2])
     elif cmd == '-lta': logger.explain_tpu_aliases()
     elif cmd == 'add-user': users.create_user()
     elif cmd == 'del-user': users.del_user()

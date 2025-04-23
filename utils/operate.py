@@ -50,7 +50,7 @@ def set_wandb(tpu):
 
     data = read_data()
     wandb_key, conda_env = data["wandb_api_key"], data["conda_env_name"]
-    data_root = "kmh-nfs-ssd-eu-mount" if 'eu' in zone else "kmh-nfs-ssd-us-mount"
+    data_root = "kmh-nfs-ssd-eu-mount" if 'eu' in zone else "kmh-nfs-us-mount"
     conda_path = f"/{data_root}/code/qiao/anaconda3/envs/{conda_env}/bin/python"
 
     remote_cmd = f'{conda_path} -m wandb login {wandb_key}'
@@ -111,7 +111,7 @@ def apply_pre(tpu, delete=True):
         print(f"Now, TPU VM {tpu} is good, ready to use")
         # mount the disk
         print(f"{PURPLE}[INFO]{NC} Mounting disk in TPU {tpu}...")
-        res = mount_disk(tpu)
+        res = mount_disk(tpu, quiet = True)
         if res != 'success':
             print(f"{RED}[ERROR]{NC} apply_pre: mounting disk failed")
             return 'mount failed'
@@ -131,39 +131,110 @@ def apply_pre(tpu, delete=True):
         print(f"{RED}[ERROR]{NC} apply_pre: TPU {tpu} not ready, state: {state}")
         return 'unknown'
     
-def describe_tpu(tpu):
+def check_tpu_status(tpu):
     zone, pre, tpu = get_zone_pre(tpu)
     if zone is None: return
     cmd = f"gcloud compute tpus describe {tpu} --zone={zone} --format='value(state)'"
     try:
         state = subprocess.check_output(cmd, shell=True, stderr=subprocess.DEVNULL).decode().strip()
     except subprocess.CalledProcessError:
-        print(f"{RED}[ERROR]{NC} describle_tpu: Failed to query TPU state")
+        print(f"{RED}[ERROR]{NC} check_tpu_status: Failed to query TPU state")
         return 'failed'
     
     return state
 
-def check_env(tpu):
+def describe_tpu(tpu, quiet = False):
+    """
+    Describe the TPU.
+    Return value: ['no tpu found', 'preempted', 'terminated', 'creating', 'success', 'test env failed', 'file error', 'unknown']
+    """
+    zone, pre, tpu = get_zone_pre(tpu)
+    if zone is None: 
+        print(f"{RED}[ERROR]{NC} describe_tpu: TPU {tpu} not found")
+        return 'no tpu found'
+    if not quiet:
+        print(f"{PURPLE}[INFO]{NC} describe_tpu: Starting to describe TPU {tpu} in zone {zone}...")
+        print(f"{PURPLE}[INFO]{NC} describe_tpu: Querying TPU {tpu} state...")
+    res = check_tpu_status(tpu)
+    if res == 'PREEMPTED':
+        if not quiet:
+            print(f"{PURPLE}[INFO]{NC} describe_tpu: TPU {tpu} is {RED}PREEMPTED{NC}")
+        return 'preempted'
+    elif res == 'TERMINATED':
+        if not quiet:
+            print(f"{PURPLE}[INFO]{NC} describe_tpu: TPU {tpu} is {RED}TERMINATED{NC}")
+        return 'terminated'
+    elif res == 'CREATING':
+        if not quiet:
+            print(f"{PURPLE}[INFO]{NC} describe_tpu: TPU {tpu} is {YELLOW}CREATING{NC}")
+        return 'creating'
+    elif res == 'READY':
+        if not quiet:
+            print(f"{PURPLE}[INFO]{NC} TPU {tpu} is {GREEN}READY{NC}")
+            print(f"{PURPLE}[INFO]{NC} Checking environment in TPU {tpu}...")
+        state = check_env(tpu, quiet=True)
+        if state == 'success':
+            if not quiet:
+                print(f"{GREEN}[SUCCESS]{NC} Environment in TPU {tpu} is good!")
+            return 'success'
+        elif state == 'failed':
+            if not quiet:
+                print(f"{RED}[ERROR]{NC} Environment in TPU {tpu} is not good")
+                print(f"state: {state}")
+                print("Unexpected error, please check the TPU manually, or contact the admin")
+            return 'failed'
+        elif state == 'file error':
+            if not quiet:
+                print(f"{RED}[ERROR]{NC} Environment in TPU {tpu} has file error")
+                print(f"{PURPLE}[INFO] {NC}You may need to {PURPLE}mount the NFS{NC} by `tpu mount-disk`, or solve the env by `tpu solve`")
+            return 'file error'
+        elif state == 'unknown':
+            if not quiet:
+                print(f"{RED}[ERROR]{NC} Environment in TPU {tpu} is getting unkown error, please contact the admin.")
+                print(f"state: {state}")
+            return 'unknown'
+        else:
+            if not quiet:
+                print(f"{RED}[ERROR]{NC} describe_tpu: TPU {tpu} is getting unkown error, please contact the admin.")
+                print(f"state: {state}")
+            return 'unknown'
+
+def check_env(tpu, quiet = False):
+    """
+    Check if the environment in the TPU is good.
+    Return value: ['no tpu found', 'success', 'failed', 'file error', 'unknown', 'timeout', 'occupied']
+    """
     zone, pre, tpu = get_zone_pre(tpu)
     if zone is None: return 'no tpu found'
     data = read_data()
     conda_env = data["conda_env_name"]
-    data_root = "kmh-nfs-ssd-eu-mount" if 'eu' in zone else "kmh-nfs-ssd-us-mount"
+    data_root = "kmh-nfs-ssd-eu-mount" if 'eu' in zone else "kmh-nfs-us-mount"
     conda_path = f"/{data_root}/code/qiao/anaconda3/envs/{conda_env}/bin/python"
     cmd = f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --worker=all --command \"{conda_path} -c 'import jax; print(jax.devices())'\""
+    if not quiet:
+        print(f"{PURPLE}[INFO]{NC} check_env: Checking environment in TPU {tpu}... This may take a while...")
     try:
         # get the output of the command
-        result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout = 120)
         stdout, stderr= result.stdout, result.stderr
     except subprocess.CalledProcessError:
-        print(f"{RED}[ERROR]{NC} check_remote_env: Failed to query TPU state")
+        if not quiet:
+            print(f"{RED}[ERROR]{NC} check_env: Failed to query TPU state")
         return 'failed'
+    except subprocess.TimeoutExpired:
+        if not quiet:
+            print(f"{RED}[ERROR]{NC} check_env: Timeout expired")
+        return 'timeout'
 
     if 'No such file or directory' in stderr:
-        print(f"{RED}[ERROR]{NC} check_remote_env: Can't find directory")
-        print(f"You may need to {PURPLE}mount the NFS{NC} first")
+        if not quiet:
+            print(f"{RED}[ERROR]{NC} check_remote_env: Can't find directory")
+            print(f"{PURPLE}[INFO]{NC} You may need to {PURPLE}mount the NFS{NC} first")
         return 'file error'
-
+    if 'The TPU is already in use' in stderr:
+        if not quiet:
+            print(f"{RED}[ERROR]{NC} check_env: TPU {tpu} is already in use")
+        return 'occupied'
     if "TpuDevice" in stdout:
         print(f"{GREEN}[SUCCESS]{NC} check_remote_env: TPU {tpu} is good!")
         return 'success'
@@ -174,7 +245,7 @@ def check_env(tpu):
         print(f"stderr: {stderr}")
         return 'unknown'
 
-def mount_disk(tpu):
+def mount_disk(tpu, quiet = False):
     zone, pre, tpu = get_zone_pre(tpu)
     if zone is None: return
     print(f"{PURPLE}[INFO]{NC} Mounting disk in TPU {tpu}...")
@@ -206,9 +277,19 @@ def mount_disk(tpu):
     "
     """
     try:
-        download_process = subprocess.run(cmd1, shell=True, timeout=600, check=True)
+        download_process = \
+            subprocess.run(cmd1, shell=True, timeout=600, check=True,\
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL) if quiet \
+            else subprocess.run(cmd1, shell=True, timeout=600, check=True)
+
         time.sleep(5)
-        mount_process = subprocess.run(cmd2, shell=True, timeout=600, check=True)
+
+        mount_process = \
+            subprocess.run(cmd2, shell=True, timeout=600, check=True,\
+                                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) if quiet \
+            else subprocess.run(cmd2, shell=True, timeout=600, check=True)
+
     except subprocess.TimeoutExpired:
         print(f"{RED}[ERROR]{NC} mount_disk: mounting disk timed out")
         return 'timeout'

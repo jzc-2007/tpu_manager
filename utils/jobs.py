@@ -2,7 +2,7 @@ import os, re, time, json
 from .helpers import is_integer, DATA_PATH
 from . import users
 from .data_io import read_and_lock_data, write_and_unlock_data, release_lock_data, read_data
-from .operate import describe_tpu, apply_pre
+from .operate import check_tpu_status, apply_pre
 RED, GREEN, YELLOW, PURPLE, NC = "\033[1;31m", "\033[1;32m", "\033[1;33m", "\033[1;34m", "\033[0m"
 RULE_DICT ={
     'pre':{
@@ -44,7 +44,7 @@ def run(user_obj, args):
         # Check the status of the TPU
         if tpu is not None:
             print(f"{PURPLE}[INFO] {NC}Checking the status of TPU {tpu}...")
-            tpu_status = describe_tpu(tpu)
+            tpu_status = check_tpu_status(tpu)
 
             if tpu_status == 'PREEMPTED':
                 print(f"{YELLOW}[WARNING]{NC} TPU {tpu} is preempted")
@@ -176,7 +176,7 @@ def run(user_obj, args):
             'job_tags': tag,
             'log_dir': None,
             'extra_configs': config_args,
-            'status': None,
+            'status': 'starting',
             'error': None,
             'stage': 0,
             'monitor': monitor,
@@ -239,7 +239,15 @@ def check_jobs(user_obj, args):
                 print('-'*40)
             continue
         else:
-            print(f'Window {window_id} (tag: {job_data["job_tags"]})')
+            father_job = None
+            try:
+                father_job = job_data['extra_msgs']['father']
+            except Exception as e:
+                father_job = None
+            if father_job is not None:
+                print(f"Window {window_id} (tag: {job_data["job_tags"]}, rerun: Window {father_job}, stage {job_data['stage']+1})")
+            else:
+                print(f'Window {window_id} (tag: {job_data["job_tags"]})')
             print(f"DIR: {job_data['job_dir'].split('/')[-1]}\nTPU: {job_data['tpu']}")
         # Get the window last line
         last_line = os.popen(f"tmux capture-pane -t {session_name}:{window_id} -p").read()
@@ -286,17 +294,7 @@ def check_jobs(user_obj, args):
                 continue
         if re.search(r'Job failed', last_line) or re.search(r'[eE]rror', last_line) or re.search(r'ERROR', last_line):
             # change the job status to error
-            data = read_and_lock_data()
-            for user in data['users']:
-                if data['users'][user]['tmux_name'] == session_name:
-                    for job in data['users'][user]['job_data']:
-                        if job['windows_id'] == int(window_id):
-                            job['status'] = 'error'
-                            job['error'] = 'unknown'
-                            break
-                    break
-            write_and_unlock_data(data)
-            print(f"Status: {RED}Error{NC}")
+            print(f"Status: {RED}Unknown Error{NC}")
             print(f"msg: {msg}")
         elif re.search(r'[cC]ompiling', last_line) or re.search(r'[cC]ompilation', last_line)or re.search(r'[cC]ompile', last_line):
             print(f"Status: {GREEN}Compiling{NC}")
