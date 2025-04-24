@@ -63,6 +63,7 @@ if __name__ == '__main__':
     try:
         ############### JOBS that don't require a user ###############
         if cmd == 'tldr': desc.tldr()
+        elif cmd == 'change-ip': handler.change_ip()
         elif cmd == 'upd-log': jobs.upd_log(args[2], args[3], args[4], args[5]) #windows, log_dir, ka, time
         elif cmd == 'finish-job': jobs.finish_job(args[2])
         elif cmd == 'help' or cmd == '-h': desc.explain(args[2])
