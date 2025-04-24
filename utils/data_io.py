@@ -46,6 +46,19 @@ def write_data(data):
     with open(DATA_PATH, 'w') as file:
         json.dump(data, file, indent=4)
 
+def lock_data():
+    print(f"{INFO} lock_data: locking data")
+    with open(LOCK_FILE, 'r') as file:
+        lock = json.load(file)
+    if lock['data']['status'] == False:
+        lock['data']['status'] = True
+        with open(LOCK_FILE, 'w') as file:
+            json.dump(lock, file, indent=4)
+    else:
+        print(f"{FAIL} lock_data: the data is locked now.")
+        raise Exception("Lock not released.")
+    
+
 def read_and_lock_data():
     num_ack = 0
     while True:

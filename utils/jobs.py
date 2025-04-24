@@ -398,6 +398,36 @@ def run(user_obj, args):
     if user_obj.settings['monitor_after_run']:
         monitor_jobs(user_obj, args)
 
+def check_all_jobs():
+    """
+    check the jobs for all the users
+    """
+    data = read_data()
+    try:
+        for user in data['users']:
+            user_obj = users.user_from_dict(data['users'][user])
+            print(f"{YELLOW}==============={NC} User {user_obj.name} {YELLOW}==============={NC}")
+            check_jobs(user_obj, [])
+    except Exception as e:
+        print(f"{RED}[Error] {NC} check_all_jobs: Failed to check jobs")
+        print(f"Error: {e}")
+
+def monitor_all_jobs():
+    """
+    monitor the jobs for all the users
+    """
+    try:
+        while True:
+            check_all_jobs()
+            data = read_data()
+            sleep_time = data["monitor_all_check_time"] if "monitor_all_check_time" in data else 20
+            time.sleep(sleep_time)
+            # clear the screen
+            os.system('clear' if os.name == 'posix' else 'cls')
+    except KeyboardInterrupt:
+        print(f"\n{INFO} Stopping monitor...")
+        return
+
 def check_jobs(user_obj, args):
     """
     Print the status of all the jobs in the tmux session.
@@ -431,9 +461,9 @@ def check_jobs(user_obj, args):
                 father_job = None
             if father_job is not None:
                 operation = 'resume' if job_data['status'] == 'resumed' else 'rerun'
-                print(f"Window {window_id} (tag: {job_data["job_tags"]}, {operation}: Window {father_job}, stage {job_data['stage']+1})")
+                print(f"Window {window_id} (tag: {job_data['job_tags']}, {operation}: Window {father_job}, stage {job_data['stage']+1})")
             else:
-                print(f'Window {window_id} (tag: {job_data["job_tags"]})')
+                print(f"Window {window_id} (tag: {job_data['job_tags']})")
             print(f"DIR: {job_data['job_dir'].split('/')[-1]}\nTPU: {job_data['tpu']}")
         # Get the window last line
         last_line = os.popen(f"tmux capture-pane -t {session_name}:{window_id} -p").read()
@@ -467,7 +497,7 @@ def check_jobs(user_obj, args):
                 except Exception as e:
                     print(f"{RED}Failed to get child window id{NC}")
                     child = None
-                print(f"Status: {YELLOW}{job_data["status"]}({job_data['error']}){NC} in window {child}")
+                print(f"Status: {YELLOW}{job_data['status']}({job_data['error']}){NC} in window {child}")
                 if monitor_verbose:
                     print(f"msg: {msg}")
                 print('-'*40)

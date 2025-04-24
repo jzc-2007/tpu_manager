@@ -13,6 +13,7 @@ from utils.helpers import is_integer, is_boolean, to_boolean, DATA_PATH
 import utils.error_handler as handler
 import utils.data_io as data_io
 import utils.unit_tests as unit_tests
+import utils.develop as develop
 RED, GREEN, YELLOW, PURPLE, NC = "\033[1;31m", "\033[1;32m", "\033[1;33m", "\033[1;34m", "\033[0m"
 GOOD, INFO, WARNING, FAIL = f"{GREEN}[GOOD]{NC}", f"{PURPLE}[INFO]{NC}", f"{YELLOW}[WARNING]{NC}", f"{RED}[FAIL]{NC}"
 def find_user(data, args):
@@ -87,6 +88,10 @@ if __name__ == '__main__':
         elif cmd == 'kill-tpu' or cmd == '-kt': operate.kill_jobs_tpu(args[2])
         elif cmd == 'set-monitor-config' or cmd == '-smc': logger.set_monitor_config(args[2:])
         elif cmd == 'get-monitor-config' or cmd == '-gmc': logger.get_monitor_config()
+        elif cmd == 'maj': jobs.monitor_all_jobs()
+        elif cmd == 'caj': jobs.check_all_jobs()
+        elif cmd == 'lock-data': data_io.lock_data()
+        elif cmd == 'unlock-data': data_io.release_lock_data()
         else: 
         ############### JOBS that require a user ###############
             with open(DATA_PATH, 'r') as file: data = json.load(file)
