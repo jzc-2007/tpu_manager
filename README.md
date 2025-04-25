@@ -501,7 +501,7 @@ current_window=`tmux display-message -p '#S:#I'`
 echo "Current tmux window: $current_window"
 
 echo 'tpu: '$VM_NAME
-tpu upd-log $current_window $LOGDIR $VM_NAME $now
+tpu upd-log $current_window $LOGDIR $STAGEDIR $VM_NAME $now
 
 export cmd="cd $STAGEDIR
 echo 'Current dir: '

@@ -231,7 +231,7 @@ def check_tpu_status(tpu):
         print(f"{FAIL} check_tpu_status: Failed to query TPU state")
         return 'failed'
     
-    return state
+    return state.lower()
 
 def describe_tpu(tpu, quiet = False):
     """
@@ -246,15 +246,15 @@ def describe_tpu(tpu, quiet = False):
         print(f"{INFO} describe_tpu: Starting to describe TPU {tpu} in zone {zone}...")
         print(f"{INFO} describe_tpu: Querying TPU {tpu} state...")
     res = check_tpu_status(tpu)
-    if res == 'PREEMPTED':
+    if res == 'preempted':
         if not quiet:
             print(f"{INFO} describe_tpu: TPU {tpu} is {RED}PREEMPTED{NC}")
         return 'preempted'
-    elif res == 'TERMINATED':
+    elif res == 'terminated':
         if not quiet:
             print(f"{INFO} describe_tpu: TPU {tpu} is {RED}TERMINATED{NC}")
         return 'terminated'
-    elif res == 'CREATING':
+    elif res == 'creating':
         if not quiet:
             print(f"{INFO} describe_tpu: TPU {tpu} is {YELLOW}CREATING{NC}")
         return 'creating'

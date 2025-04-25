@@ -118,6 +118,7 @@ def resume_rerun_job(job, new_tpu = None, load_ckpt = True):
             'tpu': job["tpu"] if new_tpu is None else new_tpu,
             'job_tags': job["job_tags"],
             'log_dir': None,
+            'stage_dir': None,
             'extra_configs': job["extra_configs"],
             'status': None,
             'stage': new_stage,
@@ -142,14 +143,15 @@ def resume_rerun_job(job, new_tpu = None, load_ckpt = True):
         tpu = job["tpu"] if new_tpu is None else new_tpu
         config_args = job["extra_configs"]
         tags = job["job_tags"]
-        job_dir = job["job_dir"]
+        stage_dir = job["stage_dir"]
+        assert stage_dir is not None, f"Job {job['windows_id']} for user {user_obj.name} has no stage dir"
         log_dir = job["log_dir"]
         print(f"{INFO} {operation} job {job['windows_id']} for user {user_obj.name} with new windows id {id}")
 
         # make sure that the tpu is ready
         if tpu is not None:
             tpu_status = check_tpu_status(tpu)
-            if tpu_status == 'PREEMPTED':
+            if tpu_status == 'preempted':
                 print(f"{WARNING} {operation}_job: TPU {tpu} is preempted, trying to reapply...")
                 res = apply_pre(tpu, delete=True)
                 if res == 'success':
@@ -161,7 +163,7 @@ def resume_rerun_job(job, new_tpu = None, load_ckpt = True):
             elif tpu_status == 'failed':
                 print(f"{FAIL} {operation}_job: Failed to query status")
                 print(f"{FAIL} {operation}_job: This may indicate that this TPU is deleted, please contact the admin")
-            assert tpu_status == 'READY', f"TPU {tpu} is not ready, status: {tpu_status}"
+            assert tpu_status == 'ready', f"TPU {tpu} is not ready, status: {tpu_status}"
 
         # kill the old job
         kill_jobs_tpu(tpu)
@@ -169,7 +171,7 @@ def resume_rerun_job(job, new_tpu = None, load_ckpt = True):
         # create the tmux window
         os.system(f"tmux new-window -t {session_name}:{id} -n {tags}")
         time.sleep(0.5)
-        os.system(f"tmux send-keys -t {session_name}:{id} 'cd {job_dir}' Enter")
+        os.system(f"tmux send-keys -t {session_name}:{id} 'cd {stage_dir}' Enter")
         if load_ckpt:
             os.system(f"tmux send-keys -t {session_name}:{id} 'source staging.sh ka={tpu} {config_args} --config.load_from={log_dir} ' Enter") 
         else:
@@ -243,7 +245,7 @@ def run(user_obj, args):
             print(f"{INFO} Checking the status of TPU {tpu}...")
             tpu_status = check_tpu_status(tpu)
 
-            if tpu_status == 'PREEMPTED':
+            if tpu_status == 'preempted':
                 print(f"{WARNING} TPU {tpu} is preempted")
                 REAPPLY = False
                 if '-apply' in args:
@@ -270,7 +272,7 @@ def run(user_obj, args):
                         return
                     print(f"{GOOD} Re-applying TPU {tpu} successfully")
 
-            elif tpu_status == 'READY':
+            elif tpu_status == 'ready':
                 print(f"{GOOD} TPU {tpu} is ready, starting job...")
 
             elif tpu_status == 'failed':
@@ -290,7 +292,7 @@ def run(user_obj, args):
                     print(f"{INFO} Quiting... {tpu}")
                     release_lock_data()
 
-            elif tpu_status == 'RESTARTING' or tpu_status == 'CREATING' or tpu_status == 'STOPPING':
+            elif tpu_status == 'restarting' or tpu_status == 'creating' or tpu_status == 'stopping':
                 print(f"{WARNING} TPU {tpu} is {tpu_status.lower()}")
                 print(f"{INFO} Quiting... {tpu}")
                 release_lock_data()
@@ -369,6 +371,7 @@ def run(user_obj, args):
             'tpu': tpu,
             'job_tags': tag,
             'log_dir': None,
+            'stage_dir': None,
             'extra_configs': config_args,
             'status': 'starting',
             'error': None,
@@ -383,7 +386,7 @@ def run(user_obj, args):
         # make sure that the tpu is ready
         if tpu is not None:
             tpu_status = check_tpu_status(tpu)
-            assert tpu_status == 'READY', f"TPU {tpu} is not ready, status: {tpu_status}"
+            assert tpu_status == 'ready', f"TPU {tpu} is not ready, status: {tpu_status}"
 
         # create the tmux window
         os.system(f"tmux new-window -t {session_name}:{id} -n {tag}")
@@ -630,7 +633,7 @@ def monitor_jobs(user_obj, args):
         return
 
 
-def upd_log(window, log_dir, ka, start_time):
+def upd_log(window, log_dir, stage_dir, ka, start_time):
     data = read_and_lock_data()
     try:
         session_name, window_num = window.split(':')
@@ -643,6 +646,7 @@ def upd_log(window, log_dir, ka, start_time):
                 for job in data['users'][user]['job_data']:
                     if job['windows_id'] == window_num:
                         job['log_dir'] = log_dir
+                        job['stage_dir'] = stage_dir
                         job['tpu'] = ka
                         job['start_time'] = start_time
                         job['status'] = 'running'

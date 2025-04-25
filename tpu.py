@@ -127,7 +127,7 @@ if __name__ == '__main__':
             elif cmd == '-czj': jobs.clear_zombie_jobs(user_object)
             elif cmd == 'clean': jobs.clear_all_jobs(user_object), handler.clear_zombie_windows(user_object), jobs.clear_zombie_jobs(user_object)
 
-            else: print(f"Unknown command {cmd}")
+            else: print(f"{FAIL} Unknown command {cmd}")
     except Exception as e:
         print(f"{FAIL} {e}")
         sys.exit(1)

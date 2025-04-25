@@ -63,6 +63,11 @@ def reapply_worker(ka, result_queue):
     sys.stdout = open(os.devnull, 'w')
     try:
         result = operate.apply_pre(ka, delete=True)
+        if result == 'success':
+            print(f"{GOOD} reapply_worker: Reapply TPU {ka} done")
+            add_MONITOR_log(f"{GOOD} reapply_worker: Reapply TPU {ka} done")
+        else:
+            raise Exception(f"Reapply TPU {ka} failed, please contact the admin")
         result_queue.put(result)
     except Exception as e:
         print(f"{FAIL} reapply_worker: Failed to reapply TPU {ka}: {e}")
@@ -126,9 +131,7 @@ def mainloop():
 
     print(f"{INFO} mainloop: found {len(error_jobs['preempted'])} preempted jobs and {len(error_jobs['grpc'])} grpc jobs")
     if len(error_jobs['preempted']) != 0:
-        add_MONITOR_log({
-            "msg": f"Found {len(error_jobs['preempted'])} preempted jobs, reapply them"
-        })
+        add_MONITOR_log(f"{INFO} Found {len(error_jobs['preempted'])} preempted jobs, reapply them")
     if len(error_jobs['grpc']) != 0:
         add_MONITOR_log({
             "msg": f"Found {len(error_jobs['grpc'])} grpc jobs, reapply them"
@@ -180,6 +183,7 @@ if __name__ == "__main__":
             mainloop()
             cur_time = time.time()
             time_used = cur_time - last_time # in seconds
+            print(f"{INFO} Time: {convert_utcstr_to_edtstr(get_abs_time_str())}")
             print(f"Loop {num_loops} finished, time used: {time_used:.2f} seconds")
             time.sleep(max(0, checking_freq - time_used))
 
