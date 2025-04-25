@@ -53,7 +53,17 @@ You can also add the flag `-apply` to skip the prompt.
 </details>
 
 <details>
-<summary> <strong>Killing Jobs/Windows </strong></summary>
+<summary> <strong>Killing Jobs/Windows & Cleaning up (<strong>USEFUL</strong>)</strong></summary>
+
+As you run more and more jobs, there will be a lot of tmux windows, which is messy.
+
+You can use 
+
+```bash
+tpu clean username 
+```
+
+to kill all the tmux windows whose jobs are finished/error/killed.
 
 To kill a job, use:
 
@@ -61,11 +71,7 @@ To kill a job, use:
 tpu kill-job/-k/-kj -w=<windows_id>/window=<windows_id> username # Kill all the jobs in the TPU
 ```
 
-This command will not kill the tmux window but will mark the job as "killed." To clean up, use the integrated `clean` command:
-
-```bash
-tpu clean username # Kill all tmux windows whose jobs are finished/error/killed
-```
+This command will not kill the tmux window but will mark the job as "killed." After that, you can use `tpu clean` to kill the tmux window.
 
 Jobs with child jobs that were rerun/resumed will be killed based on the status of their children.
 
@@ -75,7 +81,7 @@ To kill a specific tmux window (NOT RECOMMENDED):
 tpu -kw/kill-window window_number username
 ```
 
-After killing windows, some jobs may become "zombies" (i.e., jobs without associated windows). Use these helpers to clean zombies:
+After killing windows, some jobs may become "zombies" (i.e., jobs without associated windows). You can use these helpers to clean zombies (Supported, but NOT RECOMMENDED):
 
 ```bash
 tpu -czw username # Clear all zombie windows
@@ -90,7 +96,7 @@ The `clean` command integrates these actions, so using `kill-job + clean` is str
 </details>
 
 <details>
-<summary> <strong>Monitoring </strong></summary>
+<summary> <strong>Monitoring (<strong>IMPORTANT</strong>)</strong></summary>
 
 If the TPU is preemptible, `tpu run` will **auto-resume on GRPC errors** and **auto-reapply and resume** when preempted. You can also use `tpu resume <windows_id> username` to resume jobs.  
 The `tpu run` command opens a monitor window to track all your jobs. Alternatively, you can use:
