@@ -1,11 +1,10 @@
 import json
 import os, time
-from .helpers import DATA_PATH, LOCK_FILE
+from .helpers import *
 from .data_io import read_and_lock_data, write_and_unlock_data, release_lock_data, read_data, write_data
 from .operate import get_zone_pre, check_env, mount_disk, check_tpu_status, apply_pre
 from .jobs import resume_rerun_job
-RED, GREEN, YELLOW, PURPLE, NC = "\033[1;31m", "\033[1;32m", "\033[1;33m", "\033[1;34m", "\033[0m"
-GOOD, INFO, WARNING, FAIL = f"{GREEN}[GOOD]{NC}", f"{PURPLE}[INFO]{NC}", f"{YELLOW}[WARNING]{NC}", f"{RED}[FAIL]{NC}"
+
 def clear_zombie_windows(user_obj):
     """
     Clean up all the tmux windows that are not in user's joblist, except window 0.

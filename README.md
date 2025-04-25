@@ -189,9 +189,10 @@ For preempted TPUs, we will reapply the TPU and resume the job when the job is p
 
 You can pass the `rule=<rule>` to the `tpu run` command to set the rules. The available rules are:  
 - `reapply`: Reapply when GRPC error occurs or when preempted.  
-- `pass`: Do nothing.  
+- `pass` (default for non-preempted TPUs): Do nothing.  
 - `rerun`: Rerun when GRPC error occurs, reapply when preempted.  
 - `pre` (default for preempted TPUs): Reapply when GRPC error occurs, resume
+- `resume`(recommend for non-preempted TPUs, may change to default someday): Resume when GRPC error occurs, pass when preempted.
 
 For example, if you want a job running in preempted TPUs to be rerunned instead of resumed when grpc, you can do:
 ```bash
@@ -227,7 +228,10 @@ tpu -h command # details of the command
 <summary> <strong>Code Structure </strong></summary>
 
 The user interface is implemented in `tpu.py`, and the specific function implementation is in `utils/`.  
-`monitor.py` does the check and resume work, and will be run all day, it will check the jobs and do unit tests occansionally according to ``data["monitor_config"]``(You can see the full format of ``data.json`` below, which is the key matadata we maintain to manage all the jobs).
+`MONITOR.py` does the check and resume work, and will be run all day, it will check the jobs and do unit tests occansionally according to ``data["MONITOR_config"]``(You can see the full format of ``data.json`` below, which is the key matadata we maintain to manage all the jobs).
+
+We use MONITOR to referr to the global monitor process to separate it from the local monitor window for 
+each user. 
 
 For `utils/`:  
 - `desciptions.py` does all the documentation work  
@@ -238,6 +242,7 @@ For `utils/`:
 - `helpers.py` does the helper functions
 - `error_handler.py` does the error handling works
 - `unit_tests.py` does the unit tests (sanity checks)
+- `develop.py` does the developer tools, to safely modify the metadata and avoid conflicts with current jobs
 (see more in next paragraph)
 <details>
 <summary> <strong>Data Format </strong></summary>

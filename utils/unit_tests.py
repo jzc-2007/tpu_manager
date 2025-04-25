@@ -2,9 +2,8 @@ import os, sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from utils import operate, data_io
 from utils import directories as dirs
+from utils.helpers import *
 
-RED, GREEN, YELLOW, PURPLE, NC = "\033[1;31m", "\033[1;32m", "\033[1;33m", "\033[1;34m", "\033[0m"
-GOOD, INFO, WARNING, FAIL = f"{GREEN}[GOOD]{NC}", f"{PURPLE}[INFO]{NC}", f"{YELLOW}[WARNING]{NC}", f"{RED}[FAIL]{NC}"
 def test_get_zone_pre(quiet = False):
     try:
         assert operate.get_zone_pre("kmh-tpuvm-v2-32-preemptible-2") == ("europe-west4-a", True, "kmh-tpuvm-v2-32-preemptible-2"), f"T1, Expected ('europe-west4-a', True, 'kmh-tpuvm-v2-32-preemptible-2'), got {operate.get_zone_pre('kmh-tpuvm-v2-32-preemptible-2')}"
@@ -171,6 +170,7 @@ def sanity_check():
         print(f"{RED}[UNIT TEST]{NC} {failed}/{len(all_tests)} tests failed")
         print(f"Failed tests: {', '.join(failed_list)}")
         print(f"{YELLOW}Please check the failed tests and fix them before proceeding.{NC}")
+    return passed, failed
 
 if __name__ == "__main__":
     # run the functions

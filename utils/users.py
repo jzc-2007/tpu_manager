@@ -1,8 +1,7 @@
-from .helpers import DATA_PATH
+from .helpers import *
 from .data_io import read_and_lock_data, write_and_unlock_data, release_lock_data
 import os, json, time
-RED, GREEN, YELLOW, PURPLE, NC = "\033[1;31m", "\033[1;32m", "\033[1;33m", "\033[1;34m", "\033[0m"
-GOOD, INFO, WARNING, FAIL = f"{GREEN}[GOOD]{NC}", f"{PURPLE}[INFO]{NC}", f"{YELLOW}[WARNING]{NC}", f"{RED}[FAIL]{NC}"
+
 class User():
     def __init__(self, id, name, tmux_name = None):
         self.id = id
@@ -133,3 +132,26 @@ def list_users():
         data = json.load(file)
     for id, user in data['id_user_dict'].items():
         print(f"{id}: {user}")
+
+def reset_settings(user_obj):
+    data = read_and_lock_data()
+    username = user_obj.name
+    print(f"{INFO} reset_settings: Resetting settings for user {user_obj.name}")
+    # Find the corresponding user object in the data
+    user_data = data['users'].get(username)
+    if user_data is None:
+        print(f"{FAIL} reset_settings: User {username} not found")
+        return
+    for key, value in user_data['settings'].items():
+        new_value = input(f"Enter new value for {key} (current: {value}), empty to keep current value:")
+        if new_value == '':
+            continue
+        if is_integer(new_value):
+            new_value = int(new_value)
+        elif is_boolean(new_value):
+            new_value = to_boolean(new_value)
+        else:
+            new_value = str(new_value)
+        user_obj.settings[key] = new_value
+        user_data['settings'][key] = new_value
+        print(f"Set {key} to {new_value}")

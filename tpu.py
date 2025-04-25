@@ -1,21 +1,16 @@
-import json
-import os
-import time
-import re
-import sys
+import json, sys, os
 import utils.descriptions as desc
 import utils.directories as dirs
 import utils.users as users
 import utils.jobs as jobs
 import utils.logger as logger
 import utils.operate as operate
-from utils.helpers import is_integer, is_boolean, to_boolean, DATA_PATH
 import utils.error_handler as handler
 import utils.data_io as data_io
 import utils.unit_tests as unit_tests
 import utils.develop as develop
-RED, GREEN, YELLOW, PURPLE, NC = "\033[1;31m", "\033[1;32m", "\033[1;33m", "\033[1;34m", "\033[0m"
-GOOD, INFO, WARNING, FAIL = f"{GREEN}[GOOD]{NC}", f"{PURPLE}[INFO]{NC}", f"{YELLOW}[WARNING]{NC}", f"{RED}[FAIL]{NC}"
+from utils.helpers import *
+
 def find_user(data, args):
     for arg in args:
         if arg in data['user_list'] or arg.startswith('id=') or arg.startswith('user='):
@@ -92,6 +87,14 @@ if __name__ == '__main__':
         elif cmd == 'caj': jobs.check_all_jobs()
         elif cmd == 'lock-data': data_io.lock_data()
         elif cmd == 'unlock-data': data_io.release_lock_data()
+
+        # ------------ For development only ------------
+        elif cmd == 'add_global_config' or cmd == '-agc': develop.add_global_config(args[2], args[3])
+        elif cmd == 'merge_global_config' or cmd == '-mgc': develop.merge_global_config(args[2])
+        elif cmd == '-Ml': develop.show_MONITOR_log() if len(args) < 3 else develop.show_MONITOR_log(args[2])
+        elif cmd == '-Mc': develop.clear_MONITOR_log()
+        # ------------ End of development only ------------
+
         else: 
         ############### JOBS that require a user ###############
             with open(DATA_PATH, 'r') as file: data = json.load(file)
@@ -103,6 +106,7 @@ if __name__ == '__main__':
             elif cmd == 'set-dir': dirs.set_dir(user_object, args[2:])
             elif cmd == 'get-settings': logger.get_settings(user_object)
             elif cmd == 'set-settings': logger.set_settings(user_object, args[2:])
+            elif cmd == 'reset-user-settings': users.reset_settings(user_object)
             elif cmd == 'get-dir': print(dirs.get_dir(user_object, args[2]))
             elif cmd == 'check': jobs.check_jobs(user_object, args[2:])
             elif cmd == 'monitor': jobs.monitor_jobs(user_object, args[2:])
@@ -122,6 +126,7 @@ if __name__ == '__main__':
             elif cmd == '-czw': handler.clear_zombie_windows(user_object)
             elif cmd == '-czj': jobs.clear_zombie_jobs(user_object)
             elif cmd == 'clean': jobs.clear_all_jobs(user_object), handler.clear_zombie_windows(user_object), jobs.clear_zombie_jobs(user_object)
+
             else: print(f"Unknown command {cmd}")
     except Exception as e:
         print(f"{FAIL} {e}")

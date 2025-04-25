@@ -7,10 +7,36 @@ import utils.data_io as data_io
 import utils.operate as operate
 import utils.unit_tests as unit_tests
 import utils.jobs as jobs
-DATA_PATH="/home/jzc/zhichengjiang/working/xibo_tpu_manager/data.json"
+from utils.helpers import *
+
 running_processes = []
-RED, GREEN, YELLOW, PURPLE, NC = "\033[1;31m", "\033[1;32m", "\033[1;33m", "\033[1;34m", "\033[0m"
-GOOD, INFO, WARNING, FAIL = f"{GREEN}[GOOD]{NC}", f"{PURPLE}[INFO]{NC}", f"{YELLOW}[WARNING]{NC}", f"{RED}[FAIL]{NC}"
+
+def add_MONITOR_log(log):
+    data = data_io.read_and_lock_data()
+    try:
+        data["MONITOR_logs"].append({
+            "time": get_abs_time_str(),
+            "msg": log
+        })
+        data_io.write_and_unlock_data(data)
+    except Exception as e:
+        print(f"{FAIL} add_MONITOR_log: Failed to add log {log}: {e}")
+        data_io.release_lock_data()
+
+def show_MONITOR_log(timezone = 'us'):
+    data = data_io.read_data()
+    for log in data["MONITOR_logs"]:
+        cur_time = log["time"]
+        msg = log["msg"]
+        show_time = None
+        if timezone == 'us':
+            show_time = convert_utcstr_to_edtstr(cur_time)
+        elif timezone == 'cn':
+            show_time = convert_utcstr_to_chnstr(cur_time)
+        else:
+            show_time = cur_time
+        print(f"{LOG} {show_time}: {msg}")
+
 def check_job_status(job):
     if job["log_dir"] == '' or job["log_dir"] is None:
         return None
@@ -40,6 +66,7 @@ def reapply_worker(ka, result_queue):
         result_queue.put(result)
     except Exception as e:
         print(f"{FAIL} reapply_worker: Failed to reapply TPU {ka}: {e}")
+        add_MONITOR_log(f"{FAIL} reapply_worker: Failed to reapply TPU {ka}: {e}")
         result_queue.put(e)
 
 def kill_resume(job):
@@ -75,11 +102,13 @@ def reapply_resume(job, timeout=1800):
             result = result_queue.get()
             if isinstance(result, Exception):
                 print(f"{FAIL} reapply_resume: Reapply TPU {ka} failed: {result}")
+                add_MONITOR_log(f"{FAIL} reapply_resume: Reapply TPU {ka} failed: {result}")
             else:
                 print(f"{GOOD} Reapply TPU {ka} success: {result}, start resume job")
                 jobs.resume_rerun_job(job, load_ckpt=True)
         else:
             print(f"{FAIL} reapply_resume: Reapply TPU {ka} failed, no result returned")
+            add_MONITOR_log(f"{FAIL} reapply_resume: Reapply TPU {ka} failed, no result returned")
 
 def mainloop():
     error_jobs = {'preempted': [], 'grpc': []}
@@ -96,6 +125,14 @@ def mainloop():
                 error_jobs['grpc'].append(job)
 
     print(f"{INFO} mainloop: found {len(error_jobs['preempted'])} preempted jobs and {len(error_jobs['grpc'])} grpc jobs")
+    if len(error_jobs['preempted']) != 0:
+        add_MONITOR_log({
+            "msg": f"Found {len(error_jobs['preempted'])} preempted jobs, reapply them"
+        })
+    if len(error_jobs['grpc']) != 0:
+        add_MONITOR_log({
+            "msg": f"Found {len(error_jobs['grpc'])} grpc jobs, reapply them"
+        })
 
     for error_type in error_jobs:
         for job in error_jobs[error_type]:
@@ -109,6 +146,7 @@ def mainloop():
                 data_io.write_and_unlock_data(data)
             except:
                 print(f"{FAIL} mainloop: Failed to update job {job['windows_id']} for user {user}")
+                add_MONITOR_log(f"{FAIL} mainloop: Failed to update job {job['windows_id']} for user {user}")
                 data_io.release_lock_data()
 
     for error_type in error_jobs:
@@ -127,6 +165,7 @@ def mainloop():
 if __name__ == "__main__":
     num_loops = 0
     last_test_time = time.time()
+    add_MONITOR_log(f"{GOOD} Starting monitor...")
 
     if data_io.check_code_lock():
         print(f"{FAIL} Code is locked for developing, please unlock it first.")
@@ -134,7 +173,7 @@ if __name__ == "__main__":
     try:
         while True:
             data = data_io.read_data()
-            checking_freq, test_freq = data["monitor_config"]["checking_freq"], data["monitor_config"]["test_freq"]
+            checking_freq, test_freq = data["MONITOR_config"]["checking_freq"], data["MONITOR_config"]["test_freq"]
 
             num_loops += 1
             last_time = time.time()
@@ -147,7 +186,12 @@ if __name__ == "__main__":
             if time.time() - last_test_time > test_freq:
                 try:
                     print(f"{INFO} Running unit tests...")
-                    unit_tests.sanity_check()
+                    passed, failed = unit_tests.sanity_check()
+                    tot = passed + failed
+                    if failed == 0:
+                        add_MONITOR_log(f"{GOOD} All unit tests passed")
+                    else:
+                        add_MONITOR_log(f"{FAIL} {failed}/{tot} unit tests failed")
                 except Exception as e:
                     print(f"{FAIL} Unit tests failed: {e}")
                 last_test_time = time.time()

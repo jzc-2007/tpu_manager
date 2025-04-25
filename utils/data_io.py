@@ -1,7 +1,6 @@
-from .helpers import DATA_PATH, LOCK_FILE
+from .helpers import *
 import json, time
-RED, GREEN, YELLOW, PURPLE, NC = "\033[1;31m", "\033[1;32m", "\033[1;33m", "\033[1;34m", "\033[0m"
-GOOD, INFO, WARNING, FAIL = f"{GREEN}[GOOD]{NC}", f"{PURPLE}[INFO]{NC}", f"{YELLOW}[WARNING]{NC}", f"{RED}[FAIL]{NC}"
+
 def lock_code(username = None):
     print(f"{INFO} lock_code: locking code for user {username}")
     with open(LOCK_FILE, 'r') as file:

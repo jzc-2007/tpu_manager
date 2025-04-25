@@ -1,6 +1,5 @@
 .xiboconfig
-data.json
-lock.json
+*.json
 config.sh
 test*
 **__pycache__**

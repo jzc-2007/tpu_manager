@@ -1,10 +1,8 @@
 import os, re, time, json, copy
-from .helpers import is_integer, DATA_PATH
+from .helpers import *
 from . import users
 from .data_io import read_and_lock_data, write_and_unlock_data, release_lock_data, read_data
 from .operate import check_tpu_status, apply_pre, kill_jobs_tpu, get_zone_pre
-RED, GREEN, YELLOW, PURPLE, NC = "\033[1;31m", "\033[1;32m", "\033[1;33m", "\033[1;34m", "\033[0m"
-GOOD, INFO, WARNING, FAIL = f"{GREEN}[GOOD]{NC}", f"{PURPLE}[INFO]{NC}", f"{YELLOW}[WARNING]{NC}", f"{RED}[FAIL]{NC}"
 RULE_DICT ={
     'pre':{
         'preempted': 'reapply',
@@ -151,6 +149,18 @@ def resume_rerun_job(job, new_tpu = None, load_ckpt = True):
         # make sure that the tpu is ready
         if tpu is not None:
             tpu_status = check_tpu_status(tpu)
+            if tpu_status == 'PREEMPTED':
+                print(f"{WARNING} {operation}_job: TPU {tpu} is preempted, trying to reapply...")
+                res = apply_pre(tpu, delete=True)
+                if res == 'success':
+                    print(f"{GOOD} {operation}_job: Reapply TPU {tpu} done")
+                else:
+                    print(f"{FAIL} {operation}_job: Reapply TPU {tpu} failed, please contact the admin")
+                    release_lock_data()
+                    return
+            elif tpu_status == 'failed':
+                print(f"{FAIL} {operation}_job: Failed to query status")
+                print(f"{FAIL} {operation}_job: This may indicate that this TPU is deleted, please contact the admin")
             assert tpu_status == 'READY', f"TPU {tpu} is not ready, status: {tpu_status}"
 
         # kill the old job
@@ -389,7 +399,7 @@ def run(user_obj, args):
         write_and_unlock_data(data)
 
     except BaseException as e:
-        print(f"{RED}[Error] {NC} run: Failed to create job in tmux window")
+        print(f"{FAIL} run: Failed to create job in tmux window")
         print(f"Error: {e}")
         release_lock_data()
 

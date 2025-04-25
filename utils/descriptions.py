@@ -1,5 +1,5 @@
-RED, GREEN, YELLOW, PURPLE, NC = "\033[1;31m", "\033[1;32m", "\033[1;33m", "\033[1;34m", "\033[0m"
-GOOD, INFO, WARNING, FAIL = f"{GREEN}[GOOD]{NC}", f"{PURPLE}[INFO]{NC}", f"{YELLOW}[WARNING]{NC}", f"{RED}[FAIL]{NC}"
+from .helpers import *
+
 def explain(cmd):
     print(f"{INFO} Help for command: {cmd}")
     
@@ -7,54 +7,54 @@ def explain(cmd):
         # ========== Core Job Commands ==========
         case 'run':
             print("Run a job in the specified working directory on a TPU.")
-            print("Usage: tpu run <tpu> dir=<dir_num> user=<name_or_id> [tag=<tag>] [config1=val1 ...]")
+            print("Usage: tpu run <tpu> dir=<dir_num> user=<username> [tag=<tag>] [config1=val1 ...]")
 
         case 'monitor':
             print("Continuously monitor the jobs of a user.")
-            print("Usage: tpu monitor user=<name_or_id>")
+            print("Usage: tpu monitor user=<username>")
 
         case 'check':
             print("Check the status of all tmux windows and jobs of a user.")
-            print("Usage: tpu check user=<name_or_id>")
+            print("Usage: tpu check user=<username>")
 
         # ========== Directory Management ==========
         case 'set-dir':
             print("Manually set a working directory to a specific number.")
-            print("Usage: tpu set-dir <abs_path> <number> user=<name_or_id>")
+            print("Usage: tpu set-dir <abs_path> <number> user=<username>")
 
         case 'set-cur':
             print("Set the current directory (current pwd) to <number> in user's directory map.")
-            print("Usage: tpu set-cur <number> user=<name_or_id>")
+            print("Usage: tpu set-cur <number> user=<username>")
 
         case 'get-dir':
             print("Get the path of the <number>th working directory of the user.")
-            print("Usage: tpu get-dir <number> user=<name_or_id>")
+            print("Usage: tpu get-dir <number> user=<username>")
 
         case 'ls' | 'list-dir':
             print("List all working directories of the user.")
-            print("Usage: tpu ls user=<name_or_id>")
+            print("Usage: tpu ls user=<username>")
 
         # ========== Config Alias ==========
         case 'add-config-alias' | '-a' | '-alias':
             print("Add a config alias for the user (e.g., lr -> config.train.lr).")
-            print("Usage: tpu -a <alias> <full_config_key> user=<name_or_id>")
+            print("Usage: tpu -a <alias> <full_config_key> user=<username>")
 
         case 'show-config-alias' | '-sa':
             print("Show all config aliases of the user.")
-            print("Usage: tpu -sa user=<name_or_id>")
+            print("Usage: tpu -sa user=<username>")
 
         case 'del-config-alias':
             print("Delete a config alias from the user.")
-            print("Usage: tpu del-config-alias <alias> user=<name_or_id>")
+            print("Usage: tpu del-config-alias <alias> user=<username>")
 
         # ========== Job Metadata ==========
         case 'add-tag':
             print("Add a tag to a job window for easier tracking.")
-            print("Usage: tpu add-tag <window_id> <tag> user=<name_or_id>")
+            print("Usage: tpu add-tag <window_id> <tag> user=<username>")
 
         case 'kill-window' | '-kw':
             print("Kill a specific tmux window of the user.")
-            print("Usage: tpu -kw <window_id> user=<name_or_id>")
+            print("Usage: tpu -kw <window_id> user=<username>")
 
         case 'upd-log':
             print("Update the log_dir, tpu, and start_time of a running job.")
@@ -67,11 +67,11 @@ def explain(cmd):
         # ========== User Settings ==========
         case 'get-settings':
             print("Get all user-level settings.")
-            print("Usage: tpu get-settings user=<name_or_id>")
+            print("Usage: tpu get-settings user=<username>")
 
         case 'set-settings':
             print("Set a user-level setting.")
-            print("Usage: tpu set-settings <key> <value> user=<name_or_id>")
+            print("Usage: tpu set-settings <key> <value> user=<username>")
 
         # ========== User Management ==========
         case 'add-user':
@@ -98,27 +98,27 @@ def explain(cmd):
         # ========== System Maintenance ==========
         case 'clear-finished':
             print("Clear all finished jobs from the user's job list.")
-            print("Usage: tpu clear-finished user=<name_or_id>")
+            print("Usage: tpu clear-finished user=<username>")
 
         case 'clear-error':
             print("Clear all error/killed jobs from the user's job list.")
-            print("Usage: tpu clear-error user=<name_or_id>")
+            print("Usage: tpu clear-error user=<username>")
 
         case 'clear' | 'clear-all':
             print("Clear all finished and error jobs.")
-            print("Usage: tpu clear user=<name_or_id>")
+            print("Usage: tpu clear user=<username>")
 
         case '-czw':
             print("Clear zombie tmux windows (no corresponding job data).")
-            print("Usage: tpu -czw user=<name_or_id>")
+            print("Usage: tpu -czw user=<username>")
 
         case '-czj':
             print("Clear zombie jobs (job entries with no tmux window).")
-            print("Usage: tpu -czj user=<name_or_id>")
+            print("Usage: tpu -czj user=<username>")
 
         case 'clean':
             print("Clear all job states and zombie windows.")
-            print("Usage: tpu clean user=<name_or_id>")
+            print("Usage: tpu clean user=<username>")
 
         # ========== TPU Environment ==========
         case 'check-status' | '-cktpu':
@@ -173,24 +173,25 @@ def explain(cmd):
 def tldr():
     Usage = f"""
 {YELLOW}== Core Job Commands =={NC}
-- `tpu run <tpu> dir=<n> [tag=<tag>] [key=value ...]`: Run a job in the specified directory on a TPU.
-e.g. `tpu run v2-32-6 dir=1 tag=baseline lr=3e-4`
-- `tpu monitor/check user=<name_or_id>`: Continuously(one-time) monitor jobs for a user.
-- `tpu resume window=<window_id> [tpu=<tpu>] user=<name_or_id>`: Resume a job in a tmux window.
+- `tpu run <tpu> [dir=1] [tag=<tag>] [key=value ...] [rule=<rule>]`: Run a job in the specified directory on a TPU.
+e.g. `tpu run v2-32-6 dir=2 tag=baseline lr=3e-4 rule=resume`
+- `tpu monitor/check user=<username>`: Continuously(one-time) monitor jobs for a user.
+- `tpu resume window=<window_id> [tpu=<tpu>] user=<username>`: Resume a job in a tmux window.
 {YELLOW}== Directory Management =={NC}
-- `tpu ls user=<name_or_id>` or `tpu list-dir user=<name_or_id>`: List all working directories.
-- `tpu set-cur <n> user=<name_or_id>`: Set current working directory (pwd) to slot `<n>`.
+- `tpu ls user=<username>` or `tpu list-dir user=<username>`: List all working directories.
+- `tpu set-cur <n> user=<usernamed>`: Set current working directory (pwd) to slot `<n>`.
 {YELLOW}== Config Aliases =={NC}
-- `tpu -a <alias> <full_config_key> user=<name_or_id>`: Add a config alias. 
+- `tpu -a <alias> <full_config_key> user=<username>`: Add a config alias. 
 e.g. `tpu -a lr config.training.learning_rate`
-- `tpu -sa user=<name_or_id>`: Show all config aliases.
+- `tpu -sa user=<username>`: Show all config aliases.
 {YELLOW}== Job Controls =={NC}
-- `tpu add-tag <window_id> <tag> user=<name_or_id>`: Add a tag to a job.
+- `tpu add-tag <window_id> <tag> user=<username>`: Add a tag to a job.
 {YELLOW}== TPU Management =={NC}
 - `tpu -dtpu <tpu>`: Describe TPU with environment info.
 - `tpu solve <tpu>`: Fix common environment errors automatically.
+- `tpu -lta`: List all TPU aliases.
 {YELLOW}== Cleanup Commands =={NC}
-- `tpu clear-all/clear user=<name_or_id>`: Clear finished + error jobs.
+- `tpu clean user=<username>`: Clear finished + error jobs.
 {YELLOW}== Info & Help =={NC}
 - `tpu help/-h <command>`: Show usage for a specific command.
 - `tpu tldr`: Show this summary.

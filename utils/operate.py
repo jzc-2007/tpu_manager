@@ -1,9 +1,8 @@
 import os, random, time
 import subprocess
 from .data_io import read_and_lock_data, write_and_unlock_data, release_lock_data, read_data
-RED, GREEN, YELLOW, PURPLE, NC = "\033[1;31m", "\033[1;32m", "\033[1;33m", "\033[1;34m", "\033[0m"
-GOOD, INFO, WARNING, FAIL = f"{GREEN}[GOOD]{NC}", f"{PURPLE}[INFO]{NC}", f"{YELLOW}[WARNING]{NC}", f"{RED}[FAIL]{NC}"
-OPERATE_PATH = "/home/jzc/zhichengjiang/working/xibo_tpu_manager"
+from .helpers import *
+
 def get_zone_pre(tpu):
     """
     Get the zone of the TPU, and check if it is preemptible.
