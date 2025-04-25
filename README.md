@@ -235,7 +235,7 @@ tpu check-rules
 </details>
 
 <details>
-<summary> <strong>Customized Settings </strong></summary>
+<summary> <strong>Customizing User Settings </strong></summary>
 
 We support customizing settings for users, and you can set/get them by:
 
