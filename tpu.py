@@ -60,7 +60,7 @@ if __name__ == '__main__':
         ############### JOBS that don't require a user ###############
         if cmd == 'tldr': desc.tldr()
         elif cmd == 'change-ip': handler.change_ip()
-        elif cmd == 'upd-log': jobs.upd_log(args[2], args[3], args[4], args[5]) #windows, log_dir, ka, time
+        elif cmd == 'upd-log': jobs.upd_log(args[2], args[3], args[4], args[5], args[6]) #windows, log_dir, stage_dir, ka, time
         elif cmd == 'finish-job': jobs.finish_job(args[2])
         elif cmd == 'help' or cmd == '-h': desc.explain(args[2])
         elif cmd == 'add-tpu-alias' or cmd == '-ta': logger.add_tpu_alias(args[2], args[3])
@@ -106,7 +106,7 @@ if __name__ == '__main__':
             elif cmd == 'set-dir': dirs.set_dir(user_object, args[2:])
             elif cmd == 'get-settings': logger.get_settings(user_object)
             elif cmd == 'set-settings': logger.set_settings(user_object, args[2:])
-            elif cmd == 'reset-user-settings': users.reset_settings(user_object)
+            elif cmd == 'reset-settings': users.reset_settings(user_object)
             elif cmd == 'get-dir': print(dirs.get_dir(user_object, args[2]))
             elif cmd == 'check': jobs.check_jobs(user_object, args[2:])
             elif cmd == 'monitor': jobs.monitor_jobs(user_object, args[2:])

@@ -40,7 +40,7 @@ def add_tpu_alias(alias, name):
         print(f"{FAIL} Failed to add tpu alias")
         release_lock_data()
 
-def get_settings(user_object, args):
+def get_settings(user_object):
     for key, value in user_object.settings.items():
         print(f"{key}: {value}")
 

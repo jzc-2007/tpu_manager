@@ -233,6 +233,38 @@ tpu check-rules
 ```
 
 </details>
+
+<details>
+<summary> <strong>Customized Settings </strong></summary>
+
+We support customizing settings for users, and you can set/get them by:
+
+```bash
+tpu set-settings key value username # set the settings
+tpu get-settings username # get the settings
+tpu reset-settings username # reset the all the settings
+```
+
+The current default settings and their meanings are:
+
+```bash
+{
+    "monitor_after_run": True, # Whether to monitor the job after running
+    "monitor_upd_time": 5, # The update time for the monitor window
+    "monitor_length": 500, # The output capturing length for the monitor window to determine the job status
+    "monitor_dir": True, # Whether to show the working directory in the monitor window
+    "monitor_tpu": True, # Whether to show the TPU name in the monitor window
+    "monitor_verbose": False, # Whether to show the output in the monitor window when the status is known
+    "show_length": 200, # The output capturing length for the monitor window to show the job status
+    "time_zone": "us", # The user timezone, only support 'us'(UTC-4)/'cn'(UTC+8) for now.
+    "extra_settings": {} # The extra settings for future development
+}
+```
+
+</details>
+
+
+
 <details>
 <summary> <strong>Documentation </strong></summary>
 
@@ -289,6 +321,8 @@ The structure of `data.json` is as follows:
                 "monitor_upd_time": 5,
                 "monitor_length": 800,
                 "monitor_verbose": false,
+                "monitor_dir": true,
+                "monitor_tpu": true,
                 "show_length": 300,
                 "time_zone": "us"
             },
@@ -360,6 +394,7 @@ Each job is described as:
 ## Future Work
 
 - [ ] More testing/docs
+- [ ] Support restarting TPU
 - [ ] Customized monitor window
 - [ ] Support to read the spreadsheet, then we can auto-choose the TPU to run a job  
 - [ ] More auto env solvers  

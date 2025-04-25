@@ -482,7 +482,10 @@ def check_jobs(user_obj, args):
                 print(f"Window {window_id} (tag: {job_data['job_tags']}, rerun/resume: Window {father_job}, stage {job_data['stage']+1})")
             else:
                 print(f"Window {window_id} (tag: {job_data['job_tags']})")
-            print(f"DIR: {job_data['job_dir'].split('/')[-1]}\nTPU: {job_data['tpu']}")
+            if user_obj.settings.get("monitor_dir", False):
+                print(f"DIR: {job_data['job_dir'].split('/')[-1]}")
+            if user_obj.settings.get("monitor_tpu", False):
+                print(f"TPU: {job_data['tpu']}")
         # Get the window last line
         last_line = os.popen(f"tmux capture-pane -t {session_name}:{window_id} -p").read()
         # remove all the empty spaces in the end
@@ -515,7 +518,7 @@ def check_jobs(user_obj, args):
                 except Exception as e:
                     print(f"{RED}Failed to get child window id{NC}")
                     child = None
-                print(f"Status: {YELLOW}{job_data['status']}({job_data['error']}){NC} in window {child}")
+                print(f"Status: {YELLOW}{job_data['error']}{NC} ({job_data['status']} in window {child})")
                 if monitor_verbose:
                     print(f"msg: {msg}")
                 print('-'*40)

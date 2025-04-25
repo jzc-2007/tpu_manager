@@ -22,11 +22,14 @@ class User():
         self.logs = []
         self.settings = {
             "monitor_after_run": True,
-            "monitor_upd_time": 10,
-            "monitor_length": 500,
+            "monitor_upd_time": 5,
+            "monitor_length": 500,                
+            "monitor_dir": True,
+            "monitor_tpu": True,
             "monitor_verbose": False,
             "show_length": 200,
-            "time_zone": "us"
+            "time_zone": "us",
+            "extra_settings": {}
         }
     def to_dict(self):
         return {
@@ -59,13 +62,16 @@ def user_from_dict(config_dict):
     user.job_data = config_dict.get('job_data', [])
     user.working_dir = config_dict.get('working_dir', {})
     user.settings = config_dict.get('settings', {
-        "monitor_after_run": True,
-        "monitor_upd_time": 5,
-        "monitor_length": 500,
-        "monitor_verbose": False,
-        "show_length": 200,
-        "time_zone": "us"
-    })
+            "monitor_after_run": True,
+            "monitor_upd_time": 10,
+            "monitor_length": 500,                
+            "monitor_dir": True,
+            "monitor_tpu": True,
+            "monitor_verbose": False,
+            "show_length": 200,
+            "time_zone": "us",
+            "extra_settings": {}
+        })
 
 
     return user
@@ -151,6 +157,8 @@ def reset_settings(user_obj):
         print(f"{FAIL} reset_settings: User {username} not found")
         return
     for key, value in user_data['settings'].items():
+        if key == 'extra_settings':
+            continue
         new_value = input(f"Enter new value for {key} (current: {value}), empty to keep current value:")
         if new_value == '':
             continue
