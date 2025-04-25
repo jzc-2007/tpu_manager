@@ -163,13 +163,13 @@ tpu run v2-32-6 xibo config.training.learning_rate=0.01 # This is also supported
 <summary> <strong>Some default aliases </strong></summary>
 
 ```bash
-    "lr": "config.training.learning_rate"
-    "bs": "config.training.batch_size"
-    "ep": "config.training.num_epochs"
-    "wd": "config.training.weight_decay"
-    "b1": "config.training.adam_b1"
-    "b2": "config.training.adam_b2"
-    "ckpt": "config.training.checkpoint_per_epoch"
+"lr": "config.training.learning_rate"
+"bs": "config.training.batch_size"
+"ep": "config.training.num_epochs"
+"wd": "config.training.weight_decay"
+"b1": "config.training.adam_b1"
+"b2": "config.training.adam_b2"
+"ckpt": "config.training.checkpoint_per_epoch"
 ```
 
 </details>
