@@ -408,6 +408,67 @@ def mount_disk(tpu, quiet = False):
         print(f"state: {state}")
         print("Unexpected error, please check the TPU manually, or contact the admin")
         return 'failed'
+    
+def restart(tpu):
+    zone, pre, tpu = get_zone_pre(tpu)
+
+    def run_cmd(cmd, timeout=None):
+        try:
+            result = subprocess.run(
+                cmd,
+                shell=True,
+                timeout=timeout,
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+            )
+            return 0
+        except subprocess.CalledProcessError as e:
+            print(f"[ERROR] Command failed with return code {e.returncode}")
+            print(e.stdout)
+            raise
+        except subprocess.TimeoutExpired as e:
+            print(f"[ERROR] Command timed out after {timeout} seconds")
+            print(e.stdout)
+            raise
+
+    print(f"{INFO} Rebooting {tpu}...")
+
+    reboot_cmd = (
+        f'gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} '
+        '--worker=all --command "sudo reboot" '
+        '--ssh-flag="-o ConnectionAttempts=1" --ssh-flag="-o ConnectTimeout=5"'
+    )
+    run_cmd(reboot_cmd, timeout=20)
+
+    print(f"{INFO} Restart command sent. Sleeping for 5 minutes...")
+    time.sleep(300)
+
+    print(f"{INFO} Checking if VM is ready...")
+    while True:
+        check_cmd = (
+            f'gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} '
+            '--worker=all --command "ls"'
+        )
+        try:
+            run_cmd(check_cmd, timeout=20)
+            break 
+        except Exception:
+            print(f"{INFO} VM not ready yet, sleeping 60s...")
+            time.sleep(60)
+
+    print(f"{GOOD} VM is ready! Doing mounting...")
+
+    try:
+        mount_disk(tpu)
+        print(f"{GOOD} Mounting done!")
+    except Exception as e:
+        print(f"{FAIL} Mounting failed: {e}")
+        return 'mount failed'
+    
+    print(f"{GOOD} Restart done!")
+
 
     
     

@@ -71,9 +71,9 @@ def read_and_lock_data():
             break
         else:
             time.sleep(10)
-        if num_ack > 120:
-            print(f"{FAIL} read_and_lock_data: Lock not released after 20 mins, this may indicate a deadlock. Please check the lock file and release it manually.")
-            raise Exception("Lock not released after 20 mins, this may indicate a deadlock. Please check the lock file and release it manually.")
+        if num_ack > 60:
+            print(f"{FAIL} read_and_lock_data: Lock not released after 10 mins, this may indicate a deadlock. Please check the lock file and release it manually.")
+            raise Exception("Lock not released after 10 mins, this may indicate a deadlock. Please check the lock file and release it manually.")
     with open(DATA_PATH, 'r') as file:
         data = json.load(file)
     return data

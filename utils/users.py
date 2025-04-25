@@ -23,7 +23,7 @@ class User():
         self.settings = {
             "monitor_after_run": True,
             "monitor_upd_time": 5,
-            "monitor_length": 500,                
+            "monitor_length": 800,                
             "monitor_dir": True,
             "monitor_tpu": True,
             "monitor_verbose": False,

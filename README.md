@@ -105,7 +105,7 @@ The `tpu run` command opens a monitor window to track all your jobs. Alternative
 tpu monitor username
 ```
 
-This updates every 10 seconds. For a one-time check, use:
+This updates every 10 seconds. For one-time checks, use:
 
 ```bash
 tpu check username
@@ -251,11 +251,11 @@ The current default settings and their meanings are:
 {
     "monitor_after_run": True, # Whether to monitor the job after running
     "monitor_upd_time": 5, # The update time for the monitor window
-    "monitor_length": 500, # The output capturing length for the monitor window to determine the job status
+    "monitor_length": 800, # The output capturing length for the monitor window to determine the job status
     "monitor_dir": True, # Whether to show the working directory in the monitor window
     "monitor_tpu": True, # Whether to show the TPU name in the monitor window
     "monitor_verbose": False, # Whether to show the output in the monitor window when the status is known
-    "show_length": 200, # The output capturing length for the monitor window to show the job status
+    "show_length": 200, # The output capturing length for the monitor window to show the job output
     "time_zone": "us", # The user timezone, only support 'us'(UTC-4)/'cn'(UTC+8) for now.
     "extra_settings": {} # The extra settings for future development
 }

@@ -191,6 +191,9 @@ def resume_rerun_job(job, new_tpu = None, load_ckpt = True):
         release_lock_data()
 
 def kill_job(user_obj, args):
+    """
+    Kill a job in the tmux session with specified window id. Need to acquire the lock.
+    """
     windows_id = None
     for arg in args:
         if arg.startswith('window=') or arg.startswith('-w='):
@@ -222,153 +225,152 @@ def kill_job(user_obj, args):
         release_lock_data()
 
 def run(user_obj, args):
-    data = read_and_lock_data()
+    data = read_data()
     user_obj = users.user_from_dict(data['users'][user_obj.name])
-    try:
-        dir = '1'
-        for arg in args:
-            if arg.startswith('dir='):
-                dir = arg.split('=')[1]
-                break
-        dir_path = user_obj.working_dir[dir]
-        if not os.path.exists(dir_path):
-            raise ValueError(f"Directory {dir_path} does not exist")
-        # Get the tpu name
-        tpu = None
-        for arg in args:
-            if arg in data['tpu_aliases']:
-                tpu = data['tpu_aliases'][arg]
-                print(f"Using tpu {tpu}")
-                break
-        if tpu is None:
-            print('No TPU Specified, use the TPU in ka.sh instead')
+    dir = '1'
+    for arg in args:
+        if arg.startswith('dir='):
+            dir = arg.split('=')[1]
+            break
+    dir_path = user_obj.working_dir[dir]
+    if not os.path.exists(dir_path):
+        raise ValueError(f"Directory {dir_path} does not exist")
+    # Get the tpu name
+    tpu = None
+    for arg in args:
+        if arg in data['tpu_aliases']:
+            tpu = data['tpu_aliases'][arg]
+            print(f"Using tpu {tpu}")
+            break
+    if tpu is None:
+        print('No TPU Specified, use the TPU in ka.sh instead')
 
-        # Check the status of the TPU
-        if tpu is not None:
-            print(f"{INFO} Checking the status of TPU {tpu}...")
-            tpu_status = check_tpu_status(tpu)
+    # Check the status of the TPU
+    if tpu is not None:
+        print(f"{INFO} Checking the status of TPU {tpu}...")
+        tpu_status = check_tpu_status(tpu)
 
-            if tpu_status == 'preempted':
-                print(f"{WARNING} TPU {tpu} is preempted")
-                REAPPLY = False
-                if '-apply' in args:
+        if tpu_status == 'preempted':
+            print(f"{WARNING} TPU {tpu} is preempted")
+            REAPPLY = False
+            if '-apply' in args:
+                print(f"{INFO} Re-applying preempted TPU {tpu}...")
+                REAPPLY = True
+            else:
+                print(f"DO YOU WANT TO REAPPLY? (y/n)")
+                res = input()
+                if res == 'y' or res == 'Y':
                     print(f"{INFO} Re-applying preempted TPU {tpu}...")
                     REAPPLY = True
                 else:
-                    print(f"DO YOU WANT TO REAPPLY? (y/n)")
-                    res = input()
-                    if res == 'y' or res == 'Y':
-                        print(f"{INFO} Re-applying preempted TPU {tpu}...")
-                        REAPPLY = True
-                    else:
-                        print(f"{INFO} Quiting... {tpu}")
-                        REAPPLY = False
-                if not REAPPLY:
-                    release_lock_data()
-                    return
-                else:
-                    try:
-                        apply_pre(tpu, delete=True)
-                    except Exception as e:
-                        print(f"{FAIL} Failed to reapply TPU {tpu}: {e}")
-                        release_lock_data()
-                        return
-                    print(f"{GOOD} Re-applying TPU {tpu} successfully")
-
-            elif tpu_status == 'ready':
-                print(f"{GOOD} TPU {tpu} is ready, starting job...")
-
-            elif tpu_status == 'failed':
-                print(f"{WARNING} Failed to query status")
-                print(f"This may indicate that this TPU is deleted, do you want to apply? (y/n)")
-                res = input()
-                if res == 'y' or res == 'Y':
-                    print(f"{INFO} Re-applying TPU {tpu}...")
-                    try:
-                        apply_pre(tpu, delete=False)
-                    except Exception as e:
-                        print(f"{FAIL} Failed to reapply TPU {tpu}: {e}")
-                        release_lock_data()
-                        return
-                    print(f"{GOOD} Applying TPU {tpu} successfully")
-                else:
                     print(f"{INFO} Quiting... {tpu}")
-                    release_lock_data()
-
-            elif tpu_status == 'restarting' or tpu_status == 'creating' or tpu_status == 'stopping':
-                print(f"{WARNING} TPU {tpu} is {tpu_status.lower()}")
-                print(f"{INFO} Quiting... {tpu}")
-                release_lock_data()
+                    REAPPLY = False
+            if not REAPPLY:
                 return
-
             else:
-                print(f"{WARNING} TPU {tpu} is in unknown state {tpu_status}")
+                try:
+                    apply_pre(tpu, delete=True)
+                except Exception as e:
+                    print(f"{FAIL} Failed to reapply TPU {tpu}: {e}")
+                    return
+                except KeyboardInterrupt:
+                    print(f"{INFO} Stopping reapply...")
+                    return
+                print(f"{GOOD} Re-applying TPU {tpu} successfully")
+
+        elif tpu_status == 'ready':
+            print(f"{GOOD} TPU {tpu} is ready, starting job...")
+
+        elif tpu_status == 'failed':
+            print(f"{WARNING} Failed to query status")
+            print(f"This may indicate that this TPU is deleted, do you want to apply? (y/n)")
+            res = input()
+            if res == 'y' or res == 'Y':
+                print(f"{INFO} Re-applying TPU {tpu}...")
+                try:
+                    apply_pre(tpu, delete=False)
+                except Exception as e:
+                    print(f"{FAIL} Failed to reapply TPU {tpu}: {e}")
+                    return
+                except KeyboardInterrupt:
+                    print(f"{INFO} Stopping reapply...")
+                    return
+                print(f"{GOOD} Applying TPU {tpu} successfully")
+            else:
                 print(f"{INFO} Quiting... {tpu}")
-                release_lock_data()
                 return
 
+        elif tpu_status == 'restarting' or tpu_status == 'creating' or tpu_status == 'stopping':
+            print(f"{WARNING} TPU {tpu} is {tpu_status.lower()}")
+            print(f"{INFO} Quiting... {tpu}")
+            return
+
+        else:
+            print(f"{WARNING} TPU {tpu} is in unknown state {tpu_status}")
+            print(f"{INFO} Quiting... {tpu}")
+            return
 
 
+    # Check if there is job running using this tpu
+    if tpu is not None:
+        for user in data['users']:
+            for job in data['users'][user]['job_data']:
+                if job['tpu'] == tpu and job['status'] == 'running':
+                    print(f"{WARNING} There is a job running using tpu {tpu}, by user {user}")
+                    print(f"DO YOU WANT TO CONTINUE? (y/n)")
+                    res = input()
+                    if res != 'y' and res != 'Y':
+                        print("Exiting...")
+                        return
+                    # change the status of this job to 'killed'
+                    job['status'] = 'killed'
 
-        # Check if there is job running using this tpu
-        if tpu is not None:
-            for user in data['users']:
-                for job in data['users'][user]['job_data']:
-                    if job['tpu'] == tpu and job['status'] == 'running':
-                        print(f"{WARNING} There is a job running using tpu {tpu}, by user {user}")
-                        print(f"DO YOU WANT TO CONTINUE? (y/n)")
-                        res = input()
-                        if res != 'y' and res != 'Y':
-                            print("Exiting...")
-                            release_lock_data()
-                            return
-                        # change the status of this job to 'killed'
-                        job['status'] = 'killed'
+    config_args = ""
+    tag, rule = None, None
+    preemptible = tpu in data['all_tpus']['preemptible']
+    monitor = True
+    ignore_keys = ['dir', 'user', 'id', 'tag', 'rule', 'monitor']
+    customized_settings = {}
 
-        config_args = ""
-        tag, rule = None, None
-        preemptible = tpu in data['all_tpus']['preemptible']
-        monitor = True
-        ignore_keys = ['dir', 'user', 'id', 'tag', 'rule', 'monitor']
-        customized_settings = {}
-        if "--log-stage" in args:
-            customized_settings['log_stage'] = True
-        for arg in args:
-            #check if contains '='
-            if '=' in arg:
-                key, value = arg.split('=')
-                if key not in ignore_keys:
-                    if key in user_obj.config_aliases:
-                        config_args += f" --{user_obj.config_aliases[key]}={value}"
-                    else:
-                        assert key.startswith('config'), f"Unknown config key {key}"
-                        config_args += f" --{key}={value}"
-                if key == 'tag':
-                    tag = value
-                if key == 'rule':
-                    rule = value
-                if key == 'monitor':
-                    if value == 'False' or value == '0' or value == 'false':
-                        monitor = False
-                    elif value == 'True' or value == '1' or value == 'true':
-                        monitor = True
-                    else:
-                        raise ValueError(f"Value {value} is not a valid boolean")
-        if rule is None:
-            rule = 'pass' if not preemptible else 'pre'
-        if rule not in RULE_DICT:
-            print(f"Rule {rule} is not valid.")
-            rule = 'pass' if not preemptible else 'pre'
-            print(f"Using rule {rule} instead")
+    if "--log-stage" in args:
+        customized_settings['log_stage'] = True
+
+    for arg in args:
+        #check if contains '='
+        if '=' in arg:
+            key, value = arg.split('=')
+            if key not in ignore_keys:
+                if key in user_obj.config_aliases:
+                    config_args += f" --{user_obj.config_aliases[key]}={value}"
+                else:
+                    assert key.startswith('config'), f"Unknown config key {key}"
+                    config_args += f" --{key}={value}"
+            if key == 'tag':
+                tag = value
+            if key == 'rule':
+                rule = value
+            if key == 'monitor':
+                if value == 'False' or value == '0' or value == 'false':
+                    monitor = False
+                elif value == 'True' or value == '1' or value == 'true':
+                    monitor = True
+                else:
+                    raise ValueError(f"Value {value} is not a valid boolean")
+    if rule is None:
+        rule = 'pass' if not preemptible else 'pre'
+    if rule not in RULE_DICT:
+        print(f"Rule {rule} is not valid.")
+        rule = 'pass' if not preemptible else 'pre'
+        print(f"Using rule {rule} instead")
         
+    try:
+        data = read_and_lock_data()
 
-        # kill all the windows that uses the same tpu
         session_name = user_obj.tmux_name
-        all_jobs = user_obj.job_data
 
-        id = user_obj.windows_offset
+        id = data['users'][user_obj.name]['windows_offset']
         data['users'][user_obj.name]['windows_offset'] = id + 1
-        all_jobs.append({
+        data['users'][user_obj.name]['job_data'].append({
             'user': user_obj.name,
             'windows_id': id,
             'job_dir_id': dir,
@@ -386,7 +388,6 @@ def run(user_obj, args):
             'extra_msgs': {},
             'customized_settings': customized_settings
         })
-        data['users'][user_obj.name]['job_data'] = all_jobs
 
         kill_jobs_tpu(tpu)
         # make sure that the tpu is ready
@@ -406,6 +407,11 @@ def run(user_obj, args):
         print(f"{GOOD} run: Successfully created job in tmux window {session_name}:{id}")
 
         write_and_unlock_data(data)
+    
+    except KeyboardInterrupt:
+        print(f"\n{INFO} run: Stopping job creation...")
+        release_lock_data()
+        return
 
     except BaseException as e:
         print(f"{FAIL} run: Failed to create job in tmux window")
@@ -530,9 +536,12 @@ def check_jobs(user_obj, args):
                 print('-'*40)
                 continue
         if re.search(r'Job failed', last_line) or re.search(r'[eE]rror', last_line) or re.search(r'FAIL', last_line):
-            # change the job status to error
-            print(f"Status: {RED}Unknown Error{NC}")
-            print(f"msg: {msg}")
+            if re.search(r'Allocation type', last_line):
+                print(f"Status: {RED}OOM Error{NC}")
+                print(f"msg: {msg}")
+            else:
+                print(f"Status: {RED}Unknown Error{NC}")
+                print(f"msg: {msg}")
         elif re.search(r'[cC]ompiling', last_line) or re.search(r'[cC]ompilation', last_line)or re.search(r'[cC]ompile', last_line):
             print(f"Status: {GREEN}Compiling{NC}")
             if monitor_verbose:
@@ -639,6 +648,7 @@ def monitor_jobs(user_obj, args):
     except KeyboardInterrupt:
         print(f"\n{INFO} Stopping monitor...")
         return
+    
 
 
 def upd_log(window, log_dir, stage_dir, ka, start_time):
