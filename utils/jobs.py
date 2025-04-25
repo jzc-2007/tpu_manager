@@ -473,8 +473,7 @@ def check_jobs(user_obj, args):
             except Exception as e:
                 father_job = None
             if father_job is not None:
-                operation = 'resume' if job_data['status'] == 'resumed' else 'rerun'
-                print(f"Window {window_id} (tag: {job_data['job_tags']}, {operation}: Window {father_job}, stage {job_data['stage']+1})")
+                print(f"Window {window_id} (tag: {job_data['job_tags']}, rerun/resume: Window {father_job}, stage {job_data['stage']+1})")
             else:
                 print(f"Window {window_id} (tag: {job_data['job_tags']})")
             print(f"DIR: {job_data['job_dir'].split('/')[-1]}\nTPU: {job_data['tpu']}")
