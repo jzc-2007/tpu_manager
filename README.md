@@ -53,7 +53,7 @@ You can also add the flag `-apply` to skip the prompt.
 </details>
 
 <details>
-<summary> <strong>Kill Jobs/Windows </strong></summary>
+<summary> <strong>Killing Jobs/Windows </strong></summary>
 
 To kill a job, use:
 
@@ -69,7 +69,7 @@ tpu clean username # Kill all tmux windows whose jobs are finished/error/killed
 
 Jobs with child jobs that were rerun/resumed will be killed based on the status of their children.
 
-To kill a specific tmux window:
+To kill a specific tmux window (NOT RECOMMENDED):
 
 ```bash
 tpu -kw/kill-window window_number username
