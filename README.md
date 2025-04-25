@@ -309,6 +309,7 @@ Each job is described as:
     "tpu": "kmh-tpuvm-v2-32-preemptible-1",
     "job_tags": null,
     "log_dir": "/your/log/path",
+    "staage_dir": "/your/staging/path",
     "extra_configs": "--lr=0.01",
     "status": "running",
     "error": null,
@@ -319,7 +320,8 @@ Each job is described as:
         "grpc": "resume"
     },
     "extra_msgs": {},
-    "start_time": "20250420_011026"
+    "start_time": "20250420_011026",
+    "customized_settings": {}
 }
 ```
 

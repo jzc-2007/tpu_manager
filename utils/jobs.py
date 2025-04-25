@@ -126,6 +126,7 @@ def resume_rerun_job(job, new_tpu = None, load_ckpt = True):
             'rules': job["rules"],
             'error': None,
             'extra_msgs': job["extra_msgs"] | {"father": job["windows_id"]},
+            'customized_settings': job.get("customized_settings", {}),
         }
         if load_ckpt:
             assert job["log_dir"] is not None, f"Job {job['windows_id']} for user {user_obj.name} has no log dir"
@@ -173,6 +174,8 @@ def resume_rerun_job(job, new_tpu = None, load_ckpt = True):
         time.sleep(0.5)
         os.system(f"tmux send-keys -t {session_name}:{id} 'cd {stage_dir}' Enter")
         if load_ckpt:
+            if job.get("customized_settings", {}).get("log_stage", False):
+                os.system(f"tmux send-keys -t {session_name}:{id} 'source staging.sh ka={tpu} {config_args} --config.load_from={log_dir} --config.stage={new_stage}' Enter")
             os.system(f"tmux send-keys -t {session_name}:{id} 'source staging.sh ka={tpu} {config_args} --config.load_from={log_dir} ' Enter") 
         else:
             os.system(f"tmux send-keys -t {session_name}:{id} 'source staging.sh ka={tpu} {config_args}' Enter")
@@ -327,6 +330,9 @@ def run(user_obj, args):
         preemptible = tpu in data['all_tpus']['preemptible']
         monitor = True
         ignore_keys = ['dir', 'user', 'id', 'tag', 'rule', 'monitor']
+        customized_settings = {}
+        if "--log-stage" in args:
+            customized_settings['log_stage'] = True
         for arg in args:
             #check if contains '='
             if '=' in arg:
@@ -360,7 +366,6 @@ def run(user_obj, args):
         session_name = user_obj.tmux_name
         all_jobs = user_obj.job_data
 
-        # Find a minimum id not in use
         id = user_obj.windows_offset
         data['users'][user_obj.name]['windows_offset'] = id + 1
         all_jobs.append({
@@ -379,6 +384,7 @@ def run(user_obj, args):
             'monitor': monitor,
             'rules': copy.deepcopy(RULE_DICT[rule]),
             'extra_msgs': {},
+            'customized_settings': customized_settings
         })
         data['users'][user_obj.name]['job_data'] = all_jobs
 
