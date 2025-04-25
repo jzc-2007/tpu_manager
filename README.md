@@ -242,7 +242,7 @@ We support customizing settings for users, and you can set/get them by:
 ```bash
 tpu set-settings key value username # set the settings
 tpu get-settings username # get the settings
-tpu reset-settings username # reset the all the settings
+tpu reset-settings username # reset all the settings
 ```
 
 The current default settings and their meanings are:
