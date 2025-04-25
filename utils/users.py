@@ -9,7 +9,15 @@ class User():
         self.tmux_name = tmux_name if tmux_name else name
         self.working_dir = {}
         self.job_data = []
-        self.config_aliases = {}
+        self.config_aliases = {
+            "lr": "config.training.learning_rate",
+            "bs": "config.training.batch_size",
+            "ep": "config.training.num_epochs",
+            "wd": "config.training.weight_decay",
+            "b1": "config.training.adam_b1",
+            "b2": "config.training.adam_b2",
+            "ckpt": "config.training.checkpoint_per_epoch"
+        }
         self.windows_offset = 1
         self.logs = []
         self.settings = {

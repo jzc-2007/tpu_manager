@@ -141,7 +141,7 @@ We support passing configs on the command line, and you can also set your own co
 
 
 ```bash
-tpu -a/-alias your_alias FULL_NAME username # add a new alias
+tpu -a/-alias your_alias FULL_NAME username # add/change an alias
 tpu -sa username # list all the aliases
 tpu del-config-alias your_alias username # delete the alias
 ```
@@ -158,6 +158,21 @@ Then:
 tpu run v2-32-6 xibo lr=0.01
 tpu run v2-32-6 xibo config.training.learning_rate=0.01 # This is also supported
 ```
+
+<details>
+<summary> <strong>Some default aliases </strong></summary>
+
+```bash
+    "lr": "config.training.learning_rate"
+    "bs": "config.training.batch_size"
+    "ep": "config.training.num_epochs"
+    "wd": "config.training.weight_decay"
+    "b1": "config.training.adam_b1"
+    "b2": "config.training.adam_b2"
+    "ckpt": "config.training.checkpoint_per_epoch"
+```
+
+</details>
 
 You can add tags to the existing jobs (so that they will be shown in the monitor) by:
 
