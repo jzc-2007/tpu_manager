@@ -18,7 +18,7 @@ More usage in **two sentences**: Use ``tpu tldr`` to see useful commands, and ``
 <summary> <strong>Setup(<strong>IMPORTANT</strong>) </strong></summary>
 
 You should **update your scripts** to the newest version supporting command-line arguments. The newest scripts can be pulled from zhh's repo. The current finishing check is based on wandb final output, so please make sure your scripts are using wandb to log the final output.  
-Also, this script is not very robust to attack, so try not to do OOD things, for example, setting username to be `run`, `false` or Chinese characters.
+Also, this script is not very robust to attack, so please try **not to do OOD things**, for example, setting username to be `run`, `false`, `v2-32-2` or Chinese characters.
 
 Use ``tpu add-user`` and follow the instructions to add your username.
 
