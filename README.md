@@ -49,6 +49,8 @@ tpu run v2-32-p1 lyy dir=2 tag=bird # Run the job in working directory 2
 
 The `run` command will ask whether to reapply when the TPU is preempted.  
 You can also add the flag `-apply` to skip the prompt.
+If the TPU is preemptible, `tpu run` will **auto-resume** on GRPC errors and **auto-reapply and resume** when preempted. If the TPU is not preemptible, it will **do nothing** by default. If you want it to 
+resume after grpc, you can use `tpu run <tpu> <username> rule=resume` to set the rule. (See more in the **More Resuming/Rerunning Rules** section.)
 
 </details>
 
@@ -98,7 +100,6 @@ The `clean` command integrates these actions, so using `kill-job + clean` is str
 <details>
 <summary> <strong>Monitoring (<strong>IMPORTANT</strong>)</strong></summary>
 
-If the TPU is preemptible, `tpu run` will **auto-resume on GRPC errors** and **auto-reapply and resume** when preempted. You can also use `tpu resume <windows_id> username` to resume jobs.  
 The `tpu run` command opens a monitor window to track all your jobs. Alternatively, you can use:
 
 ```bash
@@ -110,6 +111,8 @@ This updates every 10 seconds. For one-time checks, use:
 ```bash
 tpu check username
 ```
+
+If you don't want `tpu run` to open the monitor window, you can use `tpu set-settings monitor_after_run False username` to disable it. See the **Customizing User Settings** section for more details.
 
 </details>
 

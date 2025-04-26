@@ -258,7 +258,7 @@ def describe_tpu(tpu, quiet = False):
         if not quiet:
             print(f"{INFO} describe_tpu: TPU {tpu} is {YELLOW}CREATING{NC}")
         return 'creating'
-    elif res == 'READY':
+    elif res == 'ready':
         if not quiet:
             print(f"{INFO} TPU {tpu} is {GREEN}READY{NC}")
             print(f"{INFO} Checking environment in TPU {tpu}...")
@@ -288,6 +288,18 @@ def describe_tpu(tpu, quiet = False):
                 print(f"{FAIL} describe_tpu: TPU {tpu} is getting unkown error, please contact the admin.")
                 print(f"state: {state}")
             return 'unknown'
+    elif res == 'failed':
+        if not quiet:
+            print(f"{FAIL} describe_tpu: Failed to query TPU state")
+        return 'failed'
+    elif res == 'timeout':
+        if not quiet:
+            print(f"{FAIL} describe_tpu: Timeout expired")
+        return 'timeout'
+    elif res == 'occupied':
+        if not quiet:
+            print(f"{FAIL} describe_tpu: TPU {tpu} is already in use")
+        return 'occupied'
 
 def check_env(tpu, quiet = False):
     """
@@ -412,27 +424,6 @@ def mount_disk(tpu, quiet = False):
 def restart(tpu):
     zone, pre, tpu = get_zone_pre(tpu)
 
-    def run_cmd(cmd, timeout=None):
-        try:
-            result = subprocess.run(
-                cmd,
-                shell=True,
-                timeout=timeout,
-                check=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-            )
-            return 0
-        except subprocess.CalledProcessError as e:
-            print(f"[ERROR] Command failed with return code {e.returncode}")
-            print(e.stdout)
-            raise
-        except subprocess.TimeoutExpired as e:
-            print(f"[ERROR] Command timed out after {timeout} seconds")
-            print(e.stdout)
-            raise
-
     print(f"{INFO} Rebooting {tpu}...")
 
     reboot_cmd = (
@@ -440,7 +431,8 @@ def restart(tpu):
         '--worker=all --command "sudo reboot" '
         '--ssh-flag="-o ConnectionAttempts=1" --ssh-flag="-o ConnectTimeout=5"'
     )
-    run_cmd(reboot_cmd, timeout=20)
+    subprocess.run(reboot_cmd, shell=True, timeout=300, check=True,
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     print(f"{INFO} Restart command sent. Sleeping for 5 minutes...")
     time.sleep(300)
@@ -452,7 +444,9 @@ def restart(tpu):
             '--worker=all --command "ls"'
         )
         try:
-            run_cmd(check_cmd, timeout=20)
+            subprocess.run(check_cmd, shell=True, timeout=300, check=True,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            print(f"{GOOD} VM is ready!")
             break 
         except Exception:
             print(f"{INFO} VM not ready yet, sleeping 60s...")

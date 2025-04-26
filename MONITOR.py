@@ -57,6 +57,8 @@ def check_job_status(job):
     for line in lines:
         if "GRPC error" in line:
             return 'grpc'
+        if "Could not open any log file" in line:
+            return 'locked'
     return None
 
 def reapply_worker(ka, result_queue):
@@ -88,6 +90,13 @@ def kill_rerun(job):
     print(f"{INFO} rerun job...")
     jobs.resume_rerun_job(job, load_ckpt=False)
 
+def restart_rerun(job):
+    ka = job["tpu"]
+    # print(f"{INFO} restart_rerun: Killing jobs  TPU {ka}...")
+    operate.restart(ka)
+    print(f"{INFO} rerun job...")
+    jobs.resume_rerun_job(job, load_ckpt=False)
+
 
 def reapply_resume(job, timeout=1800):
     ka = job["tpu"]
@@ -116,7 +125,7 @@ def reapply_resume(job, timeout=1800):
             add_MONITOR_log(f"{FAIL} reapply_resume: Reapply TPU {ka} failed, no result returned")
 
 def mainloop():
-    error_jobs = {'preempted': [], 'grpc': []}
+    error_jobs = {'preempted': [], 'grpc': [], 'locked': []}
     data = data_io.read_data()
     print(f"{INFO} mainloop: checking jobs")
     for user in data["user_list"]:
@@ -124,12 +133,12 @@ def mainloop():
             if job['status'] in ['finished', 'rerunned', 'resumed', 'killed'] or not job['monitor']:
                 continue
             status = job['error'] if job['status'] == 'error' else check_job_status(job)
-            if status == 'preempted':
-                error_jobs['preempted'].append(job)
-            elif status == 'grpc':
-                error_jobs['grpc'].append(job)
+            if status in error_jobs:
+                error_jobs[status].append(job)
 
-    print(f"{INFO} mainloop: found {len(error_jobs['preempted'])} preempted jobs and {len(error_jobs['grpc'])} grpc jobs")
+    print(f"{INFO} mainloop: found {len(error_jobs['preempted'])} preempted jobs, {len(error_jobs['grpc'])} grpc jobs, {len(error_jobs['locked'])} locked jobs")
+    if len(error_jobs['locked']) != 0:
+        add_MONITOR_log(f"{INFO} Found {len(error_jobs['locked'])} locked jobs, restart them")
     if len(error_jobs['preempted']) != 0:
         add_MONITOR_log(f"{INFO} Found {len(error_jobs['preempted'])} preempted jobs, reapply them")
     if len(error_jobs['grpc']) != 0:
@@ -155,14 +164,20 @@ def mainloop():
     for error_type in error_jobs:
         for job in error_jobs[error_type]:
             rule = job["rules"][error_type]
-            if rule == 'pass':
-                continue
-            elif rule == 'reapply':
-                reapply_resume(job, timeout=1800)
-            elif rule == 'resume':
-                kill_resume(job)
-            elif rule == 'rerun':
-                kill_rerun(job) 
+            try:
+                if rule == 'pass':
+                    continue
+                elif rule == 'reapply':
+                    reapply_resume(job, timeout=1800)
+                elif rule == 'resume':
+                    kill_resume(job)
+                elif rule == 'rerun':
+                    kill_rerun(job)
+                elif rule == 'restart':
+                    restart_rerun(job)
+            except:
+                print(f"{FAIL} mainloop: Failed to handle job {job['windows_id']} for user {user}, (error type {error_type}, rule {rule})")
+                add_MONITOR_log(f"{FAIL} mainloop: Failed to handle job {job['windows_id']} for user {user}, (error type {error_type}, rule {rule})")
     
 
 if __name__ == "__main__":

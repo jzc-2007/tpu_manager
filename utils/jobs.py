@@ -2,27 +2,32 @@ import os, re, time, json, copy
 from .helpers import *
 from . import users
 from .data_io import read_and_lock_data, write_and_unlock_data, release_lock_data, read_data
-from .operate import check_tpu_status, apply_pre, kill_jobs_tpu, get_zone_pre
+from .operate import check_tpu_status, apply_pre, kill_jobs_tpu, get_zone_pre, restart
 RULE_DICT ={
     'pre':{
         'preempted': 'reapply',
         'grpc': 'resume',
+        'locked': 'restart',
     },
     'pass':{
         'preempted': 'pass',
         'grpc': 'pass',
+        'locked': 'restart',
     },
     'reapply':{
         'preempted': 'reapply',
         'grpc': 'reapply',
+        'locked': 'restart',
     },
     'rerun':{
         'preempted': 'reapply',
         'grpc': 'rerun',
+        'locked': 'restart',
     },
     'resume':{
         'preempted': 'pass',
         'grpc': 'resume',
+        'locked': 'restart',
     }
 }
 
@@ -66,6 +71,7 @@ def resume(user_obj, args):
     else:
         print(f"{FAIL} resume: Job {windows_id} not found")
         return
+
 
 def rerun(user_obj, args):
     # Check if the window is in the job data, if it is, then rerun the job
@@ -224,6 +230,25 @@ def kill_job(user_obj, args):
         print(f"{FAIL} kill_job: Failed to kill job {windows_id} for user {user_obj.name}, error: {e}")
         release_lock_data()
 
+
+def restart_run(user_obj, args):
+    tpu = args[0]
+    zone, _, tpu = get_zone_pre(tpu)
+    if zone is None:
+        print(f"{FAIL} No zone found for tpu {tpu}")
+        return
+    try:
+        restart(tpu)
+    except Exception as e:
+        print(f"{FAIL} Failed to restart TPU {tpu}: {e}")
+        return
+    except KeyboardInterrupt:
+        print(f"{INFO} Stopping restart...")
+        return
+    print(f"{GOOD} Restarted TPU {tpu} successfully")
+    run(user_obj, args)
+        
+
 def run(user_obj, args):
     data = read_data()
     user_obj = users.user_from_dict(data['users'][user_obj.name])
@@ -240,7 +265,7 @@ def run(user_obj, args):
     for arg in args:
         if arg in data['tpu_aliases']:
             tpu = data['tpu_aliases'][arg]
-            print(f"Using tpu {tpu}")
+            print(f"{INFO} Using tpu {tpu}")
             break
     if tpu is None:
         print('No TPU Specified, use the TPU in ka.sh instead')
