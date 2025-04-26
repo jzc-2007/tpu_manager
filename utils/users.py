@@ -171,3 +171,18 @@ def reset_settings(user_obj):
         user_obj.settings[key] = new_value
         user_data['settings'][key] = new_value
         print(f"Set {key} to {new_value}")
+
+def reset_window_num(user_obj, args):
+    data = read_and_lock_data()
+    username = user_obj.name
+    print(f"{INFO} reset_window_num: Resetting window number for user {user_obj.name}")
+    # Find the corresponding user object in the data
+    user_data = data['users'].get(username)
+    if user_data is None:
+        print(f"{FAIL} reset_window_num: User {username} not found")
+        return
+    window_num = int(args[0]) if args else 1
+    if window_num < 1 or window_num > 100:
+        raise ValueError(f"Window number {window_num} out of range")
+    user_data['windows_offset'] = window_num
+    write_and_unlock_data(data)

@@ -125,6 +125,7 @@ if __name__ == '__main__':
             elif cmd == 'clear-finished': jobs.clear_finished_jobs(user_object)
             elif cmd == 'clear-error': jobs.clear_error_jobs(user_object)
             elif cmd == 'clear-all' or cmd == 'clear': jobs.clear_all_jobs(user_object)
+            elif cmd == 'reset-window-num' or cmd == 'reset-window': users.reset_window_num(user_object, args[2:])
             elif cmd == '-czw': handler.clear_zombie_windows(user_object)
             elif cmd == '-czj': jobs.clear_zombie_jobs(user_object)
             elif cmd == 'clean': jobs.clear_all_jobs(user_object), handler.clear_zombie_windows(user_object), jobs.clear_zombie_jobs(user_object)

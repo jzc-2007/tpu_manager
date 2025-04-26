@@ -136,7 +136,7 @@ def apply_pre(tpu, delete=True):
         return 'describe failed'
 
     if state == 'READY':
-        print(f"Now, TPU VM {tpu} is good, ready to use")
+        print(f"{GOOD} Now, TPU VM {tpu} is good, ready to use")
         # mount the disk
         print(f"{INFO} Mounting disk in TPU {tpu}...")
         res = mount_disk(tpu, quiet = True)
@@ -198,7 +198,7 @@ def apply_norm(tpu, delete=True):
         return 'describe failed'
 
     if state == 'READY':
-        print(f"Now, TPU VM {tpu} is good, ready to use")
+        print(f"{GOOD} Now, TPU VM {tpu} is good, ready to use")
         # mount the disk
         print(f"{INFO} Mounting disk in TPU {tpu}...")
         res = mount_disk(tpu, quiet = True)
