@@ -7,27 +7,27 @@ RULE_DICT ={
     'pre':{
         'preempted': 'reapply',
         'grpc': 'resume',
-        'locked': 'restart',
+        'locked': 'pass',
     },
     'pass':{
         'preempted': 'pass',
         'grpc': 'pass',
-        'locked': 'restart',
+        'locked': 'pass',
     },
     'reapply':{
         'preempted': 'reapply',
         'grpc': 'reapply',
-        'locked': 'restart',
+        'locked': 'pass',
     },
     'rerun':{
         'preempted': 'reapply',
         'grpc': 'rerun',
-        'locked': 'restart',
+        'locked': 'pass',
     },
     'resume':{
         'preempted': 'pass',
         'grpc': 'resume',
-        'locked': 'restart',
+        'locked': 'pass',
     }
 }
 
@@ -532,6 +532,8 @@ def check_jobs(user_obj, args):
             if job_data["status"] == 'error':
                 if job_data["error"] == 'preempted':
                     print(f"Status: {RED}Preempted{NC}")
+                # elif job_data["error"] == 'locked':
+                #     print(f"Status: {RED}Locked{NC}(Restarting...)")
                 else:
                     print(f"Status: {RED}Error{NC}")
                     print(f"msg: {msg}")
@@ -560,6 +562,8 @@ def check_jobs(user_obj, args):
                     print(f"msg: {msg}")
                 print('-'*40)
                 continue
+            elif job_data["status"] == 'starting':
+                print(f"{WARNING} Don't have logdir yet")
         if re.search(r'Job failed', last_line) or re.search(r'[eE]rror', last_line) or re.search(r'FAIL', last_line):
             if re.search(r'Allocation type', last_line):
                 print(f"Status: {RED}OOM Error{NC}")

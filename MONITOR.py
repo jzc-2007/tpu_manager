@@ -76,6 +76,22 @@ def reapply_worker(ka, result_queue):
         add_MONITOR_log(f"{FAIL} reapply_worker: Failed to reapply TPU {ka}: {e}")
         result_queue.put(e)
 
+def restart_worker(ka, result_queue):
+    sys.stdout = open(os.devnull, 'w')
+    try:
+        print(f"{INFO} restart_worker: Restarting TPU {ka}...")
+        result = operate.restart(ka)
+        if result == 'success':
+            print(f"{GOOD} restart_worker: Restart TPU {ka} done")
+            add_MONITOR_log(f"{GOOD} restart_worker: Restart TPU {ka} done")
+        else:
+            raise Exception(f"Restart TPU {ka} failed, please contact the admin")
+        result_queue.put(result)
+    except Exception as e:
+        print(f"{FAIL} restart_worker: Failed to restart TPU {ka}: {e}")
+        add_MONITOR_log(f"{FAIL} restart_worker: Failed to restart TPU {ka}: {e}")
+        result_queue.put(e)
+
 def kill_resume(job):
     ka = job["tpu"]
     # print(f"{INFO} kill_resume: Killing jobs  TPU {ka}...")
@@ -90,15 +106,35 @@ def kill_rerun(job):
     print(f"{INFO} rerun job...")
     jobs.resume_rerun_job(job, load_ckpt=False)
 
-def restart_rerun(job):
+def restart_rerun(job, timeout=900):
     ka = job["tpu"]
-    # print(f"{INFO} restart_rerun: Killing jobs  TPU {ka}...")
-    operate.restart(ka)
-    print(f"{INFO} rerun job...")
-    jobs.resume_rerun_job(job, load_ckpt=False)
+    print(f"{INFO} restart_rerun: Restarting TPU {ka}...")
+    result_queue = multiprocessing.Queue()
+    process = multiprocessing.Process(target=restart_worker, args=(ka, result_queue))
+    running_processes.append(process)
+    process.start()
+    process.join(timeout)
+    if process.is_alive():
+        print(f"Restart TPU {ka} timeout, killing the process")
+        process.terminate()
+        process.join()
+        running_processes.remove(process)
+        print(f"{WARNING} restart_rerun: Restart TPU {ka} failed, process killed")
+    else:
+        if not result_queue.empty():
+            result = result_queue.get()
+            if isinstance(result, Exception):
+                print(f"{FAIL} restart_rerun: Restart TPU {ka} failed: {result}")
+                add_MONITOR_log(f"{FAIL} restart_rerun: Restart TPU {ka} failed: {result}")
+            else:
+                print(f"{GOOD} Restart TPU {ka} success: {result}, start rerun job")
+                jobs.resume_rerun_job(job, load_ckpt=False)
+        else:
+            print(f"{FAIL} restart_rerun: Restart TPU {ka} failed, no result returned")
+            add_MONITOR_log(f"{FAIL} restart_rerun: Restart TPU {ka} failed, no result returned")
 
 
-def reapply_resume(job, timeout=1800):
+def reapply_resume(job, timeout=900):
     ka = job["tpu"]
     result_queue = multiprocessing.Queue()
     process = multiprocessing.Process(target=reapply_worker, args=(ka, result_queue))
@@ -145,39 +181,43 @@ def mainloop():
         add_MONITOR_log({
             "msg": f"Found {len(error_jobs['grpc'])} grpc jobs, reapply them"
         })
-
-    for error_type in error_jobs:
-        for job in error_jobs[error_type]:
-            user = job["user"]
-            data = data_io.read_and_lock_data()
-            try:
-                for jb in data["users"][user]["job_data"]:
-                    if jb["windows_id"] == job["windows_id"]:
-                        jb["status"] = 'error'
-                        jb['error'] = error_type
-                data_io.write_and_unlock_data(data)
-            except:
-                print(f"{FAIL} mainloop: Failed to update job {job['windows_id']} for user {user}")
-                add_MONITOR_log(f"{FAIL} mainloop: Failed to update job {job['windows_id']} for user {user}")
-                data_io.release_lock_data()
-
-    for error_type in error_jobs:
-        for job in error_jobs[error_type]:
-            rule = job["rules"][error_type]
-            try:
-                if rule == 'pass':
-                    continue
-                elif rule == 'reapply':
-                    reapply_resume(job, timeout=1800)
-                elif rule == 'resume':
-                    kill_resume(job)
-                elif rule == 'rerun':
-                    kill_rerun(job)
-                elif rule == 'restart':
-                    restart_rerun(job)
-            except:
-                print(f"{FAIL} mainloop: Failed to handle job {job['windows_id']} for user {user}, (error type {error_type}, rule {rule})")
-                add_MONITOR_log(f"{FAIL} mainloop: Failed to handle job {job['windows_id']} for user {user}, (error type {error_type}, rule {rule})")
+    
+    all_good = all(len(error_jobs[error_type]) == 0 for error_type in error_jobs)
+    if not all_good:
+        print(f"{INFO} mainloop: Logging error jobs")
+        for error_type in error_jobs:
+            for job in error_jobs[error_type]:
+                user = job["user"]
+                data = data_io.read_and_lock_data()
+                try:
+                    for jb in data["users"][user]["job_data"]:
+                        if jb["windows_id"] == job["windows_id"]:
+                            jb["status"] = 'error'
+                            jb['error'] = error_type
+                    data_io.write_and_unlock_data(data)
+                except:
+                    print(f"{FAIL} mainloop: Failed to update job {job['windows_id']} for user {user}")
+                    add_MONITOR_log(f"{FAIL} mainloop: Failed to update job {job['windows_id']} for user {user}")
+                    data_io.release_lock_data()
+    if not all_good:
+        print(f"{INFO} mainloop: Handling error jobs")
+        for error_type in error_jobs:
+            for job in error_jobs[error_type]:
+                rule = job["rules"][error_type]
+                try:
+                    if rule == 'pass':
+                        continue
+                    elif rule == 'reapply':
+                        reapply_resume(job, timeout=1800)
+                    elif rule == 'resume':
+                        kill_resume(job)
+                    elif rule == 'rerun':
+                        kill_rerun(job)
+                    elif rule == 'restart':
+                        restart_rerun(job)
+                except:
+                    print(f"{FAIL} mainloop: Failed to handle job {job['windows_id']} for user {user}, (error type {error_type}, rule {rule})")
+                    add_MONITOR_log(f"{FAIL} mainloop: Failed to handle job {job['windows_id']} for user {user}, (error type {error_type}, rule {rule})")
     
 
 if __name__ == "__main__":
@@ -200,7 +240,12 @@ if __name__ == "__main__":
             time_used = cur_time - last_time # in seconds
             print(f"{INFO} Time: {convert_utcstr_to_edtstr(get_abs_time_str())}")
             print(f"Loop {num_loops} finished, time used: {time_used:.2f} seconds")
-            time.sleep(max(0, checking_freq - time_used))
+            while time.time() - last_time < checking_freq:
+                data = data_io.read_data()
+                time.sleep(10)
+                if data['ack_MONITOR']:
+                    print(f"{INFO} Acknowledged by user, start checking...")
+                    break
 
             if time.time() - last_test_time > test_freq:
                 try:

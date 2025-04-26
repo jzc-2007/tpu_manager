@@ -424,18 +424,26 @@ def mount_disk(tpu, quiet = False):
 def restart(tpu):
     zone, pre, tpu = get_zone_pre(tpu)
 
-    print(f"{INFO} Rebooting {tpu}...")
+    print(f"{INFO} Rebooting {tpu}... This may take a while...")
 
     reboot_cmd = (
-        f'gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} '
+        f'timeout 20s gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} '
         '--worker=all --command "sudo reboot" '
         '--ssh-flag="-o ConnectionAttempts=1" --ssh-flag="-o ConnectTimeout=5"'
     )
-    subprocess.run(reboot_cmd, shell=True, timeout=300, check=True,
-                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        subprocess.run(reboot_cmd, shell=True, check=True, 
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except subprocess.CalledProcessError as e:
+        print(f"{INFO} Expected SSH disconnect during reboot: {e}")
+    except subprocess.TimeoutExpired:
+        print(f"{INFO} Expected SSH timeout during reboot")
+    except Exception as e:
+        print(f"{FAIL} Unexpected error while rebooting: {e}")
+        return 'reboot failed'
 
-    print(f"{INFO} Restart command sent. Sleeping for 5 minutes...")
-    time.sleep(300)
+    print(f"{INFO} Reboot command sent. Sleeping 3 minutes...")
+    time.sleep(180)
 
     print(f"{INFO} Checking if VM is ready...")
     while True:
@@ -444,23 +452,26 @@ def restart(tpu):
             '--worker=all --command "ls"'
         )
         try:
-            subprocess.run(check_cmd, shell=True, timeout=300, check=True,
+            subprocess.run(check_cmd, shell=True, timeout=60, check=True,
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             print(f"{GOOD} VM is ready!")
-            break 
-        except Exception:
+            break
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
             print(f"{INFO} VM not ready yet, sleeping 60s...")
+            time.sleep(60)
+        except Exception as e:
+            print(f"{FAIL} Unexpected error while checking VM readiness: {e}")
             time.sleep(60)
 
     print(f"{GOOD} VM is ready! Doing mounting...")
 
     try:
-        mount_disk(tpu)
+        mount_disk(tpu, quiet=True)
         print(f"{GOOD} Mounting done!")
     except Exception as e:
         print(f"{FAIL} Mounting failed: {e}")
         return 'mount failed'
-    
+
     print(f"{GOOD} Restart done!")
 
 

@@ -349,7 +349,10 @@ The structure of `data.json` is as follows:
         "checking_freq": 600
     },
     "wandb_api_key": "...",
-    "conda_env_name": "NNX"
+    "conda_env_name": "NNX",
+    "monitor_all_check_time": 20,
+    "MONITOR_logs": [],
+    "ack_MONITOR": false
 }
 ```
 
