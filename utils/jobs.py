@@ -453,7 +453,7 @@ def run(user_obj, args):
 
     time.sleep(3)
 
-    if user_obj.settings['monitor_after_run']:
+    if user_obj.settings['monitor_after_run'] and '-q' not in args:
         monitor_jobs(user_obj, args)
 
 def check_all_jobs():

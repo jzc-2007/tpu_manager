@@ -93,20 +93,20 @@ tpu clear-error username # Clear all error jobs
 tpu clear-all username # RECOMMENDED: Clear all finished/error jobs
 ```
 
-The `clean` command integrates these actions, so using `kill-job + clean` is strongly recommended instead of manually killing windows with `tmux kill-window`.
+The `clean` command integrates these actions, so using `kill-job + clean` is strongly recommended instead of manually killing windows with `tmux kill-window` or exit the window yourself. (If you like to kill the window yourself, we recommend doing `tpu clean username` occasionally to clear the job data associated with these windows, or others may get the annoying warning of the TPU occupied by your dead jobs.)
 
 </details>
 
 <details>
 <summary> <strong>Monitoring (<strong>IMPORTANT</strong>)</strong></summary>
 
-The `tpu run` command opens a monitor window to track all your jobs. Alternatively, you can use:
+The `tpu run` command opens a monitor window to track all your jobs. (If you don't want that, add argument `-q` to your command, e.g.`tpu run v2-32-2 xibo -q`) Alternatively, you can use:
 
 ```bash
 tpu monitor username
 ```
 
-This updates every 10 seconds. For one-time checks, use:
+which updates the monitor window every 10 seconds. For one-time checks, use:
 
 ```bash
 tpu check username
@@ -240,6 +240,14 @@ You can see all the rules using
 ```bash
 tpu check-rules
 ```
+
+The default checking time is about 30 mins, that is, the jobs will wait at most 30 mins to be resumed. If you run a job that leads to a GRPC immediately, you can acknowledge the MONITOR to rerun that immediately by:
+
+```bash
+tpu ack
+```
+
+Then after no more than 3 mins you should expect the job to be resumed(if not, contact the admin).
 
 </details>
 
