@@ -241,7 +241,9 @@ You can see all the rules using
 tpu check-rules
 ```
 
-The default checking time is about 30 mins, that is, the jobs will wait at most 30 mins to be resumed. If you run a job that leads to a GRPC immediately, you can acknowledge the MONITOR to rerun that immediately by:
+If you want to know whether the job is a resumed job in the program(for example, use that to set a new wandb name/note), you can add `--log-stage` flag in `tpu run`, then it will pass an additional argument `config.stage` to indicate the number of resumes of this job. (For example, if the job has been resumed twice, that is, there're 3 runs in total including the current one, the current one will recieve an extra `config.stage=2` config).
+
+We have a MONITOR to occasionally keep tract of all the job status and decide whether to resume/rerun. The default checking frequency for the jobs to be rerun is about 30 mins, that is, the jobs will wait at most 30 mins to be resumed. If you run a job that leads to a GRPC immediately, you can acknowledge the MONITOR to rerun that immediately by:
 
 ```bash
 tpu ack
