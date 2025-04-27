@@ -168,7 +168,10 @@ def mainloop():
         for job in data["users"][user]["job_data"]:
             if job['status'] in ['finished', 'rerunned', 'resumed', 'killed'] or not job['monitor']:
                 continue
-            status = job['error'] if job['status'] == 'error' else check_job_status(job)
+            if job['status'] == 'error' and job['error'] != 'unknown':
+                status = job['error']
+            else:
+                status = check_job_status(job)
             if status in error_jobs:
                 error_jobs[status].append(job)
 
@@ -245,6 +248,9 @@ if __name__ == "__main__":
                 time.sleep(10)
                 if data['ack_MONITOR']:
                     print(f"{INFO} Acknowledged by user, start checking...")
+                    data = data_io.read_and_lock_data()
+                    data['ack_MONITOR'] = False
+                    data_io.write_and_unlock_data(data)
                     break
 
             if time.time() - last_test_time > test_freq:

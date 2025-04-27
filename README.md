@@ -561,7 +561,8 @@ sudo chmod 777 -R ${LOGDIR}
 echo 'Log dir: '$LOGDIR
 echo 'Staging dir: '$STAGEDIR
 
-current_window=`tmux display-message -p '#S:#I'`
+pane_id=$TMUX_PANE
+current_window=$(tmux display-message -p -t "$pane_id" '#S:#I')
 echo "Current tmux window: $current_window"
 
 echo 'tpu: '$VM_NAME

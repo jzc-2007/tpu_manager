@@ -88,6 +88,7 @@ if __name__ == '__main__':
         elif cmd == 'caj': jobs.check_all_jobs()
         elif cmd == 'lock-data': data_io.lock_data()
         elif cmd == 'unlock-data': data_io.release_lock_data()
+        elif cmd == 'ack': jobs.ack_MONITOR()
 
         # ------------ For development only ------------
         elif cmd == 'add_global_config' or cmd == '-agc': develop.add_global_config(args[2], args[3])

@@ -278,6 +278,11 @@ def describe_tpu(tpu, quiet = False):
                 print(f"{FAIL} Environment in TPU {tpu} has file error")
                 print(f"{INFO} You may need to {PURPLE}mount the NFS{NC} by `tpu mount-disk`, or solve the env by `tpu solve`")
             return 'file error'
+        elif state == 'occupied':
+            if not quiet:
+                print(f"{FAIL} Environment in TPU {tpu} is occupied")
+                print(f"{INFO} You may need to {PURPLE}kill the jobs{NC} by `tpu kill-jobs`")
+            return 'occupied'
         elif state == 'unknown':
             if not quiet:
                 print(f"{FAIL} Environment in TPU {tpu} is getting unkown error, please contact the admin.")
@@ -288,18 +293,10 @@ def describe_tpu(tpu, quiet = False):
                 print(f"{FAIL} describe_tpu: TPU {tpu} is getting unkown error, please contact the admin.")
                 print(f"state: {state}")
             return 'unknown'
-    elif res == 'failed':
-        if not quiet:
-            print(f"{FAIL} describe_tpu: Failed to query TPU state")
-        return 'failed'
     elif res == 'timeout':
         if not quiet:
             print(f"{FAIL} describe_tpu: Timeout expired")
         return 'timeout'
-    elif res == 'occupied':
-        if not quiet:
-            print(f"{FAIL} describe_tpu: TPU {tpu} is already in use")
-        return 'occupied'
 
 def check_env(tpu, quiet = False):
     """

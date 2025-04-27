@@ -341,14 +341,22 @@ def run(user_obj, args):
         for user in data['users']:
             for job in data['users'][user]['job_data']:
                 if job['tpu'] == tpu and job['status'] == 'running':
-                    print(f"{WARNING} There is a job running using tpu {tpu}, by user {user}")
+                    print(f"{WARNING} There is a job using tpu {tpu}(maybe dead), by user {user}")
                     print(f"DO YOU WANT TO CONTINUE? (y/n)")
                     res = input()
                     if res != 'y' and res != 'Y':
                         print("Exiting...")
                         return
                     # change the status of this job to 'killed'
-                    job['status'] = 'killed'
+                    data = read_and_lock_data()
+                    for user_ in data['users']:
+                        if data['users'][user_]['tmux_name'] == user_obj.tmux_name:
+                            for job_ in data['users'][user_]['job_data']:
+                                if str(job_['windows_id']) == str(job['windows_id']):
+                                    job_['status'] = 'killed'
+                                    break
+                            break
+                    write_and_unlock_data(data)
 
     config_args = ""
     tag, rule = None, None
@@ -478,6 +486,21 @@ def monitor_all_jobs():
         print(f"\n{INFO} Stopping monitor...")
         return
 
+def write_error_to_job(user_obj, job_data, error):
+    """
+    Write the error to the job data
+    """
+    data = read_and_lock_data()
+    for user in data['users']:
+        if data['users'][user]['tmux_name'] == user_obj.tmux_name:
+            for job in data['users'][user]['job_data']:
+                if str(job['windows_id']) == str(job_data['windows_id']):
+                    job['status'] = 'error'
+                    job['error'] = error
+                    break
+            break
+    write_and_unlock_data(data)
+
 def check_jobs(user_obj, args):
     """
     Print the status of all the jobs in the tmux session.
@@ -532,8 +555,8 @@ def check_jobs(user_obj, args):
             if job_data["status"] == 'error':
                 if job_data["error"] == 'preempted':
                     print(f"Status: {RED}Preempted{NC}")
-                # elif job_data["error"] == 'locked':
-                #     print(f"Status: {RED}Locked{NC}(Restarting...)")
+                elif job_data["error"] == 'OOM':
+                    print(f"Status: {RED}OOM{NC}")
                 else:
                     print(f"Status: {RED}Error{NC}")
                     print(f"msg: {msg}")
@@ -568,9 +591,18 @@ def check_jobs(user_obj, args):
             if re.search(r'Allocation type', last_line):
                 print(f"Status: {RED}OOM Error{NC}")
                 print(f"msg: {msg}")
+                # write the error to the job data
+                write_error_to_job(user_obj, job_data, 'OOM')
+            if re.search(r'GRPC [Ee]rror', last_line):
+                print(f"Status: {RED}GRPC Error{NC}")
+                print(f"msg: {msg}")
+                # write the error to the job data
+                write_error_to_job(user_obj, job_data, 'grpc')
             else:
                 print(f"Status: {RED}Unknown Error{NC}")
                 print(f"msg: {msg}")
+                # write the error to the job data
+                write_error_to_job(user_obj, job_data, 'unknown')
         elif re.search(r'[cC]ompiling', last_line) or re.search(r'[cC]ompilation', last_line)or re.search(r'[cC]ompile', last_line):
             print(f"Status: {GREEN}Compiling{NC}")
             if monitor_verbose:
@@ -832,4 +864,17 @@ def clear_zombie_jobs(user_object):
 
     except:
         print(f"{RED}[Error] {NC}clear_zombie_jobs: Failed to clear zombie jobs")
+        release_lock_data()
+
+def ack_MONITOR():
+    """
+    Acknowledge the monitor command
+    """
+    data = read_and_lock_data()
+    try:
+        data["ack_MONITOR"] = True
+        write_and_unlock_data(data)
+        print(f"{GOOD} ack_MONITOR: Monitor acknowledged")
+    except:
+        print(f"{RED}[Error] {NC}ack_MONITOR: Failed to acknowledge monitor")
         release_lock_data()
