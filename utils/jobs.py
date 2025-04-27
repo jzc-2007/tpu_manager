@@ -456,16 +456,21 @@ def run(user_obj, args):
     if user_obj.settings['monitor_after_run'] and '-q' not in args:
         monitor_jobs(user_obj, args)
 
-def check_all_jobs():
+def check_all_jobs(args):
     """
     check the jobs for all the users
     """
+    config = '-wts'
+    for arg in args:
+        if arg.startswith('-'):
+            config = arg
+        
     data = read_data()
     try:
         for user in data['users']:
             user_obj = users.user_from_dict(data['users'][user])
             print(f"{YELLOW}==============={NC} User {user_obj.name} {YELLOW}==============={NC}")
-            check_jobs(user_obj, [])
+            check_jobs(user_obj, [], config=config)
     except Exception as e:
         print(f"{RED}[Error] {NC} check_all_jobs: Failed to check jobs")
         print(f"Error: {e}")
@@ -614,11 +619,13 @@ def check_jobs(user_obj, args, config = None):
                         print(f"msg: {msg}")
                         # write the error to the job data
                         write_error_to_job(user_obj, job_data, 'grpc')
+                        ack_MONITOR()
                     else:
                         print(f"Status: {RED}Unknown Error{NC}")
                         print(f"msg: {msg}")
                         # write the error to the job data
                         write_error_to_job(user_obj, job_data, 'unknown')
+                        ack_MONITOR()
                 elif (re.search(r'[cC]ompiling', last_line_cut) or re.search(r'[cC]ompilation', last_line_cut) or re.search(r'[cC]ompile', last_line_cut)) and 's' in config:
                     print(f"Status: {GREEN}Compiling{NC}")
                     if 'v' in config:

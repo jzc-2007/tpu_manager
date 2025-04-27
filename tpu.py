@@ -85,7 +85,7 @@ if __name__ == '__main__':
         elif cmd == 'set-monitor-config' or cmd == '-smc': logger.set_monitor_config(args[2:])
         elif cmd == 'get-monitor-config' or cmd == '-gmc': logger.get_monitor_config()
         elif cmd == 'maj': jobs.monitor_all_jobs()
-        elif cmd == 'caj': jobs.check_all_jobs()
+        elif cmd == 'caj': jobs.check_all_jobs(args[2:])
         elif cmd == 'lock-data': data_io.lock_data()
         elif cmd == 'unlock-data': data_io.release_lock_data()
         elif cmd == 'ack': jobs.ack_MONITOR()

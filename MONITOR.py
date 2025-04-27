@@ -248,8 +248,7 @@ if __name__ == "__main__":
             num_loops += 1
             last_time = time.time()
             mainloop()
-            cur_time = time.time()
-            time_used = cur_time - last_time # in seconds
+            time_used = time.time()- last_time # in seconds
             print(f"{INFO} Time: {convert_utcstr_to_edtstr(get_abs_time_str())}")
             print(f"Loop {num_loops} finished, time used: {time_used:.2f} seconds")
             while time.time() - last_time < checking_freq:
