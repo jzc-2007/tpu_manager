@@ -112,10 +112,10 @@ which updates the monitor window every 10 seconds. For one-time checks, use:
 tpu check username
 ```
 
-The monitor will show four things: the windows number(w), the directory(d), the tpu(t), and the job status(s). You can choose which to show by adding commands. For example, to only show the working directory and the job status, use:
+The monitor will show four things: the windows number(`w`), the directory(`d`), the tpu(`t`), and the job status(`s`). You can choose which to show by adding commands. There's also an additional flag "verbose"(`v`) available, meaning to show the messages(cut) from tmux windows even for the running jobs with known status.(Should be used with `s`) For example, to only show the working directory and the job status and detailed output of xibo, use:
 
 ```bash
-tpu monitor username -ds
+tpu monitor xibo -dsv
 ```
 
 If you don't want `tpu run` to open the monitor window, you can use `tpu set-settings monitor_after_run False username` to disable it. Also, you can set the default monitoring whether to monitor tpu/directory. See the **Customizing User Settings** section for more details.

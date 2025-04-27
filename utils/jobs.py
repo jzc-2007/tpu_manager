@@ -567,6 +567,8 @@ def check_jobs(user_obj, args, config = None):
         msg = last_line_cut[-show_length:]
             
         if (job_data["status"] is not None) and ('s' in config):
+            if job_data["status"] == 'starting':
+                print(f"{WARNING} Don't have logdir yet")
             if job_data["status"] == 'error':
                 if job_data["error"] == 'preempted':
                     print(f"Status: {RED}Preempted{NC}")
@@ -600,9 +602,7 @@ def check_jobs(user_obj, args, config = None):
                     print(f"msg: {msg}")
                 print('-'*40)
                 continue
-            elif job_data["status"] == 'starting':
-                print(f"{WARNING} Don't have logdir yet")
-            elif job_data["status"] == 'running':
+            elif job_data["status"] == 'running' or job_data["status"] == 'starting':
                 if (re.search(r'Job failed', last_line_cut) or re.search(r'[eE]rror', last_line_cut) or re.search(r'FAIL', last_line_cut)) and 's' in config:
                     if re.search(r'Allocation type', last_line):
                         print(f"Status: {RED}OOM Error{NC}")

@@ -7,6 +7,7 @@ import utils.data_io as data_io
 import utils.operate as operate
 import utils.unit_tests as unit_tests
 import utils.jobs as jobs
+import utils.clean as clean
 from utils.helpers import *
 
 running_processes = []
@@ -233,6 +234,7 @@ def mainloop():
 if __name__ == "__main__":
     num_loops = 0
     last_test_time = time.time()
+    last_clean_time = time.time()
     add_MONITOR_log(f"{GOOD} Starting monitor...")
 
     if data_io.check_code_lock():
@@ -241,7 +243,7 @@ if __name__ == "__main__":
     try:
         while True:
             data = data_io.read_data()
-            checking_freq, test_freq = data["MONITOR_config"]["checking_freq"], data["MONITOR_config"]["test_freq"]
+            checking_freq, test_freq, clean_freq = data["MONITOR_config"]["checking_freq"], data["MONITOR_config"]["test_freq"], data["MONITOR_config"]["clean_freq"]
 
             num_loops += 1
             last_time = time.time()
@@ -273,6 +275,16 @@ if __name__ == "__main__":
                     print(f"{FAIL} Unit tests failed: {e}")
                 last_test_time = time.time()
 
+            if time.time() - last_clean_time > clean_freq:
+                try:
+                    print(f"{INFO} Running clean...")
+                    clean.clean_us(safe=False, quiet=True)
+                    clean.clean_eu(safe=False, quiet=True)
+                    print(f"{GOOD} Clean finished")
+                    add_MONITOR_log(f"{GOOD} Clean finished")
+                except Exception as e:
+                    print(f"{FAIL} Clean failed: {e}")
+                last_clean_time = time.time()
                 
     except KeyboardInterrupt:
         print("KeyboardInterrupt, exiting...")
