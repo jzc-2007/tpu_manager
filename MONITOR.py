@@ -175,19 +175,27 @@ def mainloop():
             if status in error_jobs:
                 error_jobs[status].append(job)
 
-    print(f"{INFO} mainloop: found {len(error_jobs['preempted'])} preempted jobs, {len(error_jobs['grpc'])} grpc jobs, {len(error_jobs['locked'])} locked jobs")
     if len(error_jobs['locked']) != 0:
+        error_windows_list = [(job['user'], job['windows_id']) for job in error_jobs['locked']]
+        print(f"{INFO} mainloop: Found {len(error_jobs['locked'])} locked jobs, windows list: {error_windows_list}")
         add_MONITOR_log(f"{INFO} Found {len(error_jobs['locked'])} locked jobs, restart them")
     if len(error_jobs['preempted']) != 0:
+        error_windows_list = [(job['user'], job['windows_id']) for job in error_jobs['preempted']]
+        print(f"{INFO} mainloop: Found {len(error_jobs['preempted'])} preempted jobs, windows list: {error_windows_list}")
         add_MONITOR_log(f"{INFO} Found {len(error_jobs['preempted'])} preempted jobs, reapply them")
     if len(error_jobs['grpc']) != 0:
+        error_windows_list = [(job['user'], job['windows_id']) for job in error_jobs['grpc']]
+        print(f"{INFO} mainloop: Found {len(error_jobs['grpc'])} grpc jobs, windows list: {error_windows_list}")
         add_MONITOR_log({
             "msg": f"Found {len(error_jobs['grpc'])} grpc jobs, reapply them"
         })
     
     all_good = all(len(error_jobs[error_type]) == 0 for error_type in error_jobs)
+
+    if all_good:
+        print(f"{INFO} mainloop: All jobs are good")
+        
     if not all_good:
-        print(f"{INFO} mainloop: Logging error jobs")
         for error_type in error_jobs:
             for job in error_jobs[error_type]:
                 user = job["user"]
@@ -203,7 +211,6 @@ def mainloop():
                     add_MONITOR_log(f"{FAIL} mainloop: Failed to update job {job['windows_id']} for user {user}")
                     data_io.release_lock_data()
     if not all_good:
-        print(f"{INFO} mainloop: Handling error jobs")
         for error_type in error_jobs:
             for job in error_jobs[error_type]:
                 rule = job["rules"][error_type]
