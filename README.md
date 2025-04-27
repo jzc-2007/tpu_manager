@@ -112,7 +112,13 @@ This updates every 10 seconds. For one-time checks, use:
 tpu check username
 ```
 
-If you don't want `tpu run` to open the monitor window, you can use `tpu set-settings monitor_after_run False username` to disable it. See the **Customizing User Settings** section for more details.
+The monitor will show four things: the windows number(w), the directory(d), the tpu(t), and the job status(s). You can choose which to show by adding commands. For example, to only show the working directory and the job status, use:
+
+```bash
+tpu monitor username -ds
+```
+
+If you don't want `tpu run` to open the monitor window, you can use `tpu set-settings monitor_after_run False username` to disable it. Also, you can set the default monitoring whether to monitor tpu/directory. See the **Customizing User Settings** section for more details.
 
 </details>
 

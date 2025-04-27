@@ -51,7 +51,9 @@ def kill_jobs_tpu(tpu):
     )
 
     try:
-        subprocess.run(cmd, shell=True, timeout=300, check=True,
+        subprocess.run(cmd, shell=True, timeout=30, check=True,
+                       stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        subprocess.run(cmd, shell=True, timeout=30, check=True,
                        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     except subprocess.TimeoutExpired:
         print(f"{FAIL} kill_jobs_tpu: Killing jobs timed out")

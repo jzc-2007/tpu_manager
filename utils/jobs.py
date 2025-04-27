@@ -470,7 +470,7 @@ def check_all_jobs():
         print(f"{RED}[Error] {NC} check_all_jobs: Failed to check jobs")
         print(f"Error: {e}")
 
-def monitor_all_jobs():
+def monitor_all_jobs(args):
     """
     monitor the jobs for all the users
     """
@@ -501,11 +501,25 @@ def write_error_to_job(user_obj, job_data, error):
             break
     write_and_unlock_data(data)
 
-def check_jobs(user_obj, args):
+def check_jobs(user_obj, args, config = None):
     """
     Print the status of all the jobs in the tmux session.
     """
     # Get the tmux session name
+    for arg in args:
+        if arg.startswith('-'):
+            config = arg
+
+    if config is None:
+        config = 'ws'
+        if user_obj.settings.get("monitor_dir", False):
+            config += 'd'
+        if user_obj.settings.get("monitor_tpu", False):
+            config += 't'
+        if user_obj.settings.get("monitor_verbose", False):
+            config += 'v'
+    print(f'config: {config}')
+
     session_name = user_obj.tmux_name
     # Get all the windows in the tmux session
     windows = os.popen(f"tmux list-windows -t {session_name}").read().splitlines()
@@ -522,7 +536,7 @@ def check_jobs(user_obj, args):
                 job_data = job
                 break
         if job_data is None:
-            if window_id != '0':
+            if window_id != '0' and 'w' in config:
                 print(f'Window {window_id} (NOT FOUND IN DATA)')
                 print('-'*40)
             continue
@@ -532,13 +546,14 @@ def check_jobs(user_obj, args):
                 father_job = job_data['extra_msgs']['father']
             except Exception as e:
                 father_job = None
-            if father_job is not None:
-                print(f"Window {window_id} (tag: {job_data['job_tags']}, rerun/resume: Window {father_job}, stage {job_data['stage']+1})")
-            else:
-                print(f"Window {window_id} (tag: {job_data['job_tags']})")
-            if user_obj.settings.get("monitor_dir", False):
+            if 'w' in config:
+                if father_job is not None:
+                    print(f"Window {window_id} (tag: {job_data['job_tags']}, rerun/resume: Window {father_job}, stage {job_data['stage']+1})")
+                else:
+                    print(f"Window {window_id} (tag: {job_data['job_tags']})")
+            if 'd' in config:
                 print(f"DIR: {job_data['job_dir'].split('/')[-1]}")
-            if user_obj.settings.get("monitor_tpu", False):
+            if 't' in config:
                 print(f"TPU: {job_data['tpu']}")
         # Get the window last line
         last_line = os.popen(f"tmux capture-pane -t {session_name}:{window_id} -p").read()
@@ -548,10 +563,10 @@ def check_jobs(user_obj, args):
         show_length = user_obj.settings['show_length']
         monitor_length = user_obj.settings['monitor_length']
         monitor_verbose = user_obj.settings['monitor_verbose']
-        last_line = last_line[-monitor_length:]
-        msg = last_line[-show_length:]
+        last_line_cut = last_line[-monitor_length:]
+        msg = last_line_cut[-show_length:]
             
-        if job_data["status"] is not None:
+        if (job_data["status"] is not None) and ('s' in config):
             if job_data["status"] == 'error':
                 if job_data["error"] == 'preempted':
                     print(f"Status: {RED}Preempted{NC}")
@@ -564,7 +579,7 @@ def check_jobs(user_obj, args):
                 continue
             elif job_data["status"] == 'killed':
                 print(f"Status: {YELLOW}Killed{NC}")
-                if monitor_verbose:
+                if 'v' in config:
                     print(f"msg: {msg}")
                 print('-'*40)
                 continue
@@ -575,72 +590,73 @@ def check_jobs(user_obj, args):
                     print(f"{RED}Failed to get child window id{NC}")
                     child = None
                 print(f"Status: {YELLOW}{job_data['error']}{NC} ({job_data['status']} in window {child})")
-                if monitor_verbose:
+                if 'v' in config:
                     print(f"msg: {msg}")
                 print('-'*40)
                 continue
             elif job_data["status"] == 'finished':
                 print(f"Status: {GREEN}Finished{NC}")
-                if monitor_verbose:
+                if 'v' in config:
                     print(f"msg: {msg}")
                 print('-'*40)
                 continue
             elif job_data["status"] == 'starting':
                 print(f"{WARNING} Don't have logdir yet")
-        if re.search(r'Job failed', last_line) or re.search(r'[eE]rror', last_line) or re.search(r'FAIL', last_line):
-            if re.search(r'Allocation type', last_line):
-                print(f"Status: {RED}OOM Error{NC}")
-                print(f"msg: {msg}")
-                # write the error to the job data
-                write_error_to_job(user_obj, job_data, 'OOM')
-            if re.search(r'GRPC [Ee]rror', last_line):
-                print(f"Status: {RED}GRPC Error{NC}")
-                print(f"msg: {msg}")
-                # write the error to the job data
-                write_error_to_job(user_obj, job_data, 'grpc')
-            else:
-                print(f"Status: {RED}Unknown Error{NC}")
-                print(f"msg: {msg}")
-                # write the error to the job data
-                write_error_to_job(user_obj, job_data, 'unknown')
-        elif re.search(r'[cC]ompiling', last_line) or re.search(r'[cC]ompilation', last_line)or re.search(r'[cC]ompile', last_line):
-            print(f"Status: {GREEN}Compiling{NC}")
-            if monitor_verbose:
-                print(f"msg: {msg}")
-        elif re.search(r'[sS]ampling ', last_line):
-            epoch = None
-            if re.search(r'[eE]poch\s([0-9]{1,4})', last_line):
-                epoch = re.search(r'[eE]poch\s([0-9]{1,6})', last_line).group(1)
-            elif re.search(r'ep=([0-9]){1,4}\.([0-9]){1,6}', last_line):
-                epoch = re.search(r'ep=([0-9]){1,4}\.([0-9]){1,6}', last_line).group(0)[3:]
-            if epoch is not None:
-                print(f"Status: {GREEN}Sampling{NC} (in epoch {int(float(epoch))})")
-            else:
-                print(f"Status: {GREEN}Sampling{NC}")
-            if monitor_verbose:
-                print(f"msg: {msg}")
+            elif job_data["status"] == 'running':
+                if (re.search(r'Job failed', last_line_cut) or re.search(r'[eE]rror', last_line_cut) or re.search(r'FAIL', last_line_cut)) and 's' in config:
+                    if re.search(r'Allocation type', last_line):
+                        print(f"Status: {RED}OOM Error{NC}")
+                        print(f"msg: {msg}")
+                        # write the error to the job data
+                        write_error_to_job(user_obj, job_data, 'OOM')
+                    if re.search(r'GRPC [Ee]rror', last_line):
+                        print(f"Status: {RED}GRPC Error{NC}")
+                        print(f"msg: {msg}")
+                        # write the error to the job data
+                        write_error_to_job(user_obj, job_data, 'grpc')
+                    else:
+                        print(f"Status: {RED}Unknown Error{NC}")
+                        print(f"msg: {msg}")
+                        # write the error to the job data
+                        write_error_to_job(user_obj, job_data, 'unknown')
+                elif (re.search(r'[cC]ompiling', last_line_cut) or re.search(r'[cC]ompilation', last_line_cut) or re.search(r'[cC]ompile', last_line_cut)) and 's' in config:
+                    print(f"Status: {GREEN}Compiling{NC}")
+                    if 'v' in config:
+                        print(f"msg: {msg}")
+                elif re.search(r'[sS]ampling ', last_line_cut) and 's' in config:
+                    epoch = None
+                    if re.search(r'[eE]poch\s([0-9]{1,4})', last_line_cut):
+                        epoch = re.search(r'[eE]poch\s([0-9]{1,6})', last_line_cut).group(1)
+                    elif re.search(r'ep=([0-9]){1,4}\.([0-9]){1,6}', last_line_cut):
+                        epoch = re.search(r'ep=([0-9]){1,4}\.([0-9]){1,6}', last_line_cut).group(0)[3:]
+                    if epoch is not None:
+                        print(f"Status: {GREEN}Sampling{NC} (in epoch {int(float(epoch))})")
+                    else:
+                        print(f"Status: {GREEN}Sampling{NC}")
+                    if 'v' in config:
+                        print(f"msg: {msg}")
 
-        elif re.search(r'[eE]poch\s([0-9]{1,4})', last_line):
-            epoch = re.search(r'[eE]poch\s([0-9]{1,6})', last_line).group(1)
-            print(f"Status: {GREEN}Running{NC} in epoch {epoch}")
-            if monitor_verbose:
-                print(f"msg: {msg}")
-        elif re.search(r'ep=([0-9]){1,4}\.([0-9]){1,6}', last_line):
-            epoch = re.search(r'ep=([0-9]){1,4}\.([0-9]){1,6}', last_line).group(0)[3:]
-            print(f"Status: {GREEN}Running{NC} in epoch {float(epoch):.2f}")
-            if monitor_verbose:
-                print(f"msg: {msg}")
-        elif re.search(r'[iI]nitializing', last_line):
-            print(f"Status: {GREEN}Initializing{NC}")
-            if monitor_verbose:
-                print(f"msg: {msg}")
-        elif re.search(r'[sS]taging', last_line):
-            print(f"Status: {GREEN}Staging{NC}")
-            if monitor_verbose:
-                print(f"msg: {msg}")
-        else:
-            print(f"{YELLOW}Unknown{NC}")
-            print(f"msg: {msg}")
+                elif re.search(r'[eE]poch\s([0-9]{1,4})', last_line_cut) and 's' in config:
+                    epoch = re.search(r'[eE]poch\s([0-9]{1,6})', last_line_cut).group(1)
+                    print(f"Status: {GREEN}Running{NC} in epoch {epoch}")
+                    if 'v' in config:
+                        print(f"msg: {msg}")
+                elif re.search(r'ep=([0-9]){1,4}\.([0-9]){1,6}', last_line_cut) and 's' in config:
+                    epoch = re.search(r'ep=([0-9]){1,4}\.([0-9]){1,6}', last_line_cut).group(0)[3:]
+                    print(f"Status: {GREEN}Running{NC} in epoch {float(epoch):.2f}")
+                    if 'v' in config:
+                        print(f"msg: {msg}")
+                elif re.search(r'[iI]nitializing', last_line_cut) and 's' in config:
+                    print(f"Status: {GREEN}Initializing{NC}")
+                    if 'v' in config:
+                        print(f"msg: {msg}")
+                elif re.search(r'[sS]taging', last_line_cut) and 's' in config:
+                    print(f"Status: {GREEN}Staging{NC}")
+                    if 'v' in config:
+                        print(f"msg: {msg}")
+                elif 's' in config:
+                    print(f"Status: {YELLOW}Unknown{NC}")
+                    print(f"msg: {msg}")
         print('-'*40)
 
 
@@ -696,9 +712,14 @@ def finish_job(window):
         release_lock_data()
     
 def monitor_jobs(user_obj, args):
+    config = None
+    if len(args) > 0:
+        for arg in args:
+            if arg.startswith('-'):
+                config = arg
     try:
         while True:
-            check_jobs(user_obj, args)
+            check_jobs(user_obj, args, config=config)
             time.sleep(user_obj.settings['monitor_upd_time'])
             # clear the screen
             os.system('clear' if os.name == 'posix' else 'cls')
