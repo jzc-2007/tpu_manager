@@ -8,3 +8,4 @@ window_id=$(tmux display-message -p -t "$pane_id" '#S:#I')``
 - ``f-string``的大括号里用和``string``一样的引号有时候会报错，有时候不会，尽量用不一样的
 - ``KeyBoardInterrupt``不属于``Exception``的子类，所以不能用``except Exception``来捕获
 - `gcloud`命令可能有自动重联机制，加上`--ssh-flag="-n"`然后Ctrl+C掉tmux window可以避免这个问题，以及`kill`调远程进程的时候也要杀死父亲进程，避免远程重启（也是之前zombie进程的原因），具体Kill不掉的原因可能是多者，可以做ablation study.
+- 远端炸了以后可能写不进`output.log`,唐
