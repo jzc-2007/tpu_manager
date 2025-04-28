@@ -1,6 +1,7 @@
 from .data_io import read_and_lock_data, write_and_unlock_data, release_lock_data, read_data, write_data
 from .helpers import *
-import json
+from .operate import get_zone_pre
+import json, subprocess, os, time
 
 def clear_MONITOR_log():
     data = read_and_lock_data()
@@ -85,3 +86,98 @@ def merge_global_config(dict_path):
     except Exception as e:
         print(f"{FAIL} merge_global_config: {e}")
         release_lock_data()
+
+
+def debug_stats(tpu):
+    """
+    check whether some jobs is in stats 'D'
+    """
+    zone, pre, tpu = get_zone_pre(tpu)
+    if zone is None:
+        print(f"{FAIL} debug_stats: TPU {tpu} not found")
+        return
+    print(f"{INFO} debug_stats: Checking TPU {tpu} in zone {zone}...")
+    cmd = f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --worker=all --command \"ps -eo pid,stat,cmd | grep 'main.py' | grep -v grep\""
+    try:
+        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=120)
+        stdout, stderr = result.stdout, result.stderr
+    except subprocess.CalledProcessError:
+        print(f"{FAIL} debug_stats: Failed to query TPU state")
+        return 'failed'
+    except subprocess.TimeoutExpired:
+        print(f"{FAIL} debug_stats: Timeout expired")
+        return 'timeout'
+    print(f"stdout: {stdout}")
+    print(f"stderr: {stderr}")
+
+def kill_jobs_tpu_new(tpu):
+    zone, pre, tpu = get_zone_pre(tpu)
+    if zone is None:
+        print(f"{FAIL} kill_jobs_tpu: Could not determine zone.")
+        return
+
+    print(f"{INFO} kill_jobs_tpu: Killing jobs on TPU {tpu} zone {zone}...")
+
+    try:
+        data = read_data()
+        for user in data["users"]:
+            user_tmux_name = data["users"][user]["tmux_name"]
+            for job in data["users"][user]["job_data"]:
+                if job["tpu"] == tpu:
+                    window = job["windows_id"]
+                    if window is not None:
+                        subprocess.run(f"tmux send-keys -t {user_tmux_name}:{window} C-c", shell=True, check=False)
+
+        time.sleep(3)
+
+        list_cmd = (
+            f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --worker=all "
+            "--command \"ps -eo pid,ppid,stat,cmd | grep 'main.py' | grep -v 'grep' || true\""
+        )
+        result = subprocess.run(list_cmd, shell=True, timeout=30, check=False,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        lines = result.stdout.strip().splitlines()
+
+        if not lines:
+            print(f"{INFO} No main.py processes found.")
+            return 'success'
+
+        pids = set()
+
+        for line in lines:
+            parts = line.strip().split(None, 3)
+            if len(parts) >= 2:
+                pid, ppid = parts[0], parts[1]
+                pids.add(pid)
+                pids.add(ppid)
+
+        if not pids:
+            print(f"{INFO} No processes to kill.")
+            return 'success'
+
+        pid_list = " ".join(pids)
+        print(f"{INFO} Killing PIDs: {pid_list}")
+        
+        kill_cmd = (
+            f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --worker=all "
+            f"--command \"sudo kill -9 {pid_list} || true\""
+        )
+        subprocess.run(kill_cmd, shell=True, timeout=30, check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+        print(f"{INFO} Cleaning /dev/accel0 occupation...")
+        kill_accel_cmd = (
+            f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --worker=all "
+            "--command \"pids=$(sudo lsof -w /dev/accel0 | grep 'python' | grep -v 'grep' | awk '{print $2}'); "
+            "if [ ! -z \\\"$pids\\\" ]; then sudo kill -9 $pids; fi\""
+        )
+        subprocess.run(kill_accel_cmd, shell=True, timeout=30, check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    except subprocess.TimeoutExpired:
+        print(f"{FAIL} kill_jobs_tpu: Timeout.")
+        return 'kill timeout'
+    except Exception as e:
+        print(f"{FAIL} kill_jobs_tpu: {e}")
+        return 'kill error'
+
+    print(f"{GOOD} kill_jobs_tpu: Jobs killed successfully.")
+    return 'success'

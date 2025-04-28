@@ -70,12 +70,13 @@ to kill all the tmux windows whose jobs are finished/error/killed.
 To kill a job, use:
 
 ```bash
-tpu kill-job/-k/-kj -w=<windows_id>/window=<windows_id> username # Kill all the jobs in the TPU
+tpu kill/kill-job/-k/-kj -w=<windows_id>/window=<windows_id> username # Kill the job
+tpu kill/-k <tpu> username # Kill the job in the specified TPU and user
 ```
 
 This command will not kill the tmux window but will mark the job as "killed." After that, you can use `tpu clean` to kill the tmux window.
 
-Jobs with child jobs that were rerun/resumed will be killed based on the status of their children.
+Jobs with child jobs that were rerun/resumed will be killed based on the status of their children. Use `tpu clean username -re` to make all the rerun/resumed job be cleaned too.
 
 To kill a specific tmux window (NOT RECOMMENDED):
 
@@ -601,7 +602,7 @@ for arg in "$@";
 echo "Running command: $cmd"
 
 gcloud compute tpus tpu-vm ssh $VM_NAME --zone $ZONE \
-    --worker=all --command "${cmd}" 2>&1 | tee -a $LOGDIR/output.log
+    --worker=all --ssh-flag="-n" --command "${cmd}" 2>&1 | tee -a $LOGDIR/output.log
 
 if grep -q "wandb: Run history:" $LOGDIR/output.log; then
     echo "Job completed successfully"

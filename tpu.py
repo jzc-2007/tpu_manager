@@ -81,7 +81,6 @@ if __name__ == '__main__':
         elif cmd == 'solve' or cmd == 'solve-env': handler.solve_env(args[2])
         elif cmd == 'mount-disk': operate.mount_disk(args[2])
         elif cmd == 'set-wandb': operate.set_wandb(args[2])
-        elif cmd == 'kill-tpu' or cmd == '-kt': operate.kill_jobs_tpu(args[2])
         elif cmd == 'set-monitor-config' or cmd == '-smc': logger.set_monitor_config(args[2:])
         elif cmd == 'get-monitor-config' or cmd == '-gmc': logger.get_monitor_config()
         elif cmd == 'maj': jobs.monitor_all_jobs()
@@ -95,6 +94,8 @@ if __name__ == '__main__':
         elif cmd == 'merge_global_config' or cmd == '-mgc': develop.merge_global_config(args[2])
         elif cmd == '-Ml': develop.show_MONITOR_log() if len(args) < 3 else develop.show_MONITOR_log(args[2])
         elif cmd == '-Mc': develop.clear_MONITOR_log()
+        elif cmd == 'debug-stats': develop.debug_stats(args[2])
+        elif cmd == 'debug-kill': develop.kill_jobs_tpu_new(args[2])
         # ------------ End of development only ------------
 
         else: 
@@ -112,7 +113,7 @@ if __name__ == '__main__':
             elif cmd == 'get-dir': print(dirs.get_dir(user_object, args[2]))
             elif cmd == 'check': jobs.check_jobs(user_object, args[2:])
             elif cmd == 'monitor': jobs.monitor_jobs(user_object, args[2:])
-            elif cmd == 'kill-job' or cmd == '-kj' or cmd == '-k': jobs.kill_job(user_object, args[2:])
+            elif cmd == 'kill-job' or cmd == '-kj' or cmd == '-k' or cmd == 'kill': jobs.kill_job_or_tpu(user_object, args[2:])
             elif cmd == 'run': jobs.run(user_object, args[2:])
             elif cmd == 'resume': jobs.resume(user_object, args[2:])
             elif cmd == 'rerun': jobs.rerun(user_object, args[2:])
@@ -129,7 +130,7 @@ if __name__ == '__main__':
             elif cmd == 'reset-window-num' or cmd == 'reset-window': users.reset_window_num(user_object, args[2:])
             elif cmd == '-czw': handler.clear_zombie_windows(user_object)
             elif cmd == '-czj': jobs.clear_zombie_jobs(user_object)
-            elif cmd == 'clean': jobs.clear_all_jobs(user_object), handler.clear_zombie_windows(user_object), jobs.clear_zombie_jobs(user_object)
+            elif cmd == 'clean': jobs.clear_all_jobs(user_object, args[2:]), handler.clear_zombie_windows(user_object), jobs.clear_zombie_jobs(user_object)
 
             else: print(f"{FAIL} Unknown command {cmd}")
     except Exception as e:

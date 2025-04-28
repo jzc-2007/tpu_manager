@@ -33,10 +33,83 @@ def get_zone_pre(tpu):
         print(f"{FAIL} get_zone_pre: TPU {tpu} not found in any zone")
         return None, None, None
     return zone, tpu in data['all_tpus']['preemptible'], tpu
+ 
+def kill_jobs_tpu(tpu, username = None):
+    zone, pre, tpu = get_zone_pre(tpu)
+    if zone is None:
+        print(f"{FAIL} kill_jobs_tpu: Could not determine zone.")
+        return
 
-import subprocess
+    print(f"{INFO} kill_jobs_tpu: Killing jobs on TPU {tpu} zone {zone}...")
 
-def kill_jobs_tpu(tpu):
+    try:
+        data = read_data()
+        print(f"{INFO} kill_jobs_tpu: Sending C-c to all jobs on TPU {tpu}...")
+        for user in data["users"]:
+            if username is not None and username != user:
+                continue
+            user_tmux_name = data["users"][user]["tmux_name"]
+            for job in data["users"][user]["job_data"]:
+                if job["tpu"] == tpu:
+                    window = job["windows_id"]
+                    if window is not None:
+                        subprocess.run(f"tmux send-keys -t {user_tmux_name}:{window} C-c", shell=True, check=False)
+
+        time.sleep(3)
+
+        list_cmd = (
+            f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --worker=all "
+            "--command \"ps -eo pid,ppid,stat,cmd | grep 'main.py' | grep -v 'grep' || true\""
+        )
+        result = subprocess.run(list_cmd, shell=True, timeout=30, check=False,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        lines = result.stdout.strip().splitlines()
+
+        if not lines:
+            print(f"{INFO} No main.py processes found.")
+            return 'success'
+
+        pids = set()
+
+        for line in lines:
+            parts = line.strip().split(None, 3)
+            if len(parts) >= 2:
+                pid, ppid = parts[0], parts[1]
+                pids.add(pid)
+                pids.add(ppid)
+
+        if not pids:
+            print(f"{INFO} No processes to kill.")
+            return 'success'
+
+        pid_list = " ".join(pids)
+        print(f"{INFO} Killing PIDs: {pid_list}")
+        
+        kill_cmd = (
+            f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --worker=all "
+            f"--command \"sudo kill -9 {pid_list} || true\""
+        )
+        subprocess.run(kill_cmd, shell=True, timeout=30, check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+        print(f"{INFO} Cleaning /dev/accel0 occupation...")
+        kill_accel_cmd = (
+            f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --worker=all "
+            "--command \"pids=$(sudo lsof -w /dev/accel0 | grep 'python' | grep -v 'grep' | awk '{print $2}'); "
+            "if [ ! -z \\\"$pids\\\" ]; then sudo kill -9 $pids; fi\""
+        )
+        subprocess.run(kill_accel_cmd, shell=True, timeout=30, check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    except subprocess.TimeoutExpired:
+        print(f"{FAIL} kill_jobs_tpu: Timeout.")
+        return 'kill timeout'
+    except Exception as e:
+        print(f"{FAIL} kill_jobs_tpu: {e}")
+        return 'kill error'
+
+    print(f"{GOOD} kill_jobs_tpu: Jobs killed successfully.")
+    return 'success'
+
+def kill_jobs_tpu_old(tpu):
     zone, pre, tpu = get_zone_pre(tpu)
     if zone is None:
         print("[FAIL] kill_jobs_tpu: Could not determine zone.")
@@ -50,7 +123,7 @@ def kill_jobs_tpu(tpu):
         "if [ ! -z \\\"$pids\\\" ]; then "
         "for pid in $pids; do echo Killing $pid; sudo kill -9 $pid; done; "
         "else echo 'No main.py processes found.'; fi\""
-    )
+    )    
     cmd2 = (
         f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --worker=all "
         "--command \"pids=$(sudo lsof -w /dev/accel0 | grep 'python' | grep -v 'grep' | awk '{print $2}'); "
@@ -58,83 +131,11 @@ def kill_jobs_tpu(tpu):
         "for pid in $pids; do echo Killing $pid; sudo kill -9 $pid; done; "
         "else echo 'No processes found on /dev/accel0.'; fi\""
     )
-    
-    def run_kill_commands():
-        try:
-            subprocess.run(cmd1, shell=True, timeout=30, check=True,
-                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-            subprocess.run(cmd2, shell=True, timeout=30, check=True,
-                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-            return True
-        except subprocess.TimeoutExpired:
-            print(f"{FAIL} kill_jobs_tpu: Killing jobs timed out.")
-            return False
-        except subprocess.CalledProcessError as e:
-            print(f"{FAIL} kill_jobs_tpu: Killing jobs failed.")
-            print(f"{YELLOW}stdout:{NC} {e.stdout.strip()}")
-            print(f"{YELLOW}stderr:{NC} {e.stderr.strip()}")
-            return False
-
-    def check_residual_processes():
-        check_cmd = (
-            f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --worker=all "
-            "--command \"pgrep -af python | grep 'main.py' || true\""
-        )
-        check_cmd2 = (
-            f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --worker=all "
-            "--command \"sudo lsof -w /dev/accel0 | grep 'python' || true\""
-        )
-        try:
-            result1 = subprocess.run(check_cmd, shell=True, timeout=30, check=True,
-                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-            result2 = subprocess.run(check_cmd2, shell=True, timeout=30, check=True,
-                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-            if result1.stdout.strip() or result2.stdout.strip():
-                return True
-            else:
-                return False
-        except Exception as e:
-            print(f"{FAIL} kill_jobs_tpu: Checking residual processes failed: {e}")
-            return True
-
-    if not run_kill_commands():
-        return 'kill failed'
-
-    time.sleep(2)
-
-    if check_residual_processes():
-        print(f"{YELLOW}[WARNING]{NC} Residual processes found after first kill attempt. Retrying...")
-        if not run_kill_commands():
-            return 'kill failed (retry)'
-
-        if check_residual_processes():
-            print(f"{FAIL} kill_jobs_tpu: Residual processes remain after retry. Manual intervention needed.")
-            return 'residual processes remain'
-    
-    print(f"{GOOD} kill_jobs_tpu: Killing jobs done.")
-    return 'success'
-
-
-def kill_jobs_tpu_his(tpu):
-    zone, pre, tpu = get_zone_pre(tpu)
-    if zone is None:
-        print("[FAIL] kill_jobs_tpu: Could not determine zone.")
-        return
-
-    print(f"{INFO} kill_jobs_tpu: Killing jobs in TPU {tpu} in zone {zone}...")
-
-    cmd = (
-        f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --worker=all "
-        "--command \"pids=$(pgrep -af python | grep 'main.py' | grep -v 'grep' | awk '{print $1}'); "
-        "if [ ! -z \\\"$pids\\\" ]; then "
-        "for pid in $pids; do echo Killing $pid; sudo kill -9 $pid; done; "
-        "else echo 'No main.py processes found.'; fi\""
-    )
 
     try:
-        subprocess.run(cmd, shell=True, timeout=30, check=True,
+        subprocess.run(cmd1, shell=True, timeout=30, check=True,
                        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        subprocess.run(cmd, shell=True, timeout=30, check=True,
+        subprocess.run(cmd2, shell=True, timeout=30, check=True,
                        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     except subprocess.TimeoutExpired:
         print(f"{FAIL} kill_jobs_tpu: Killing jobs timed out")

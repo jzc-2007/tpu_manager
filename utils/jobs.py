@@ -196,14 +196,25 @@ def resume_rerun_job(job, new_tpu = None, load_ckpt = True):
         print(f"{FAIL} {operation}_job: Failed to {operation} job {job['windows_id']} for user {user_obj.name}, error: {e}")
         release_lock_data()
 
-def kill_job(user_obj, args):
+def kill_job_or_tpu(user_obj, args):
     """
     Kill a job in the tmux session with specified window id. Need to acquire the lock.
     """
     windows_id = None
+    data = read_data()
+    all_tpu_list = []
+    for alias, tpu_name in data['tpu_aliases'].items():
+        all_tpu_list.append(alias)
+        all_tpu_list.append(tpu_name)
+    
     for arg in args:
         if arg.startswith('window=') or arg.startswith('-w='):
             windows_id = arg.split('=')[1]
+        if arg in all_tpu_list:
+            print(f"{INFO} kill_job: Killing all jobs using tpu {arg}")
+            kill_jobs_tpu(arg, username=user_obj.name)
+            return
+        
     if windows_id is None:
         print(f"{FAIL} kill_job:No window id provided")
         return
@@ -397,6 +408,8 @@ def run(user_obj, args):
         print(f"Using rule {rule} instead")
         
     try:
+
+        kill_jobs_tpu(tpu)
         data = read_and_lock_data()
 
         session_name = user_obj.tmux_name
@@ -421,8 +434,6 @@ def run(user_obj, args):
             'extra_msgs': {},
             'customized_settings': customized_settings
         })
-
-        kill_jobs_tpu(tpu)
         # make sure that the tpu is ready
         if tpu is not None:
             tpu_status = check_tpu_status(tpu)
@@ -818,7 +829,7 @@ def clear_finished_jobs(user_object):
         print(f"{RED}[Error] {NC}clear_finished_jobs: Failed to clear finished jobs")
         release_lock_data()
 
-def clear_error_jobs(user_object):
+def clear_error_jobs(user_object, clear_rerun = False):
     data = read_and_lock_data()
     try:
         print(f"{INFO} clear_error_jobs: Clearing jobs...")
@@ -833,6 +844,14 @@ def clear_error_jobs(user_object):
                 if ret != 0:
                     print(f"{WARNING} clear_error_jobs: Failed to kill tmux window {user_object.tmux_name}:{job['windows_id']}")
             elif job['status'] == 'resumed' or job['status'] == 'rerunned':
+                if clear_rerun:
+                    print(f"{INFO} clear_error_jobs: Clearing rerun job {job['windows_id']}")
+                    # print(f"{PURPLE}[DEBUG] {NC}clear_error_jobs: Killing tmux window {user_object.tmux_name}:{job['windows_id']}")
+                    ret = os.system(f"tmux kill-window -t {user_object.tmux_name}:{job['windows_id']}")
+                    if ret != 0:
+                        print(f"{WARNING} clear_error_jobs: Failed to kill tmux window {user_object.tmux_name}:{job['windows_id']}")
+                    continue
+                
                 cur_job = job
                 resume_chain = [cur_job]
                 try:
@@ -861,13 +880,17 @@ def clear_error_jobs(user_object):
         print(f"{RED}[Error] {NC}clear_error_jobs: Failed to clear error jobs")
         release_lock_data()
 
-def clear_all_jobs(user_object):
+def clear_all_jobs(user_object, args = None):
+    clear_rerun = False
+    if args is not None:
+        if '-re' in args:
+            clear_rerun = True
     try:
         clear_finished_jobs(user_object)
     except:
         print(f"{RED}[Error] {NC}clear_all_jobs: Failed to clear finished jobs")
     try:
-        clear_error_jobs(user_object)
+        clear_error_jobs(user_object, clear_rerun=clear_rerun)
     except:
         print(f"{RED}[Error] {NC}clear_all_jobs: Failed to clear error jobs{NC}")
 
