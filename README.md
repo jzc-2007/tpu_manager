@@ -281,6 +281,15 @@ The current default settings and their meanings are:
 }
 ```
 
+Also, to avoid concurrency issues of tmux windows creation, we use a `windows_offset` to offset the windows number for each user, and the number goes up by 1 for each new job. If you think the offset is too large, you can set it to a smaller number by:
+
+```bash
+tpu reset-window-num <num> <username>  # reset the offset to <num>
+```
+
+Please be careful not to have conflicts with current jobs.
+
+
 </details>
 
 

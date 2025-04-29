@@ -182,7 +182,7 @@ def reset_window_num(user_obj, args):
         print(f"{FAIL} reset_window_num: User {username} not found")
         return
     window_num = int(args[0]) if args else 1
-    if window_num < 1 or window_num > 100:
+    if window_num < 1 or window_num > 1000:
         raise ValueError(f"Window number {window_num} out of range")
     user_data['windows_offset'] = window_num
     write_and_unlock_data(data)

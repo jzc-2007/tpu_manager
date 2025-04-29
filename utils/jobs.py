@@ -353,8 +353,10 @@ def run(user_obj, args):
             for job in data['users'][user]['job_data']:
                 if job['tpu'] == tpu and job['status'] == 'running':
                     print(f"{WARNING} There is a job using tpu {tpu}(maybe dead), by user {user}")
-                    print(f"DO YOU WANT TO CONTINUE? (y/n)")
-                    res = input()
+                    res = 'y'
+                    if '-f' not in args:
+                        print(f"DO YOU WANT TO CONTINUE? (y/n)")
+                        res = input()
                     if res != 'y' and res != 'Y':
                         print("Exiting...")
                         return
