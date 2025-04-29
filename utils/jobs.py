@@ -725,6 +725,9 @@ def finish_job(window):
                 for job in data['users'][user]['job_data']:
                     if job['windows_id'] == window_num:
                         job['status'] = 'finished'
+                        job['extra_msgs']['finish_time_abs'] = get_abs_time_str()
+                        job['extra_msgs']['finish_time_chn'] = get_chn_time_str()
+                        job['extra_msgs']['finish_time_edt'] = get_edt_time_str()
                         break
                 break
         write_and_unlock_data(data)
@@ -768,7 +771,11 @@ def upd_log(window, log_dir, stage_dir, ka, start_time):
                         job['log_dir'] = log_dir
                         job['stage_dir'] = stage_dir
                         job['tpu'] = ka
-                        job['start_time'] = start_time
+                        job['start_time'] = {
+                            'chn': get_chn_time_str(),
+                            'edt': get_edt_time_str(),
+                            'utc': get_abs_time_str()
+                        }
                         job['status'] = 'running'
                         job['error'] = None
                         break

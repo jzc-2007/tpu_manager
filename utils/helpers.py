@@ -13,6 +13,12 @@ def get_abs_time_str():
     """
     return datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
+def get_chn_time_str():
+    return convert_utcstr_to_chnstr(get_abs_time_str())
+
+def get_edt_time_str():
+    return convert_utcstr_to_edtstr(get_abs_time_str())
+
 def convert_utcstr_to_edtstr(utc_str):
     """
     Convert UTC string to EDT string.
