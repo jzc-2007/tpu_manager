@@ -788,6 +788,8 @@ def upd_log(window, log_dir, stage_dir, ka, start_time):
 def add_tag(user_object, job_window_id, tag):
     data = read_and_lock_data()
     try:
+        if job_window_id.startswith('window=') or job_window_id.startswith('-w='):
+            job_window_id = job_window_id.split('=')[1]
         for job in user_object.job_data:
             if job['windows_id'] == int(job_window_id):
                 job['job_tags'] = tag

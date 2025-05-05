@@ -170,11 +170,12 @@ def mainloop():
             if job['status'] in ['finished', 'rerunned', 'resumed', 'killed'] or not job['monitor']:
                 continue
             if job['status'] == 'error' and job['error'] != 'unknown':
-                status = job['error']
+                error_type = job['error']
             else:
-                status = check_job_status(job)
-            if status in error_jobs:
-                error_jobs[status].append(job)
+                error_type = check_job_status(job)
+            if error_type in error_jobs:
+                error_jobs[error_type].append(job)
+            # print(f"{INFO} mainloop: Found {error_type} job {job['windows_id']} for user {user}")
 
     if len(error_jobs['locked']) != 0:
         error_windows_list = [(job['user'], job['windows_id']) for job in error_jobs['locked']]

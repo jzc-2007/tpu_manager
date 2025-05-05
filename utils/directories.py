@@ -39,7 +39,33 @@ def set_cur(user_obj, args):
             write_and_unlock_data(data)
         else:
             release_lock_data()
+def del_dir(user_obj, args):
+    data = read_and_lock_data()
+    try:
+        assert len(args) >= 1, "Please specify a directory number"
+        num = args[0]
+        if not is_integer(num):
+            print(f"{FAIL} Directory number {num} is not an integer")
+            raise ValueError(f"Directory number {num} is not an integer")
+        if num not in data['users'][user_obj.name]['working_dir']:
+            print(f"{FAIL} Directory number {num} not found")
+            raise ValueError(f"Directory number {num} not found")
+        
+        del data['users'][user_obj.name]['working_dir'][num]
+        print(f"Deleted directory {num}")
+        print("Current directories:")
+        
+        for i, dir in data['users'][user_obj.name]['working_dir'].items():
+            print(f"{i}: {dir}", end='')
+            if i == "1":
+                print("(default)")
+            else:
+                print()
 
+        write_and_unlock_data(data)
+        
+    except:
+        release_lock_data()
 
 def set_dir(user_obj, args):
     data = read_and_lock_data()
