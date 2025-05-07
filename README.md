@@ -74,8 +74,6 @@ tpu kill/kill-job/-k/-kj -w=<windows_id>/window=<windows_id> username # Kill the
 tpu kill/-k <tpu> username # Kill the job in the specified TPU and user
 ```
 
-This command will not kill the tmux window but will mark the job as "killed." After that, you can use `tpu clean` to kill the tmux window.
-
 Jobs with child jobs that were rerun/resumed will be killed based on the status of their children. Use `tpu clean username -re` to make all the rerun/resumed job be cleaned too.
 
 To kill a specific tmux window (NOT RECOMMENDED):

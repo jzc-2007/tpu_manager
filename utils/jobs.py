@@ -231,6 +231,13 @@ def kill_job_or_tpu(user_obj, args):
                         print(f"{INFO} kill_job: Killing job {windows_id} for user {user}")
                         # check the status of the job
                         job['status'] = 'killed'
+                        # send Ctrl+C to the tmux window
+                        session_name = user_obj.tmux_name
+                        os.system(f"tmux send-keys -t {session_name}:{windows_id} C-c")
+                        time.sleep(0.5)
+                        # kill the tmux window
+                        os.system(f"tmux kill-window -t {session_name}:{windows_id}")
+                        
                         break
                 break
         else:

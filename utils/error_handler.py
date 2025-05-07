@@ -119,10 +119,10 @@ def change_ip():
                 print(f"{INFO} job: {job}")
                 res = input("Do you want to resume this job? (y/n): ")
                 if res == 'y':
-                    print(f"{INFO} change-ip: Resuming job {job['job_name']} in windows{job['windows_id']} for user {user}")
+                    print(f"{INFO} change-ip: Resuming job in windows {job['windows_id']} for user {user}")
                     resume_rerun_job(job, load_ckpt=True)
                 else:
-                    print(f"{INFO} change-ip: Not resuming job {job['job_name']} in windows{job['windows_id']} for user {user}")
+                    print(f"{INFO} change-ip: Not resuming job in windows {job['windows_id']} for user {user}")
 
     print(f"{GOOD} change-ip: Resuming all jobs done")
     print(f"{INFO} change-ip: Please remember to restart the monitor script")
