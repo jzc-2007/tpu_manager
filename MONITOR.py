@@ -188,9 +188,9 @@ def mainloop():
     if len(error_jobs['grpc']) != 0:
         error_windows_list = [(job['user'], job['windows_id']) for job in error_jobs['grpc']]
         print(f"{INFO} mainloop: Found {len(error_jobs['grpc'])} grpc jobs, windows list: {error_windows_list}")
-        add_MONITOR_log({
+        add_MONITOR_log(
             f"{INFO} mainloop: Found {len(error_jobs['grpc'])} grpc jobs, windows list: {error_windows_list}"
-        })
+        )
     
     all_good = all(len(error_jobs[error_type]) == 0 for error_type in error_jobs)
 

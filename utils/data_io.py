@@ -1,6 +1,59 @@
 from .helpers import *
 import json, time
 
+def release_lock(args):
+    assert len(args) == 1, "Please specify a lock type to release"
+    lock_type = args[0]
+    if lock_type == 'code':
+        print(f"{INFO} release_lock: releasing code lock")
+        with open(LOCK_FILE, 'r') as file:
+            lock = json.load(file)
+        lock['code']['status'] = False
+        lock['code']['user'] = None
+        with open(LOCK_FILE, 'w') as file:
+            json.dump(lock, file, indent=4)
+        print(f"{INFO} release_lock: code lock released")
+    elif lock_type == 'data':
+        print(f"{INFO} release_lock: releasing data lock")
+        with open(LOCK_FILE, 'r') as file:
+            lock = json.load(file)
+        lock['data']['status'] = False
+        with open(LOCK_FILE, 'w') as file:
+            json.dump(lock, file, indent=4)
+        print(f"{INFO} release_lock: data lock released")
+    else:
+        print(f"{FAIL} release_lock: unknown lock type {lock_type}")
+        raise ValueError(f"Unknown lock type {lock_type}")
+    
+def lock(args):
+    assert len(args) == 1, "Please specify a lock type to lock"
+    lock_type = args[0]
+    if lock_type == 'code':
+        print(f"{INFO} lock: locking code")
+        with open(LOCK_FILE, 'r') as file:
+            lock = json.load(file)
+        if lock['code']['status'] == False:
+            lock['code']['status'] = True
+            with open(LOCK_FILE, 'w') as file:
+                json.dump(lock, file, indent=4)
+        else:
+            print(f"{FAIL} lock: the code is locked now.")
+            raise Exception("Lock not released.")
+    elif lock_type == 'data':
+        print(f"{INFO} lock: locking data")
+        with open(LOCK_FILE, 'r') as file:
+            lock = json.load(file)
+        if lock['data']['status'] == False:
+            lock['data']['status'] = True
+            with open(LOCK_FILE, 'w') as file:
+                json.dump(lock, file, indent=4)
+        else:
+            print(f"{FAIL} lock: the data is locked now.")
+            raise Exception("Lock not released.")
+    else:
+        print(f"{FAIL} lock: unknown lock type {lock_type}")
+        raise ValueError(f"Unknown lock type {lock_type}")
+
 def lock_code(username = None):
     print(f"{INFO} lock_code: locking code for user {username}")
     with open(LOCK_FILE, 'r') as file:

@@ -46,13 +46,12 @@ if __name__ == '__main__':
 
     cmd = args[1]
 
-    if cmd == 'lock-code' or cmd == '-lc': 
-        data_io.lock_code(args[2]) if len(args) > 2 else data_io.lock_code()
+    if cmd == 'lock':
+        data_io.lock(args[2:])
         exit(0)
-    elif cmd == 'unlock-code' or cmd == '-ulc':
-        data_io.unlock_code(args[2]) if len(args) > 2 else data_io.unlock_code()
+    elif cmd == 'rl' or cmd == 'unlock':
+        data_io.release_lock(args[2:])
         exit(0)
-
     if data_io.check_code_lock():
         print(f"{FAIL} Code is locked for developing, please unlock it first.")
         sys.exit(1)
