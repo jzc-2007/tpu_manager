@@ -59,6 +59,7 @@ if __name__ == '__main__':
     try:
         ############### JOBS that don't require a user ###############
         if cmd == 'tldr': desc.tldr()
+        # elif cmd == 'docs' or cmd == 'doc': desc.full_doc()
         elif cmd == 'change-ip': handler.change_ip()
         elif cmd == 'upd-log': jobs.upd_log(args[2], args[3], args[4], args[5], args[6]) #windows, log_dir, stage_dir, ka, time
         elif cmd == 'finish-job': jobs.finish_job(args[2])
@@ -73,8 +74,8 @@ if __name__ == '__main__':
         elif cmd == 'list-users' or cmd == '-lu': users.list_users()
         elif cmd == 'init': handler.initialization()
         elif cmd == 'check-rules': jobs.check_rules()
-        elif cmd == 'reapply': operate.apply_pre(args[2], delete=True)
-        elif cmd == 'apply': operate.apply_pre(args[2], delete=False)
+        elif cmd == 'reapply': operate.reapply(args[2:])
+        elif cmd == 'apply': operate.apply(args[2:])
         elif cmd == 'restart': operate.restart(args[2])
         elif cmd == 'apply-norm': operate.apply_norm(args[2], delete=False)
         elif cmd == 'reapply-norm': operate.apply_norm(args[2], delete=True)

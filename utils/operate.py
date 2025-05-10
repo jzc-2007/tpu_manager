@@ -181,6 +181,20 @@ def set_wandb(tpu):
     print(f"{GOOD} set_wandb: Setting wandb done")
     return 'success'
 
+def apply(args):
+    if '-norm' in args:
+        tpu = args[1] if args[0] == '-norm' else args[0]
+        return apply_norm(tpu, delete=False)
+    else:
+        return apply_pre(args[0], delete=False)
+    
+def reapply(args):
+    if '-norm' in args:
+        tpu = args[1] if args[0] == '-norm' else args[0]
+        return apply_norm(tpu, delete=True)
+    else:
+        return apply_pre(args[0], delete=True)
+
 def apply_pre(tpu, delete=True):
     zone, pre, tpu = get_zone_pre(tpu)
     if zone is None: return

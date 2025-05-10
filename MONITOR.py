@@ -137,6 +137,7 @@ def restart_rerun(job, timeout=900):
 
 def reapply_resume(job, timeout=900):
     ka = job["tpu"]
+    add_MONITOR_log(f"{INFO} reapply_resume: Reapply TPU {ka}...")
     result_queue = multiprocessing.Queue()
     process = multiprocessing.Process(target=reapply_worker, args=(ka, result_queue))
     running_processes.append(process)
@@ -175,21 +176,20 @@ def mainloop():
                 error_type = check_job_status(job)
             if error_type in error_jobs:
                 error_jobs[error_type].append(job)
-            # print(f"{INFO} mainloop: Found {error_type} job {job['windows_id']} for user {user}")
 
     if len(error_jobs['locked']) != 0:
         error_windows_list = [(job['user'], job['windows_id']) for job in error_jobs['locked']]
         print(f"{INFO} mainloop: Found {len(error_jobs['locked'])} locked jobs, windows list: {error_windows_list}")
-        add_MONITOR_log(f"{INFO} Found {len(error_jobs['locked'])} locked jobs, restart them")
+        add_MONITOR_log(f"{INFO} mainloop: Found {len(error_jobs['locked'])} locked jobs, windows list: {error_windows_list}")
     if len(error_jobs['preempted']) != 0:
         error_windows_list = [(job['user'], job['windows_id']) for job in error_jobs['preempted']]
         print(f"{INFO} mainloop: Found {len(error_jobs['preempted'])} preempted jobs, windows list: {error_windows_list}")
-        add_MONITOR_log(f"{INFO} Found {len(error_jobs['preempted'])} preempted jobs, reapply them")
+        add_MONITOR_log(f"{INFO} mainloop: Found {len(error_jobs['preempted'])} preempted jobs, windows list: {error_windows_list}")
     if len(error_jobs['grpc']) != 0:
         error_windows_list = [(job['user'], job['windows_id']) for job in error_jobs['grpc']]
         print(f"{INFO} mainloop: Found {len(error_jobs['grpc'])} grpc jobs, windows list: {error_windows_list}")
         add_MONITOR_log({
-            "msg": f"Found {len(error_jobs['grpc'])} grpc jobs, reapply them"
+            f"{INFO} mainloop: Found {len(error_jobs['grpc'])} grpc jobs, windows list: {error_windows_list}"
         })
     
     all_good = all(len(error_jobs[error_type]) == 0 for error_type in error_jobs)

@@ -43,7 +43,7 @@ def parse_args_resume_rerun(args):
     windows_id = None
     new_tpu = None
     for arg in args:
-        if arg.startswith('tpu='):
+        if arg.startswith('tpu=') or arg.startswith('ka='):
             new_tpu = arg.split('=')[1]
         if arg.startswith('window=') or arg.startswith('-w='):
             windows_id = arg.split('=')[1]
@@ -634,11 +634,17 @@ def check_jobs(user_obj, args, config = None):
                         print(f"msg: {msg}")
                         # write the error to the job data
                         write_error_to_job(user_obj, job_data, 'OOM')
-                    if re.search(r'GRPC [Ee]rror', last_line):
+                    elif re.search(r'GRPC [Ee]rror', last_line):
                         print(f"Status: {RED}GRPC Error{NC}")
                         print(f"msg: {msg}")
                         # write the error to the job data
                         write_error_to_job(user_obj, job_data, 'grpc')
+                        ack_MONITOR()
+                    elif re.search(r'python: No such file or directory', last_line):
+                        print(f"Status: {RED}File Error{NC}")
+                        print(f"msg: {msg}")
+                        # write the error to the job data
+                        write_error_to_job(user_obj, job_data, 'file error')
                         ack_MONITOR()
                     else:
                         print(f"Status: {RED}Unknown Error{NC}")
