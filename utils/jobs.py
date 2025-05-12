@@ -2,7 +2,7 @@ import os, re, time, json, copy
 from .helpers import *
 from . import users
 from .data_io import read_and_lock_data, write_and_unlock_data, release_lock_data, read_data
-from .operate import check_tpu_status, apply_pre, kill_jobs_tpu, get_zone_pre, restart
+from .operate import check_tpu_status, apply_pre, kill_jobs_tpu, get_zone_pre, restart, check_tpu_running
 RULE_DICT ={
     'pre':{
         'preempted': 'reapply',
@@ -265,131 +265,24 @@ def restart_run(user_obj, args):
         return
     print(f"{GOOD} Restarted TPU {tpu} successfully")
     run(user_obj, args)
-        
 
-def run(user_obj, args):
+    # read config args
+
+def parse_config_args(user_obj, args):
+    """
+    Parse the config args from the command line arguments to use in `run`.
+    Return: dir_id, dir_path, tpu, tag, rule, monitor, config_args, customized_settings
+    """
     data = read_data()
-    user_obj = users.user_from_dict(data['users'][user_obj.name])
-    dir = '1'
-    for arg in args:
-        if arg.startswith('dir='):
-            dir = arg.split('=')[1]
-            break
-    dir_path = user_obj.working_dir[dir]
-    if not os.path.exists(dir_path):
-        raise ValueError(f"Directory {dir_path} does not exist")
-    # Get the tpu name
-    tpu = None
-    for arg in args:
-        if arg in data['tpu_aliases']:
-            tpu = data['tpu_aliases'][arg]
-            print(f"{INFO} Using tpu {tpu}")
-            break
-    if tpu is None:
-        print('No TPU Specified, use the TPU in ka.sh instead')
-
-    # Check the status of the TPU
-    if tpu is not None:
-        print(f"{INFO} Checking the status of TPU {tpu}...")
-        tpu_status = check_tpu_status(tpu)
-
-        if tpu_status == 'preempted':
-            print(f"{WARNING} TPU {tpu} is preempted")
-            REAPPLY = False
-            if '-apply' in args:
-                print(f"{INFO} Re-applying preempted TPU {tpu}...")
-                REAPPLY = True
-            else:
-                print(f"DO YOU WANT TO REAPPLY? (y/n)")
-                res = input()
-                if res == 'y' or res == 'Y':
-                    print(f"{INFO} Re-applying preempted TPU {tpu}...")
-                    REAPPLY = True
-                else:
-                    print(f"{INFO} Quiting... {tpu}")
-                    REAPPLY = False
-            if not REAPPLY:
-                return
-            else:
-                try:
-                    apply_pre(tpu, delete=True)
-                except Exception as e:
-                    print(f"{FAIL} Failed to reapply TPU {tpu}: {e}")
-                    return
-                except KeyboardInterrupt:
-                    print(f"{INFO} Stopping reapply...")
-                    return
-                print(f"{GOOD} Re-applying TPU {tpu} successfully")
-
-        elif tpu_status == 'ready':
-            print(f"{GOOD} TPU {tpu} is ready, starting job...")
-
-        elif tpu_status == 'failed':
-            print(f"{WARNING} Failed to query status")
-            print(f"This may indicate that this TPU is deleted, do you want to apply? (y/n)")
-            res = input()
-            if res == 'y' or res == 'Y':
-                print(f"{INFO} Re-applying TPU {tpu}...")
-                try:
-                    apply_pre(tpu, delete=False)
-                except Exception as e:
-                    print(f"{FAIL} Failed to reapply TPU {tpu}: {e}")
-                    return
-                except KeyboardInterrupt:
-                    print(f"{INFO} Stopping reapply...")
-                    return
-                print(f"{GOOD} Applying TPU {tpu} successfully")
-            else:
-                print(f"{INFO} Quiting... {tpu}")
-                return
-
-        elif tpu_status == 'restarting' or tpu_status == 'creating' or tpu_status == 'stopping':
-            print(f"{WARNING} TPU {tpu} is {tpu_status.lower()}")
-            print(f"{INFO} Quiting... {tpu}")
-            return
-
-        else:
-            print(f"{WARNING} TPU {tpu} is in unknown state {tpu_status}")
-            print(f"{INFO} Quiting... {tpu}")
-            return
-
-
-    # Check if there is job running using this tpu
-    if tpu is not None:
-        for user in data['users']:
-            for job in data['users'][user]['job_data']:
-                if job['tpu'] == tpu and job['status'] == 'running':
-                    print(f"{WARNING} There is a job using tpu {tpu}(maybe dead), by user {user}")
-                    res = 'y'
-                    if '-f' not in args:
-                        print(f"DO YOU WANT TO CONTINUE? (y/n)")
-                        res = input()
-                    if res != 'y' and res != 'Y':
-                        print("Exiting...")
-                        return
-                    # change the status of this job to 'killed'
-                    data = read_and_lock_data()
-                    for user_ in data['users']:
-                        if data['users'][user_]['tmux_name'] == user_obj.tmux_name:
-                            for job_ in data['users'][user_]['job_data']:
-                                if str(job_['windows_id']) == str(job['windows_id']):
-                                    job_['status'] = 'killed'
-                                    break
-                            break
-                    write_and_unlock_data(data)
 
     config_args = ""
-    tag, rule = None, None
-    preemptible = tpu in data['all_tpus']['preemptible']
+    tag, rule, tpu = None, None, None
     monitor = True
     ignore_keys = ['dir', 'user', 'id', 'tag', 'rule', 'monitor']
     customized_settings = {}
-
-    if "--log-stage" in args:
-        customized_settings['log_stage'] = True
+    dir_id = '1'
 
     for arg in args:
-        #check if contains '='
         if '=' in arg:
             key, value = arg.split('=')
             if key not in ignore_keys:
@@ -409,15 +302,143 @@ def run(user_obj, args):
                     monitor = True
                 else:
                     raise ValueError(f"Value {value} is not a valid boolean")
+            if key == 'dir':
+                dir_id = value
+                
+        if arg == '--log-stage':
+            customized_settings['log_stage'] = True
+            
+        if arg in data['tpu_aliases']:
+            tpu = data['tpu_aliases'][arg]
+            print(f"{INFO} run: Using tpu {tpu}")
+
+    dir_path = user_obj.working_dir[dir_id]
+
+    if not os.path.exists(dir_path):
+        raise ValueError(f"Directory {dir_path} does not exist")
+
+    if tpu is None:
+        print(f'{INFO} run: No TPU Specified, use the TPU in ka.sh instead')
+
+    preemptible = tpu in data['all_tpus']['preemptible']
+
     if rule is None:
         rule = 'pass' if not preemptible else 'pre'
+        
     if rule not in RULE_DICT:
         print(f"Rule {rule} is not valid.")
         rule = 'pass' if not preemptible else 'pre'
         print(f"Using rule {rule} instead")
+
+    return dir_id, dir_path, tpu, tag, rule, monitor, config_args, customized_settings   
+
+def run(user_obj, args):
+    print('args:', args)
+    data = read_data()
+    user_obj = users.user_from_dict(data['users'][user_obj.name])
+    
+    dir_id, dir_path, tpu, tag, rule, monitor, config_args, customized_settings = parse_config_args(user_obj, args)
+
+    # Check the status of the TPU, and reapply if needed
+    if tpu is not None:
+        print(f"{INFO} Checking the status of TPU {tpu}...")
+        tpu_status = check_tpu_status(tpu)
+
+        if tpu_status == 'preempted':
+            print(f"{WARNING} run: TPU {tpu} is preempted")
+            REAPPLY = False
+            if '-apply' in args:
+                print(f"{INFO} run: Re-applying preempted TPU {tpu}...")
+                REAPPLY = True
+            else:
+                print(f"DO YOU WANT TO REAPPLY? (y/n)")
+                res = input()
+                if res == 'y' or res == 'Y':
+                    print(f"{INFO} run: Re-applying preempted TPU {tpu}...")
+                    REAPPLY = True
+                else:
+                    print(f"{INFO} run: Quiting... {tpu}")
+                    REAPPLY = False
+            if not REAPPLY: return
+            try:
+                apply_pre(tpu, delete=True)
+            except Exception as e:
+                print(f"{FAIL} run: Failed to reapply TPU {tpu}: {e}")
+                return
+            except KeyboardInterrupt:
+                print(f"{INFO} run: Stopping reapply...")
+                return
+            print(f"{GOOD} run: Re-applying TPU {tpu} successfully")
+
+        elif tpu_status == 'ready':
+            print(f"{GOOD} run: TPU {tpu} is ready, starting job...")
+
+        elif tpu_status == 'failed':
+            print(f"{WARNING} run: Failed to query status")
+            print(f"This may indicate that this TPU is deleted, do you want to apply? (y/n)")
+            res = input()
+            if res == 'y' or res == 'Y':
+                print(f"{INFO} run: Re-applying TPU {tpu}...")
+                try: apply_pre(tpu, delete=False)
+                except Exception as e:
+                    print(f"{FAIL} run: Failed to reapply TPU {tpu}: {e}")
+                    return
+                except KeyboardInterrupt:
+                    print(f"{INFO} run: Stopping reapply...")
+                    return
+                print(f"{GOOD} run: Applying TPU {tpu} successfully")
+            else:
+                print(f"{INFO} run: Quiting... {tpu}")
+                return
+
+        elif tpu_status == 'restarting' or tpu_status == 'creating' or tpu_status == 'stopping':
+            print(f"{WARNING} run: TPU {tpu} is {tpu_status.lower()}")
+            print(f"{INFO} run: Quiting... {tpu}")
+            return
+
+        else:
+            print(f"{WARNING} run: TPU {tpu} is in unknown state {tpu_status}")
+            print(f"{INFO} run: Quiting... {tpu}")
+            return
+
+
+    # Check if there are jobs running in the tpu
+    if tpu is not None:
+        running = check_tpu_running(tpu)
+
+        print(f"{INFO} run: TPU {tpu} is {running}")
+
+        if running != 'free':
+            print(f"{WARNING} run: TPU {tpu} is not free, do you want to continue? (y/n)")
+            res = input()
+            if res != 'y' and res != 'Y':
+                print(f"{INFO} run: Quiting... {tpu}")
+                return
+            
+        for user in data['users']:
+            for job in data['users'][user]['job_data']:
+                if job['tpu'] == tpu and job['status'] == 'running':
+                    print(f"{WARNING} There is a job using tpu {tpu}(maybe dead), by user {user}")
+                    res = 'y'
+                    if '-f' not in args:
+                        print(f"DO YOU WANT TO CONTINUE? (y/n)")
+                        res = input()
+                    if res != 'y' and res != 'Y':
+                        print("Exiting...")
+                        return
+                    
+                    # mark the jobs in this tpu as killed
+                    data = read_and_lock_data()
+                    for user_ in data['users']:
+                        if data['users'][user_]['tmux_name'] == user_obj.tmux_name:
+                            for job_ in data['users'][user_]['job_data']:
+                                if str(job_['windows_id']) == str(job['windows_id']):
+                                    job_['status'] = 'killed'
+                                    break
+                            break
+                    write_and_unlock_data(data)
         
     try:
-
         kill_jobs_tpu(tpu)
         data = read_and_lock_data()
 
@@ -428,7 +449,7 @@ def run(user_obj, args):
         data['users'][user_obj.name]['job_data'].append({
             'user': user_obj.name,
             'windows_id': id,
-            'job_dir_id': dir,
+            'job_dir_id': dir_id,
             'job_dir': dir_path,
             'tpu': tpu,
             'job_tags': tag,
@@ -482,7 +503,7 @@ def check_all_jobs(args):
     """
     config = '-wts'
     for arg in args:
-        if arg.startswith('-'):
+        if arg.startswith('-') and args not in ['-f', '-q', '-apply']:
             config = arg
         
     data = read_data()
@@ -530,9 +551,8 @@ def check_jobs(user_obj, args, config = None):
     """
     Print the status of all the jobs in the tmux session.
     """
-    # Get the tmux session name
     for arg in args:
-        if arg.startswith('-'):
+        if arg.startswith('-') and args not in ['-f', '-q', '-apply']:
             config = arg
 
     if config is None:
@@ -546,15 +566,10 @@ def check_jobs(user_obj, args, config = None):
     print(f'config: {config}')
 
     session_name = user_obj.tmux_name
-    # Get all the windows in the tmux session
     windows = os.popen(f"tmux list-windows -t {session_name}").read().splitlines()
-    # Do window by window
     for window in windows:
-        # Get the window id
         window_id = window.split(':')[0]
-        # Get the window name
         window_name = window.split(':')[1].split(' ')[0]
-        # Find that in the job_data
         job_data = None
         for job in user_obj.job_data:
             if str(job['windows_id']) == str(window_id):
@@ -572,19 +587,35 @@ def check_jobs(user_obj, args, config = None):
             except Exception as e:
                 father_job = None
             if 'w' in config:
+                tag_str = ''
+                if job_data['job_tags'] is not None:
+                    tag_str = f"tag:{job_data['job_tags']}"
+
+                rerun_str = ''
                 if father_job is not None:
-                    print(f"Window {window_id} (tag: {job_data['job_tags']}, rerun/resume: Window {father_job}, stage {job_data['stage']+1})")
+                    if job_data['status'] == 'resumed':
+                        rerun_str = f"resume:{father_job}; stage:{job_data['stage']+1}"
+                    elif job_data['status'] == 'rerunned':
+                        rerun_str = f"rerun:{father_job}; stage:{job_data['stage']+1}"
+                
+                if tag_str != '' and rerun_str != '':
+                    print(f"Window {window_id}: ({tag_str}, {rerun_str})")
+
+                elif tag_str != '':
+                    print(f"Window {window_id}: ({tag_str})")
+
+                elif rerun_str != '':
+                    print(f"Window {window_id}: ({rerun_str})")
+
                 else:
-                    print(f"Window {window_id} (tag: {job_data['job_tags']})")
+                    print(f"Window {window_id}")
+
             if 'd' in config:
                 print(f"DIR: {job_data['job_dir'].split('/')[-1]}")
             if 't' in config:
-                print(f"TPU: {job_data['tpu']}")
-        # Get the window last line
+                print(f"TPU: {job_data['tpu'][10:]}")
         last_line = os.popen(f"tmux capture-pane -t {session_name}:{window_id} -p").read()
-        # remove all the empty spaces in the end
         last_line = last_line.rstrip()
-        # Get last user_obj.monitor_length words
         show_length = user_obj.settings['show_length']
         monitor_length = user_obj.settings['monitor_length']
         monitor_verbose = user_obj.settings['monitor_verbose']
@@ -595,67 +626,50 @@ def check_jobs(user_obj, args, config = None):
             if job_data["status"] == 'starting':
                 print(f"{WARNING} Don't have logdir yet")
             if job_data["status"] == 'error':
-                if job_data["error"] == 'preempted':
-                    print(f"Status: {RED}Preempted{NC}")
-                elif job_data["error"] == 'OOM':
-                    print(f"Status: {RED}OOM{NC}")
-                else:
-                    print(f"Status: {RED}Error{NC}")
-                    print(f"msg: {msg}")
+                if job_data["error"] == 'preempted': print(f"Status: {RED}Preempted{NC}")
+                elif job_data["error"] == 'OOM': print(f"Status: {RED}OOM{NC}")
+                else: print(f"Status: {RED}Error{NC}\nmsg: {msg}")
                 print('-'*40)
                 continue
             elif job_data["status"] == 'killed':
                 print(f"Status: {YELLOW}Killed{NC}")
-                if 'v' in config:
-                    print(f"msg: {msg}")
+                if 'v' in config: print(f"msg: {msg}")
                 print('-'*40)
                 continue
             elif job_data["status"] == 'resumed' or job_data["status"] == 'rerunned':
-                try:
-                    child = job_data['extra_msgs']['child']
+                try: child = job_data['extra_msgs']['child']
                 except Exception as e:
                     print(f"{RED}Failed to get child window id{NC}")
                     child = None
-                print(f"Status: {YELLOW}{job_data['error']}{NC} ({job_data['status']} in window {child})")
-                if 'v' in config:
-                    print(f"msg: {msg}")
+                print(f"Status: {YELLOW}{job_data['error']}{NC} ({job_data['status']} in {child})")
+                if 'v' in config: print(f"msg: {msg}")
                 print('-'*40)
                 continue
             elif job_data["status"] == 'finished':
                 print(f"Status: {GREEN}Finished{NC}")
-                if 'v' in config:
-                    print(f"msg: {msg}")
+                if 'v' in config: print(f"msg: {msg}")
                 print('-'*40)
                 continue
             elif job_data["status"] == 'running' or job_data["status"] == 'starting':
                 if (re.search(r'Job failed', last_line_cut) or re.search(r'[eE]rror', last_line_cut) or re.search(r'FAIL', last_line_cut)) and 's' in config:
                     if re.search(r'Allocation type', last_line):
-                        print(f"Status: {RED}OOM Error{NC}")
-                        print(f"msg: {msg}")
-                        # write the error to the job data
+                        print(f"Status: {RED}OOM Error{NC}\nmsg: {msg}")
                         write_error_to_job(user_obj, job_data, 'OOM')
                     elif re.search(r'GRPC [Ee]rror', last_line):
-                        print(f"Status: {RED}GRPC Error{NC}")
-                        print(f"msg: {msg}")
-                        # write the error to the job data
+                        print(f"Status: {RED}GRPC Error{NC}\nmsg: {msg}")
                         write_error_to_job(user_obj, job_data, 'grpc')
                         ack_MONITOR()
                     elif re.search(r'python: No such file or directory', last_line):
-                        print(f"Status: {RED}File Error{NC}")
-                        print(f"msg: {msg}")
-                        # write the error to the job data
+                        print(f"Status: {RED}File Error{NC}\nmsg: {msg}")
                         write_error_to_job(user_obj, job_data, 'file error')
                         ack_MONITOR()
                     else:
-                        print(f"Status: {RED}Unknown Error{NC}")
-                        print(f"msg: {msg}")
-                        # write the error to the job data
+                        print(f"Status: {RED}Unknown Error{NC}\nmsg: {msg}")
                         write_error_to_job(user_obj, job_data, 'unknown')
                         ack_MONITOR()
                 elif (re.search(r'[cC]ompiling', last_line_cut) or re.search(r'[cC]ompilation', last_line_cut) or re.search(r'[cC]ompile', last_line_cut)) and 's' in config:
                     print(f"Status: {GREEN}Compiling{NC}")
-                    if 'v' in config:
-                        print(f"msg: {msg}")
+                    if 'v' in config: print(f"msg: {msg}")
                 elif re.search(r'[sS]ampling ', last_line_cut) and 's' in config:
                     epoch = None
                     if re.search(r'[eE]poch\s([0-9]{1,4})', last_line_cut):
@@ -671,25 +685,20 @@ def check_jobs(user_obj, args, config = None):
 
                 elif re.search(r'[eE]poch\s([0-9]{1,4})', last_line_cut) and 's' in config:
                     epoch = re.search(r'[eE]poch\s([0-9]{1,6})', last_line_cut).group(1)
-                    print(f"Status: {GREEN}Running{NC} in epoch {epoch}")
-                    if 'v' in config:
-                        print(f"msg: {msg}")
+                    print(f"Status: {GREEN}Running{NC} (ep={epoch})")
+                    if 'v' in config: print(f"msg: {msg}")
                 elif re.search(r'ep=([0-9]){1,4}\.([0-9]){1,6}', last_line_cut) and 's' in config:
                     epoch = re.search(r'ep=([0-9]){1,4}\.([0-9]){1,6}', last_line_cut).group(0)[3:]
-                    print(f"Status: {GREEN}Running{NC} in epoch {float(epoch):.2f}")
-                    if 'v' in config:
-                        print(f"msg: {msg}")
+                    print(f"Status: {GREEN}Running{NC} (ep={float(epoch):.2f})")
+                    if 'v' in config: print(f"msg: {msg}")
                 elif re.search(r'[iI]nitializing', last_line_cut) and 's' in config:
                     print(f"Status: {GREEN}Initializing{NC}")
-                    if 'v' in config:
-                        print(f"msg: {msg}")
+                    if 'v' in config: print(f"msg: {msg}")
                 elif re.search(r'[sS]taging', last_line_cut) and 's' in config:
                     print(f"Status: {GREEN}Staging{NC}")
-                    if 'v' in config:
-                        print(f"msg: {msg}")
+                    if 'v' in config: print(f"msg: {msg}")
                 elif 's' in config:
-                    print(f"Status: {YELLOW}Unknown{NC}")
-                    print(f"msg: {msg}")
+                    print(f"Status: {YELLOW}Unknown{NC}\nmsg: {msg}")
         print('-'*40)
 
 

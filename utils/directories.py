@@ -91,6 +91,34 @@ def set_dir(user_obj, args):
     except:
         release_lock_data()
 
+def swap_dir(user_obj, args):
+    data = read_and_lock_data()
+    try:
+        assert len(args) >= 2, "Please specify two directory numbers"
+        num1, num2 = args[0], args[1]
+        if not is_integer(num1) or not is_integer(num2):
+            raise ValueError(f"Directory numbers {num1} and {num2} are not integers")
+        if num1 not in data['users'][user_obj.name]['working_dir'] or num2 not in data['users'][user_obj.name]['working_dir']:
+            raise ValueError(f"Directory numbers {num1} and {num2} not found")
+        
+        data['users'][user_obj.name]['working_dir'][num1], data['users'][user_obj.name]['working_dir'][num2] = \
+            data['users'][user_obj.name]['working_dir'][num2], data['users'][user_obj.name]['working_dir'][num1]
+        
+        print(f"Swapped directories {num1} and {num2}")
+        print("Current directories:")
+        
+        for i, dir in data['users'][user_obj.name]['working_dir'].items():
+            print(f"{i}: {dir}", end='')
+            if i == "1":
+                print("(default)")
+            else:
+                print()
+
+        write_and_unlock_data(data)
+        
+    except:
+        release_lock_data()
+
 def list_dir(user_obj, args):
     all_dirs = user_obj.working_dir
     if len(all_dirs) == 0:

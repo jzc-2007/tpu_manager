@@ -320,6 +320,10 @@ def apply_norm(tpu, delete=True):
         return 'unknown'
     
 def check_tpu_status(tpu):
+    """
+    Check whether a TPU is preempted or not.
+    return value: ['no tpu found', 'preempted', 'terminated', 'creating', 'ready', 'failed']
+    """
     zone, pre, tpu = get_zone_pre(tpu)
     if zone is None: return
     cmd = f"gcloud compute tpus describe {tpu} --zone={zone} --format='value(state)'"
@@ -331,10 +335,45 @@ def check_tpu_status(tpu):
     
     return state.lower()
 
+def check_tpu_running(tpu, quiet = True):
+    """
+    Check whether a TPU is running or not.
+    return value: ['running', 'free', 'failed']
+    """
+    zone, pre, tpu = get_zone_pre(tpu)
+    if zone is None: return
+    cmd = f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --worker=all --command \"sudo lsof -w /dev/accel0\" "
+    try:
+        if quiet:
+            result = subprocess.run(cmd, shell=True, timeout=30, check=False,
+                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        else:
+            result = subprocess.run(cmd, shell=True, timeout=30, check=False,
+                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        if result.returncode == 0:
+            if quiet:
+                return 'running'
+            else:
+                print(f"{INFO} check_tpu_running: TPU {tpu} is running")
+                return 'running'
+        else:
+            if quiet:
+                return 'free'
+            else:
+                print(f"{INFO} check_tpu_running: TPU {tpu} is free")
+                return 'free'
+    except subprocess.TimeoutExpired:
+        if quiet:
+            return 'failed'
+        else:
+            print(f"{FAIL} check_tpu_running: Timeout expired")
+            return 'failed'
+        
+
 def describe_tpu(tpu, quiet = False):
     """
     Describe the TPU.
-    Return value: ['no tpu found', 'preempted', 'terminated', 'creating', 'success', 'test env failed', 'file error', 'unknown']
+    Return value: ['no tpu found', 'preempted', 'test env failed', 'file error', 'unknown', 'running', 'free', 'failed']
     """
     zone, pre, tpu = get_zone_pre(tpu)
     if zone is None: 
@@ -358,28 +397,41 @@ def describe_tpu(tpu, quiet = False):
         return 'creating'
     elif res == 'ready':
         if not quiet:
-            print(f"{INFO} TPU {tpu} is {GREEN}READY{NC}")
-            print(f"{INFO} Checking environment in TPU {tpu}...")
-        state = check_env(tpu, quiet=True)
+            print(f"{INFO} describe_tpu: TPU {tpu} is {GREEN}READY{NC}")
+            # print(f"{INFO} describe_tpu: Checking environment in TPU {tpu}...")
+        state = check_env(tpu, quiet=quiet)
         if state == 'success':
             if not quiet:
-                print(f"{GOOD} Environment in TPU {tpu} is good!")
-            return 'success'
+                print(f"{GOOD} describe_tpu: Environment in TPU {tpu} is good!")
+                print(f"{INFO} describe_tpu: Checking TPU {tpu} running state...")
+            running = check_tpu_running(tpu, quiet=quiet)
+            if running == 'running':
+                if not quiet:
+                    print(f"{GOOD} describe_tpu: TPU {tpu} is {GREEN}running{NC}")
+                    return 'running'
+            elif running == 'free':
+                if not quiet:
+                    print(f"{GOOD} describe_tpu: TPU {tpu} is {GREEN}free{NC}")
+                    return 'free'
+            else:
+                if not quiet:
+                    print(f"{FAIL} describe_tpu: TPU {tpu} is getting unknown error, please contact the admin.")
+                    return 'failed'
         elif state == 'failed':
             if not quiet:
-                print(f"{FAIL} Environment in TPU {tpu} is not good")
+                print(f"{FAIL} describe_tpu: Environment in TPU {tpu} is not good")
                 print(f"state: {state}")
                 print("Unexpected error, please check the TPU manually, or contact the admin")
             return 'failed'
         elif state == 'file error':
             if not quiet:
-                print(f"{FAIL} Environment in TPU {tpu} has file error")
-                print(f"{INFO} You may need to {PURPLE}mount the NFS{NC} by `tpu mount-disk`, or solve the env by `tpu solve`")
+                print(f"{FAIL} describe_tpu: Environment in TPU {tpu} has file error")
+                print(f"{INFO} describe_tpu: You may need to {PURPLE}mount the NFS{NC} by `tpu mount-disk`, or solve the env by `tpu solve`")
             return 'file error'
         elif state == 'occupied':
             if not quiet:
-                print(f"{FAIL} Environment in TPU {tpu} is occupied")
-                print(f"{INFO} You may need to {PURPLE}kill the jobs{NC} by `tpu kill-jobs`")
+                print(f"{FAIL} describe_tpu: Environment in TPU {tpu} is {YELLOW}occupied{NC}")
+                # print(f"{INFO} describe_tpu: You may need to {PURPLE}kill the jobs{NC} by `tpu kill-jobs`")
             return 'occupied'
         elif state == 'unknown':
             if not quiet:

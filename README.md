@@ -15,7 +15,7 @@ More usage in **two sentences**: Use ``tpu tldr`` to see useful commands, and ``
 ## Full docs
 
 <details>
-<summary> <strong>Setup(<strong>IMPORTANT</strong>) </strong></summary>
+<summary> <strong>1. Setup(<strong>IMPORTANT</strong>) </strong></summary>
 
 You should **update your scripts** to the newest version supporting command-line arguments. The newest scripts can be pulled from zhh's repo. The current finishing check is based on wandb final output, so please make sure your scripts are using wandb to log the final output.  
 Also, this script is not very robust to attack, so please try **not to do OOD things**, for example, setting username to be `run`, `false`, `v2-32-2` or Chinese characters.
@@ -25,7 +25,7 @@ Use ``tpu add-user`` and follow the instructions to add your username.
 </details>
 
 <details>
-<summary> <strong>Setting Working Directory & Running Jobs (<strong>IMPORTANT</strong>) </strong></summary>
+<summary> <strong>2. Setting Working Directory & Running Jobs (<strong>IMPORTANT</strong>) </strong></summary>
 
 The working directory is where you have your scripts and code. You can set multiple working directories and choose one when running code. The default working directory is `1`.  
 You can set the working directory and run the job by:
@@ -44,18 +44,37 @@ For all the aliases, use `tpu -lta` (list TPU aliases) to see. You can also add 
 
 ```bash
 tpu run v2-32-6 xibo # Default: run the job in working directory 1
-tpu run v2-32-p1 lyy dir=2 tag=bird # Run the job in working directory 2 
+tpu run v2-32-p1 lyy dir=2 # Run the job in working directory 2 
 ```
 
-The `run` command will ask whether to reapply when the TPU is preempted.  
-You can also add the flag `-apply` to skip the prompt.
-If the TPU is preemptible, `tpu run` will **auto-resume** on GRPC errors and **auto-reapply and resume** when preempted. If the TPU is not preemptible, it will **do nothing** by default. If you want it to 
-resume after grpc, you can use `tpu run <tpu> <username> rule=resume` to set the rule. (See more in the **More Resuming/Rerunning Rules** section.)
+<details>
+<summary> <strong>2A. More Directory Operations</strong></summary>
+
+```bash
+tpu del-dir <num> username # Delete the working directory <num>
+tpu swap-dir <num1> <num2> username # Swap the working directory <num1> and <num2>
+```
+</details>
+
+<details>
+<summary> <strong>2B. Advanced Running Settings</strong></summary>
+
+The `run` command will ask whether to reapply when the TPU is preempted. 
+
+You can add the flag `-apply` to skip the prompt.
+
+You can add the flag `-q` to skip the monitor window.
+
+You can add the tag by `tag=your_tag` to add a tag to the job, which will be shown in the monitor window.
+
+You can change the default rules for resuming/rerunning by passing `rule=<rule>` to the `tpu run` command. (Default: **auto-resume** on GRPC errors and **auto-reapply and resume** when preempted for preemptible TPUs and **do nothing** for other TPUs. See more in the **More Resuming/Rerunning Rules** section.)
+
+</details>
 
 </details>
 
 <details>
-<summary> <strong>Killing Jobs/Windows & Cleaning up (<strong>USEFUL</strong>)</strong></summary>
+<summary> <strong>3. Killing Jobs/Windows & Cleaning up (<strong>USEFUL</strong>)</strong></summary>
 
 As you run more and more jobs, there will be a lot of tmux windows, which is messy.
 
@@ -97,7 +116,7 @@ The `clean` command integrates these actions, so using `kill-job + clean` is str
 </details>
 
 <details>
-<summary> <strong>Monitoring (<strong>IMPORTANT</strong>)</strong></summary>
+<summary> <strong>4. Monitoring (<strong>IMPORTANT</strong>)</strong></summary>
 
 The `tpu run` command opens a monitor window to track all your jobs. (If you don't want that, add argument `-q` to your command, e.g.`tpu run v2-32-2 xibo -q`) Alternatively, you can use:
 
@@ -122,7 +141,7 @@ If you don't want `tpu run` to open the monitor window, you can use `tpu set-set
 </details>
 
 <details>
-<summary> <strong>TPU/Environment Operations </strong></summary>
+<summary> <strong>5. TPU/Environment Operations </strong></summary>
 
 We support common TPU operations, such as:
 
@@ -149,7 +168,7 @@ tpu solve tpu_name # Integrated automatic environment solver
 
 
 <details>
-<summary> <strong>Passing Configs/Adding Tags </strong></summary>
+<summary> <strong>6. Passing Configs/Adding Tags </strong></summary>
 
 We support passing configs on the command line, and you can also set your own config alias by:
 
@@ -197,7 +216,7 @@ tpu add-tag window_num tag_name username # add a tag to the job
 </details>
 
 <details>
-<summary> <strong>Resuming/Rerunning Manually </strong></summary>
+<summary> <strong>7. Resuming/Rerunning Manually </strong></summary>
 
 ```bash
 tpu resume windows=<windows_id> username # resume the job
@@ -211,7 +230,7 @@ The difference between `resume` and `rerun` is that `resume` will load the job f
 </details>
 
 <details>
-<summary> <strong>More Resuming/Rerunning Rules</strong></summary>
+<summary> <strong>8. More Resuming/Rerunning Rules</strong></summary>
 
 Our default rules for resuming/rerunning are as follows:  
 For preempted TPUs, we will reapply the TPU and resume the job when the job is preempted, and resume the job when the job encounters a GRPC error. For non-preempted TPUs, we will not perform any operations.  
@@ -253,7 +272,7 @@ Then after no more than 3 mins you should expect the job to be resumed(if not, c
 </details>
 
 <details>
-<summary> <strong>Customizing User Settings </strong></summary>
+<summary> <strong>9. Customizing User Settings </strong></summary>
 
 We support customizing settings for users, and you can set/get them by:
 
@@ -293,7 +312,7 @@ Please be careful not to have conflicts with current jobs.
 
 
 <details>
-<summary> <strong>Documentation </strong></summary>
+<summary> <strong>10. Documentation</strong></summary>
 
 ```bash
 tpu tldr

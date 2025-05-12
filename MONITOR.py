@@ -181,10 +181,12 @@ def mainloop():
         error_windows_list = [(job['user'], job['windows_id']) for job in error_jobs['locked']]
         print(f"{INFO} mainloop: Found {len(error_jobs['locked'])} locked jobs, windows list: {error_windows_list}")
         add_MONITOR_log(f"{INFO} mainloop: Found {len(error_jobs['locked'])} locked jobs, windows list: {error_windows_list}")
+    
     if len(error_jobs['preempted']) != 0:
         error_windows_list = [(job['user'], job['windows_id']) for job in error_jobs['preempted']]
         print(f"{INFO} mainloop: Found {len(error_jobs['preempted'])} preempted jobs, windows list: {error_windows_list}")
         add_MONITOR_log(f"{INFO} mainloop: Found {len(error_jobs['preempted'])} preempted jobs, windows list: {error_windows_list}")
+    
     if len(error_jobs['grpc']) != 0:
         error_windows_list = [(job['user'], job['windows_id']) for job in error_jobs['grpc']]
         print(f"{INFO} mainloop: Found {len(error_jobs['grpc'])} grpc jobs, windows list: {error_windows_list}")
@@ -212,6 +214,7 @@ def mainloop():
                     print(f"{FAIL} mainloop: Failed to update job {job['windows_id']} for user {user}")
                     add_MONITOR_log(f"{FAIL} mainloop: Failed to update job {job['windows_id']} for user {user}")
                     data_io.release_lock_data()
+
     if not all_good:
         for error_type in error_jobs:
             for job in error_jobs[error_type]:

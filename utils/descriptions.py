@@ -193,3 +193,88 @@ e.g. `tpu -a lr config.training.learning_rate`
 - `tpu tldr`: Show this summary.
     """
     print(Usage)
+
+def full_doc():
+    raise NotImplementedError
+    Usage = f"""
+{YELLOW}== Start=={NC}
+- Add yourself: `tpu add-user` → follow prompt.
+- From your project directory: `tpu set-cur 1 <username>` then `tpu run <tpu‑alias> <username>`.
+- Track jobs: `tpu monitor <username>` or one‑shot with `tpu check <username>`.
+- See command cheatsheet: `tpu tldr`; clean up: `tpu clear <username>`.
+
+{YELLOW}== Setup=={NC}
+- **Update your training scripts** to accept CLI args & log *wandb* final output.
+- Clone latest helper scripts from *zhh* repo.
+- Avoid weird usernames like `run`, `false`, Chinese chars, or TPU‑like strings.
+
+{YELLOW}== Working Directories & Running Jobs=={NC}
+- A numbered *working directory* points to a source‑code folder.
+- `tpu set-cur <n> <username>` — mark *pwd* as dir *n* (default 1).
+- `tpu ls <username>` — list all saved directories.
+- `tpu run <tpu> <username> [dir=1] [tag=<tag>] [key=value …] [rule=<rule>]`
+  · `tpu` can be an alias (e.g. `v2-32-6`) or the full TPU name.
+  · Pre‑emptible TPUs auto‑resume/on‑GRPC; non‑preemptible default *pass* — override with `rule=`.
+  · `-apply` flag skips confirmation when (re)applying.
+
+Examples:
+```bash
+tpu run v2-32-6 xibo                 # run in dir 1
+tpu run v2-32-p1 lyy dir=2 tag=bird  # run in dir 2 with tag
+```
+
+{YELLOW}== Killing / Cleaning=={NC}
+- Bulk clean finished/errored:
+  `tpu clean <username>` (alias for kill‑job → clear)
+- Kill specific job:
+  `tpu kill-job -w=<window_id> <username>`
+  `tpu kill <tpu> <username>`
+- Zombie helpers (rarely needed):
+  `tpu -czw/-czj`, `tpu clear‑finished`, `tpu clear‑error`, `tpu clear-all`.
+
+{YELLOW}== Monitoring=={NC}
+- Auto monitor window opens after `tpu run` (toggle via `set-settings monitor_after_run False`).
+- Manual: `tpu monitor <username>` (updates every *monitor_upd_time* sec) or `tpu check <username>`.
+- Display filters: `-d` dir, `-t` tpu, `-s` status, `-v` verbose output.
+  Example: `tpu monitor xibo -dsv`.
+
+{YELLOW}== TPU / Environment Ops=={NC}
+- Provision: `tpu apply/reapply <tpu>`.
+- Inspect: `tpu describe <tpu>`  |  Status: `tpu check-status <tpu>`.
+- Fix common mount/wandb issues: `tpu solve <tpu>` (community‑extendable).
+
+{YELLOW}== Config Aliases & Tags=={NC}
+- Add alias: `tpu -a <alias> <full_config_key> <username>`.
+- List aliases: `tpu -sa <username>`  |  Delete: `tpu del-config-alias <alias> <username>`.
+- Built‑ins: lr, bs, ep, wd, b1, b2, ckpt.
+- Pass configs: `tpu run v2-32-6 xibo lr=0.01` (or full key).
+- Tag running job in monitor: `tpu add-tag <window_id> <tag> <username>`.
+
+{YELLOW}== Manual Resume / Rerun=={NC}
+```bash
+tpu resume windows=<id> <username>
+tpu resume windows=<id> tpu=<new_tpu> <username>
+tpu rerun  windows=<id> <username>
+tpu rerun  windows=<id> tpu=<new_tpu> <username>
+```
+`resume` loads last ckpt, `rerun` starts fresh.
+
+{YELLOW}== Auto‑Resume / Rerun Rules=={NC}
+Default rules:
+- **Preemptible TPUs** → `pre`: reapply on GRPC, *resume* on preemption.
+- **Non‑preemptible** → `pass`: no action.
+Available `rule=` values:
+- `pre`, `resume`, `reapply`, `rerun`, `pass`.
+See all: `tpu check-rules`.
+- Immediate manual trigger for stuck job: `tpu ack` (MONITOR reacts ≤3 min).
+- `--log-stage` injects `config.stage` integer into script.
+
+{YELLOW}== User Settings=={NC}
+Manage via `tpu set-settings/get-settings/reset-settings <username>`.
+Window‑offset reset: `tpu reset-window-num <n> <username>` (avoid clashes).
+
+{YELLOW}== Built‑in Help=={NC}
+- `tpu tldr` — ultra‑short cheatsheet.
+- `tpu -h <command>` — detailed help for any command.
+"""
+    print(Usage)
