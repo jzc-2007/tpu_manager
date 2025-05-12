@@ -25,15 +25,17 @@ Use ``tpu add-user`` and follow the instructions to add your username.
 </details>
 
 <details>
-<summary> <strong>2. Setting Working Directory & Running Jobs (<strong>IMPORTANT</strong>) </strong></summary>
+<summary> <strong>2. Setting Working Directory & Running/Monitoring Jobs (<strong>IMPORTANT</strong>) </strong></summary>
 
-The working directory is where you have your scripts and code. You can set multiple working directories and choose one when running code. The default working directory is `1`.  
+The working directory is where you have your scripts and code. 
+
+You can set multiple working directories and choose any of them when running code. The default working directory is `1`.  
 You can set the working directory and run the job by:
 
 ```bash
 tpu set-cur num username # Set the working directory <num> to the current directory, default directory is 1
 tpu ls username # List all the working directories
-tpu run tpu_name username [dir=1] [tag=suibian] # Run the job in working directory <dir>, tag is optional and visible in the monitor window
+tpu run tpu_name username [dir=1] # Run the job in working directory <dir>
 ```
 
 The `tpu_name` is of the format of the **pre-defined tpu aliases** , like `v2-32-6`, `v2-32-p1`, or `v4-32-py2`. You can also pass full-name such as `kmh-tpuvm-v2-32-1`.
@@ -47,8 +49,20 @@ tpu run v2-32-6 xibo # Default: run the job in working directory 1
 tpu run v2-32-p1 lyy dir=2 # Run the job in working directory 2 
 ```
 
+The `tpu run` command opens a monitor window to track all your jobs. Alternatively, you can use:
+
+```bash
+tpu monitor username
+```
+
+which updates the monitor window every 10 seconds. For one-time checks, use:
+
+```bash
+tpu check username
+```
+
 <details>
-<summary> <strong>2A. More Directory Operations</strong></summary>
+<summary> <strong>2A. More Directory Operations (OPTIONAL)</strong></summary>
 
 ```bash
 tpu del-dir <num> username # Delete the working directory <num>
@@ -57,7 +71,7 @@ tpu swap-dir <num1> <num2> username # Swap the working directory <num1> and <num
 </details>
 
 <details>
-<summary> <strong>2B. Advanced Running Settings</strong></summary>
+<summary> <strong>2B. Advanced Running Settings (OPTIONAL)</strong></summary>
 
 The `run` command will ask whether to reapply when the TPU is preempted. 
 
@@ -70,6 +84,19 @@ You can add the tag by `tag=your_tag` to add a tag to the job, which will be sho
 You can change the default rules for resuming/rerunning by passing `rule=<rule>` to the `tpu run` command. (Default: **auto-resume** on GRPC errors and **auto-reapply and resume** when preempted for preemptible TPUs and **do nothing** for other TPUs. See more in the **More Resuming/Rerunning Rules** section.)
 
 </details>
+
+<details>
+<summary> <strong>2C. Advanced Monitor Configs(OPTIONAL)</strong></summary>
+
+
+
+The monitor will show four things: the windows number(`w`), the directory(`d`), the tpu(`t`), and the job status(`s`). You can choose which to show by adding commands. There's also an additional flag "verbose"(`v`) available, meaning to show the messages(cut) from tmux windows even for the running jobs with known status.(Should be used with `s`) For example, to only show the working directory and the job status and detailed output of xibo, use:
+
+```bash
+tpu monitor xibo -dsv
+```
+
+If you don't want `tpu run` to open the monitor window, you can use `tpu set-settings monitor_after_run False username` to disable it. Also, you can set the default monitoring whether to monitor tpu/directory. See the **Customizing User Settings** section for more details.
 
 </details>
 
@@ -116,32 +143,7 @@ The `clean` command integrates these actions, so using `kill-job + clean` is str
 </details>
 
 <details>
-<summary> <strong>4. Monitoring (<strong>IMPORTANT</strong>)</strong></summary>
-
-The `tpu run` command opens a monitor window to track all your jobs. (If you don't want that, add argument `-q` to your command, e.g.`tpu run v2-32-2 xibo -q`) Alternatively, you can use:
-
-```bash
-tpu monitor username
-```
-
-which updates the monitor window every 10 seconds. For one-time checks, use:
-
-```bash
-tpu check username
-```
-
-The monitor will show four things: the windows number(`w`), the directory(`d`), the tpu(`t`), and the job status(`s`). You can choose which to show by adding commands. There's also an additional flag "verbose"(`v`) available, meaning to show the messages(cut) from tmux windows even for the running jobs with known status.(Should be used with `s`) For example, to only show the working directory and the job status and detailed output of xibo, use:
-
-```bash
-tpu monitor xibo -dsv
-```
-
-If you don't want `tpu run` to open the monitor window, you can use `tpu set-settings monitor_after_run False username` to disable it. Also, you can set the default monitoring whether to monitor tpu/directory. See the **Customizing User Settings** section for more details.
-
-</details>
-
-<details>
-<summary> <strong>5. TPU/Environment Operations </strong></summary>
+<summary> <strong>4. TPU/Environment Operations </strong></summary>
 
 We support common TPU operations, such as:
 
@@ -168,7 +170,7 @@ tpu solve tpu_name # Integrated automatic environment solver
 
 
 <details>
-<summary> <strong>6. Passing Configs/Adding Tags </strong></summary>
+<summary> <strong>5. Passing Configs/Adding Tags </strong></summary>
 
 We support passing configs on the command line, and you can also set your own config alias by:
 
@@ -216,7 +218,7 @@ tpu add-tag window_num tag_name username # add a tag to the job
 </details>
 
 <details>
-<summary> <strong>7. Resuming/Rerunning Manually </strong></summary>
+<summary> <strong>6. Resuming/Rerunning Manually </strong></summary>
 
 ```bash
 tpu resume windows=<windows_id> username # resume the job
@@ -230,7 +232,7 @@ The difference between `resume` and `rerun` is that `resume` will load the job f
 </details>
 
 <details>
-<summary> <strong>8. More Resuming/Rerunning Rules</strong></summary>
+<summary> <strong>7. More Resuming/Rerunning Rules</strong></summary>
 
 Our default rules for resuming/rerunning are as follows:  
 For preempted TPUs, we will reapply the TPU and resume the job when the job is preempted, and resume the job when the job encounters a GRPC error. For non-preempted TPUs, we will not perform any operations.  
@@ -272,7 +274,7 @@ Then after no more than 3 mins you should expect the job to be resumed(if not, c
 </details>
 
 <details>
-<summary> <strong>9. Customizing User Settings </strong></summary>
+<summary> <strong>8. Customizing User Settings </strong></summary>
 
 We support customizing settings for users, and you can set/get them by:
 
@@ -312,7 +314,7 @@ Please be careful not to have conflicts with current jobs.
 
 
 <details>
-<summary> <strong>10. Documentation</strong></summary>
+<summary> <strong>9. Documentation</strong></summary>
 
 ```bash
 tpu tldr
