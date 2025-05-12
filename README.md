@@ -62,12 +62,12 @@ tpu check username
 ```
 
 <details>
-<summary> <strong>2A. More Directory Operations (OPTIONAL)</strong></summary>
+    <summary> <strong>2A. More Directory Operations (OPTIONAL)</strong></summary>
 
-```bash
-tpu del-dir <num> username # Delete the working directory <num>
-tpu swap-dir <num1> <num2> username # Swap the working directory <num1> and <num2>
-```
+    ```bash
+    tpu del-dir <num> username # Delete the working directory <num>
+    tpu swap-dir <num1> <num2> username # Swap the working directory <num1> and <num2>
+    ```
 </details>
 
 <details>
@@ -80,8 +80,9 @@ You can add the flag `-apply` to skip the prompt.
 You can add the flag `-q` to skip the monitor window.
 
 You can add the tag by `tag=your_tag` to add a tag to the job, which will be shown in the monitor window.
+You can add tags to **existing** jobs by:`tpu add-tag window_num tag_name username`
 
-You can change the default rules for resuming/rerunning by passing `rule=<rule>` to the `tpu run` command. (Default: **auto-resume** on GRPC errors and **auto-reapply and resume** when preempted for preemptible TPUs and **do nothing** for other TPUs. See more in the **More Resuming/Rerunning Rules** section.)
+You can change the default rules for resuming/rerunning by passing `rule=<rule>` to the `tpu run` command. (Default: **auto-resume** on GRPC errors and **auto-reapply and resume** when preempted for preemptible TPUs and **do nothing** for other TPUs (you can set `rule=resume` to make it resume). See more in the **More on Resuming/Rerunning** section.)
 
 </details>
 
@@ -144,9 +145,9 @@ The `clean` command integrates these actions, so using `kill-job + clean` is str
 </details>
 
 <details>
-<summary> <strong>4. TPU/Environment Operations </strong></summary>
+<summary> <strong>4. Environment Operations </strong></summary>
 
-We support common TPU operations, such as:
+We support common operations, such as:
 
 ```bash
 tpu apply/reapply tpu_name # Apply/reapply the TPU; reapply deletes and recreates the TPU
@@ -171,9 +172,9 @@ tpu solve tpu_name # Integrated automatic environment solver
 
 
 <details>
-<summary> <strong>5. Passing Configs/Adding Tags </strong></summary>
+<summary> <strong>5. Passing Configs in Command Line</strong></summary>
 
-We support passing configs on the command line, and you can also set your own config alias by:
+We support passing configs in the command line by config aliases or full config name. You can also set your own config alias by:
 
 
 ```bash
@@ -210,16 +211,12 @@ tpu run v2-32-6 xibo config.training.learning_rate=0.01 # This is also supported
 
 </details>
 
-You can add tags to the existing jobs (so that they will be shown in the monitor) by:
-
-```bash
-tpu add-tag window_num tag_name username # add a tag to the job
-```
 
 </details>
 
 <details>
-<summary> <strong>6. Resuming/Rerunning Manually </strong></summary>
+<summary> <strong>6. More on Resuming/Rerunning </strong></summary>
+You can manually resume/rerun a job by:
 
 ```bash
 tpu resume windows=<windows_id> username # resume the job
@@ -229,11 +226,6 @@ tpu rerun windows=<windows_id> tpu=<tpu> username # rerun the job in a new TPU
 ```
 
 The difference between `resume` and `rerun` is that `resume` will load the job from the last checkpoint, while `rerun` will start a new job from the beginning.
-
-</details>
-
-<details>
-<summary> <strong>7. More Resuming/Rerunning Rules</strong></summary>
 
 Our default rules for resuming/rerunning are as follows:  
 For preempted TPUs, we will reapply the TPU and resume the job when the job is preempted, and resume the job when the job encounters a GRPC error. For non-preempted TPUs, we will not perform any operations.  
@@ -275,7 +267,7 @@ Then after no more than 3 mins you should expect the job to be resumed(if not, c
 </details>
 
 <details>
-<summary> <strong>8. Customizing User Settings </strong></summary>
+<summary> <strong>7. Customizing User Settings </strong></summary>
 
 We support customizing settings for users, and you can set/get them by:
 
@@ -315,7 +307,7 @@ Please be careful not to have conflicts with current jobs.
 
 
 <details>
-<summary> <strong>9. Documentation</strong></summary>
+<summary> <strong>8. Documentation</strong></summary>
 
 ```bash
 tpu tldr
