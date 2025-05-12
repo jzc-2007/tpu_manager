@@ -107,7 +107,7 @@ If you don't want `tpu run` to open the monitor window, you can use `tpu set-set
 
 As you run more and more jobs, there will be a lot of tmux windows, which is messy.
 
-You can use 
+You can use (**recommend to do occasionally**):
 
 ```bash
 tpu clean username 
@@ -118,12 +118,14 @@ to kill all the tmux windows whose jobs are finished/error/killed.
 To kill a job, use:
 
 ```bash
-tpu kill/kill-job/-k/-kj -w=<windows_id>/window=<windows_id> username # Kill the job
-tpu kill/-k <tpu> username # Kill the job in the specified TPU and user
+tpu kill/kill-job/-k/-kj -w=<windows_id>/window=<windows_id> username
 ```
 
-Jobs with child jobs that were rerun/resumed will be killed based on the status of their children. Use `tpu clean username -re` to make all the rerun/resumed job be cleaned too.
+Jobs with children jobs that were rerun/resumed will be killed based on the status of their children. Use `tpu clean username -re` to make all the rerun/resumed job be cleaned too.
 
+**IMPORTANT**: If you have a job that has rerun setting, and it has been grpc, please remember to use `clean` to clear it if you **manually kill the window**, otherwise it may be rerunned.
+<details>
+<summary> <strong>3A. Other killing commands(OPTIONAL)</strong></summary>
 To kill a specific tmux window (NOT RECOMMENDED):
 
 ```bash
@@ -141,6 +143,7 @@ tpu clear-all username # RECOMMENDED: Clear all finished/error jobs
 ```
 
 The `clean` command integrates these actions, so using `kill-job + clean` is strongly recommended instead of manually killing windows with `tmux kill-window` or exit the window yourself. (If you like to kill the window yourself, we recommend doing `tpu clean username` occasionally to clear the job data associated with these windows, or others may get the annoying warning of the TPU occupied by your dead jobs.)
+</details>
 
 </details>
 
