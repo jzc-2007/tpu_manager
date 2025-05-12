@@ -99,6 +99,7 @@ tpu monitor xibo -dsv
 If you don't want `tpu run` to open the monitor window, you can use `tpu set-settings monitor_after_run False username` to disable it. Also, you can set the default monitoring whether to monitor tpu/directory. See the **Customizing User Settings** section for more details.
 
 </details>
+</details>
 
 <details>
 <summary> <strong>3. Killing Jobs/Windows & Cleaning up (<strong>USEFUL</strong>)</strong></summary>
