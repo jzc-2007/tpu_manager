@@ -3,10 +3,11 @@ from .data_io import read_and_lock_data, write_and_unlock_data, release_lock_dat
 import os, json, time
 
 class User():
-    def __init__(self, id, name, tmux_name = None):
+    def __init__(self, id, name, tmux_name = None, speadsheet_name = None):
         self.id = id
         self.name = name
         self.tmux_name = tmux_name if tmux_name else name
+        self.spreadsheet_name = speadsheet_name if speadsheet_name else name
         self.working_dir = {}
         self.job_data = []
         self.config_aliases = {
@@ -36,6 +37,7 @@ class User():
             "id": self.id,
             "name": self.name,
             "tmux_name": self.tmux_name,
+            "spreadsheet_name": self.spreadsheet_name,
             "working_dir": self.working_dir,
             "job_data": self.job_data,
             "config_aliases": self.config_aliases,
@@ -54,7 +56,7 @@ class User():
             raise ValueError(f"Alias {alias} not found")
 
 def user_from_dict(config_dict):
-    user = User(config_dict['id'], config_dict['name'], config_dict['tmux_name'])
+    user = User(config_dict['id'], config_dict['name'], config_dict['tmux_name'], config_dict['spreadsheet_name'])
 
     user.config_aliases = config_dict.get('config_aliases', {})
     user.logs = config_dict.get('logs', [])
@@ -82,9 +84,12 @@ def create_user():
         name = input('Enter user name:')
         if name in data['user_list']:
             raise ValueError(f"User {name} already exists")
-        tmux_name = input(f'Enter tmux name, empty for default={name}(Warning: This may clear you all current windows if the tmux_name already exists):')
+        tmux_name = input(f'Enter tmux name, empty for default={name}({RED}Warning{NC}: This may clear you all current windows if the tmux_name already exists):')
         if tmux_name == '':
             tmux_name = name
+        spreadsheet_name = input(f'Enter your name on spreadsheet, empty for default={name}:')
+        if spreadsheet_name == '':
+            spreadsheet_name = name
         # Find a mininum id not in use
         id = 0
         while id in data['id_list']:
@@ -96,7 +101,7 @@ def create_user():
             timezone = 'us'
         if timezone not in ['us', 'cn']:
             raise ValueError(f"Timezone {timezone} not supported")
-        user = User(user_id, name, tmux_name)
+        user = User(user_id, name, tmux_name, spreadsheet_name)
         init_dir = input('Enter initial working directory(abs. path), empty for to be set later:')
         assert os.path.exists(init_dir) or init_dir == '', f"Directory {init_dir} does not exist"
         if init_dir != '':
@@ -109,7 +114,7 @@ def create_user():
         data['user_id_dict'][name] = user_id
         data['users'][name] = user.to_dict()
         write_and_unlock_data(data)
-        print(f"{GOOD} create_user: Created user {name} with id {user_id} and tmux name {tmux_name}, start working with cute TPUs!")
+        print(f"{GOOD} create_user: Hello, {name}!\nYour id is {user_id} and your tmux name is {tmux_name}. Let's start working with the cute TPUs!")
     except:
         print(f"{FAIL} create_user: Creating user {name} failed")
         release_lock_data()

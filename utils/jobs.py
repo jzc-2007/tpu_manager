@@ -333,7 +333,7 @@ def parse_config_args(user_obj, args):
     return dir_id, dir_path, tpu, tag, rule, monitor, config_args, customized_settings   
 
 def run(user_obj, args):
-    print('args:', args)
+    # print('args:', args)
     data = read_data()
     user_obj = users.user_from_dict(data['users'][user_obj.name])
     
@@ -502,6 +502,7 @@ def check_all_jobs(args):
     check the jobs for all the users
     """
     config = '-wts'
+    print(f"args: {args}")
     for arg in args:
         if arg.startswith('-') and args not in ['-f', '-q', '-apply']:
             config = arg
@@ -563,7 +564,7 @@ def check_jobs(user_obj, args, config = None):
             config += 't'
         if user_obj.settings.get("monitor_verbose", False):
             config += 'v'
-    print(f'config: {config}')
+    # print(f'config: {config}')
 
     session_name = user_obj.tmux_name
     windows = os.popen(f"tmux list-windows -t {session_name}").read().splitlines()

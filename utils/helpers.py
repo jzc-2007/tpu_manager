@@ -1,7 +1,8 @@
 import os, datetime
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 DATA_PATH = os.path.join(BASE_DIR, "data.json")
-LOCK_FILE = os.path.join(BASE_DIR, "lock.json")
+LOCK_PATH = os.path.join(BASE_DIR, "lock.json")
+SECRET_PATH = os.path.join(BASE_DIR, "secret.json")
 
 RED, GREEN, YELLOW, PURPLE, NC = "\033[1;31m", "\033[1;32m", "\033[1;33m", "\033[1;34m", "\033[0m"
 GOOD, INFO, WARNING, FAIL = f"{GREEN}[GOOD]{NC}", f"{PURPLE}[INFO]{NC}", f"{YELLOW}[WARNING]{NC}", f"{RED}[FAIL]{NC}"
@@ -66,3 +67,75 @@ def recursive_update(dict1, dict2):
         else:
             dict1[key] = value
     return dict1
+
+def filter_tpu_information(tpu_information, **kwargs):
+    """
+    Filter the TPU information based on the specified criteria.
+    Keys: ['zone', 'pre', 'belong', 'running_status', 'user', 'version', 'type']
+    """
+    filtered_tpu_information = {}
+
+    for key, value in kwargs.items():
+        assert key in ['zone', 'pre', 'belong', 'running_status', 'user', 'version', 'type'], f"Key {key} not recognized"
+        
+    for tpu, info in tpu_information.items():
+        match = True
+        for key, value in kwargs.items():
+            if isinstance(value, list):
+                if info[key] not in value:
+                    match = False
+                    break
+            elif isinstance(value, str):
+                if info[key] != value:
+                    match = False
+                    break
+        if match:
+            filtered_tpu_information[tpu] = info
+
+    return filtered_tpu_information
+
+def display_tpu_information(tpu_information, style = None, **kwargs):
+    """
+    Display the TPU information in a formatted way.
+    styles:
+    - full: full information dict
+    - category: ['free', 'reserved', 'running']
+    - category_note (default): ['free', 'reserved', 'running'] with user note
+    """
+    if style is None:
+        style = 'category_note'
+    if style == 'full':
+        for tpu, info in tpu_information.items():
+            print(f"{tpu}: {info}")
+    elif style == 'category':
+        free_tpus = [tpu for tpu, info in tpu_information.items() if info['running_status'] == 'free']
+        reserved_tpus = [tpu for tpu, info in tpu_information.items() if info['running_status'] == 'reserved']
+        running_tpus = [tpu for tpu, info in tpu_information.items() if info['running_status'] == 'running']
+        print(f"{GREEN}Free TPUs{NC}")
+        for tpu in free_tpus:
+            print(tpu_information[tpu]['alias'], end='; ')
+        print(f"\n{YELLOW}Reserved TPUs{NC}")
+        for tpu in reserved_tpus:
+            print(f"{tpu_information[tpu]['alias']}({tpu_information[tpu]['user']})", end='; ')
+        print(f"\n{RED}Running TPUs{NC}")
+        for tpu in running_tpus:
+            print(f"{tpu_information[tpu]['alias']}({tpu_information[tpu]['user']})", end='; ')
+        print()
+    elif style == 'category_note':
+        free_tpus = [tpu for tpu, info in tpu_information.items() if info['running_status'] == 'free']
+        reserved_tpus = [tpu for tpu, info in tpu_information.items() if info['running_status'] == 'reserved']
+        running_tpus = [tpu for tpu, info in tpu_information.items() if info['running_status'] == 'running']
+        print(f"{GREEN}Free TPUs{NC}")
+        for tpu in free_tpus:
+            info = tpu_information[tpu]
+            print(info['alias'], end='; ')
+        print(f"\n{YELLOW}Reserved TPUs{NC}")
+        for tpu in reserved_tpus:
+            info = tpu_information[tpu]
+            print(f"{info['alias']}({info['user']}: {info['user_note']})")
+        print(f"{RED}Running TPUs{NC}")
+        for tpu in running_tpus:
+            info = tpu_information[tpu]
+            print(f"{info['alias']}({info['user']}: {info['user_note']})")
+    else:
+        raise ValueError(f"Style {style} not recognized")
