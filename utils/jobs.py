@@ -812,6 +812,13 @@ def finish_job(window):
                         break
                 break
         write_and_unlock_data(data)
+        # set the status to be reserved for this TPU
+        tpu = job['tpu']
+        if tpu is not None:
+            tpu_info = get_tpu_info_sheet(tpu)
+            tpu_info['running_status'] = 'reserved'
+            write_sheet_info(tpu_info)
+        print(f"{INFO} finish_job: Finished job {window_num} in session {session_name}")
     except:
         release_lock_data()
 

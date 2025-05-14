@@ -110,6 +110,8 @@ The `tpu run` command will automatically set the status in the spreadsheet to be
 You can use `tpu find <all_tpu_types>` to look at the status of the TPUs in the spreadsheet. The format of tpu_types is like `v2`, `v3`, `v234`(or `v*`) or `v2-32`. You can also pass `-n` for normal TPUs and `-p` for preemptible TPUs. For example, to show the status of all non-preemptible v3 and v4 TPUs, you can do:
 `tpu find v34 -n`.
 
+You can release the TPU by `tpu release/rel <tpu_name>`, which set the status and the user to be free('闲的') in the spreadsheet. You can also use `tpu release/rel <tpu_name> <username>` to make sure that the TPU is currently owned by you(recommended).
+
 </details>
 <!-- END OF 2D -->
 </details>

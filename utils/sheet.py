@@ -189,6 +189,35 @@ def get_tpu_info_sheet(tpu):
         print(f"{FAIL} TPU {tpu} not found in the sheet")
         return None
 
+def release_tpu(args):
+    """
+    Change the running status to '闲的', user to '闲的', and user_note to be empty.
+    Args: TPU name or alias
+    """
+    tpu, user = None, None
+    data = read_data()
+    assert len(args) in [1, 2], f"release_tpu: {args} is not valid"
+    if len(args) == 1:
+        tpu = args[0]
+    elif len(args) == 2:
+        tpu = args[0]
+        user = args[1]
+    spreadsheet_name = None
+    if user is not None:
+        spreadsheet_name = data['users'][user]['spreadsheet_name']
+    
+    tpu_information = get_tpu_info_sheet(tpu)
+    if tpu_information is not None:
+        if user is not None:
+            assert tpu_information['user'] == spreadsheet_name, f"TPU {tpu} is not used by {user}, but by {tpu_information['user']}"
+        tpu_information['running_status'] = '闲的'
+        tpu_information['user'] = '闲的'
+        tpu_information['user_note'] = ''
+        write_sheet_info(tpu_information)
+        print(f"{INFO} TPU {tpu} released")
+    else:
+        print(f"{FAIL} TPU {tpu} not found in the sheet")
+
 
 
 

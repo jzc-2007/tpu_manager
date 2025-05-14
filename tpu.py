@@ -91,6 +91,7 @@ if __name__ == '__main__':
         elif cmd == 'ack': jobs.ack_MONITOR()
         elif cmd == 'rs': sheet.read_sheet_info()
         elif cmd == 'find': sheet.find_tpu_from_type(args[2:])
+        elif cmd == 'rel' or cmd == 'release': sheet.release_tpu(args[2:])
 
         # ------------ For development only ------------
         elif cmd == 'add_global_config' or cmd == '-agc': develop.add_global_config(args[2], args[3])
