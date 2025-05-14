@@ -99,6 +99,8 @@ if __name__ == '__main__':
         elif cmd == '-Mc': develop.clear_MONITOR_log()
         elif cmd == 'debug-stats': develop.debug_stats(args[2])
         elif cmd == 'debug-kill': develop.kill_jobs_tpu_new(args[2])
+        elif cmd == 'gtis' or cmd == 'get-tpu-info-sheet': print(sheet.get_tpu_info_sheet(args[2]))
+        elif cmd == 'twsi': unit_tests.test_write_sheet_info(args[2])
         # ------------ End of development only ------------
 
         else: 

@@ -86,10 +86,9 @@ You can change the default rules for resuming/rerunning by passing `rule=<rule>`
 
 </details>
 
+<!-- BEGIN OF 2C -->
 <details>
 <summary> <strong>2C. Advanced Monitor Configs(OPTIONAL)</strong></summary>
-
-
 
 The monitor will show four things: the windows number(`w`), the directory(`d`), the tpu(`t`), and the job status(`s`). You can choose which to show by adding commands. There's also an additional flag "verbose"(`v`) available, meaning to show the messages(cut) from tmux windows even for the running jobs with known status.(Should be used with `s`) For example, to only show the working directory and the job status and detailed output of xibo, use:
 
@@ -99,7 +98,19 @@ tpu monitor xibo -dsv
 
 If you don't want `tpu run` to open the monitor window, you can use `tpu set-settings monitor_after_run False username` to disable it. Also, you can set the default monitoring whether to monitor tpu/directory. See the **Customizing User Settings** section for more details.
 
+</details> 
+<!-- END OF 2C -->
+
+<!-- BEGIN OF 2D -->
+<details>
+<summary> <strong>2D. Spreadsheet Support(OPTIONAL)</strong></summary>
+The `tpu run` command will automatically set the status in the spreadsheet to be running by you. If you want to set the notes, you can add a `-ssn` flag(short for `--set-spreadsheet-notes`) to set the notes interactively, or you can pass `ssn=your_notes` to set the notes directly.(In this case, space will not be supported, and you need to use `_` instead of space.)
+
+You can use `tpu find <all_tpu_types>` to look at the status of the TPUs in the spreadsheet. The format of tpu_types is like `v2`, `v3`, `v234`(or `v*`) or `v2-32`. You can also pass `-n` for normal TPUs and `-p` for preemptible TPUs. For example, to show the status of all non-preemptible v3 and v4 TPUs, you can do:
+`tpu find v34 -n`.
+
 </details>
+<!-- END OF 2D -->
 </details>
 
 <details>
@@ -118,8 +129,10 @@ to kill all the tmux windows whose jobs are finished/error/killed.
 To kill a job, use:
 
 ```bash
-tpu kill/kill-job/-k/-kj -w=<windows_id>/window=<windows_id> username
+tpu kill/kill-job/-k/-kj w=/-w=/window=/<windows_id> username
 ```
+You can also just enter windows_id, in this case the command will find the integer in the 
+arguments to be the windows id. For example you can just use `tpu kill 101 xibo` to kill the job with windows id 101, but passing `w=` is safer for future use.
 
 Jobs with children jobs that were rerun/resumed will be killed based on the status of their children. Use `tpu clean username -re` to make all the rerun/resumed job be cleaned too.
 
@@ -308,7 +321,6 @@ Please be careful not to have conflicts with current jobs.
 </details>
 
 
-
 <details>
 <summary> <strong>8. Documentation</strong></summary>
 
@@ -339,6 +351,7 @@ For `utils/`:
 - `helpers.py` does the helper functions
 - `error_handler.py` does the error handling works
 - `unit_tests.py` does the unit tests (sanity checks)
+- `sheet.py` does the spreadsheet operations
 - `develop.py` does the developer tools, to safely modify the metadata and avoid conflicts with current jobs
 (see more in next paragraph)
 <details>
@@ -443,7 +456,7 @@ Each job is described as:
 - [ ] More testing/docs
 - [ ] Support restarting TPU
 - [ ] Customized monitor window
-- [ ] Support to read the spreadsheet, then we can auto-choose the TPU to run a job  
+- [ ] Auto-choose the TPU to run a job  
 - [ ] More auto env solvers  
 - [ ] Logging for every user so that you can check the things happen since last time  
 

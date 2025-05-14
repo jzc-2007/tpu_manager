@@ -111,13 +111,13 @@ def display_tpu_information(tpu_information, style = None, **kwargs):
         free_tpus = [tpu for tpu, info in tpu_information.items() if info['running_status'] == 'free']
         reserved_tpus = [tpu for tpu, info in tpu_information.items() if info['running_status'] == 'reserved']
         running_tpus = [tpu for tpu, info in tpu_information.items() if info['running_status'] == 'running']
-        print(f"{GREEN}Free TPUs{NC}")
+        print(f"{GREEN}Free TPUs{NC} (Total: {len(free_tpus)})")
         for tpu in free_tpus:
             print(tpu_information[tpu]['alias'], end='; ')
-        print(f"\n{YELLOW}Reserved TPUs{NC}")
+        print(f"\n{YELLOW}Reserved TPUs{NC} (Total: {len(reserved_tpus)})")
         for tpu in reserved_tpus:
             print(f"{tpu_information[tpu]['alias']}({tpu_information[tpu]['user']})", end='; ')
-        print(f"\n{RED}Running TPUs{NC}")
+        print(f"\n{RED}Running TPUs{NC} (Total: {len(running_tpus)})")
         for tpu in running_tpus:
             print(f"{tpu_information[tpu]['alias']}({tpu_information[tpu]['user']})", end='; ')
         print()
@@ -125,15 +125,15 @@ def display_tpu_information(tpu_information, style = None, **kwargs):
         free_tpus = [tpu for tpu, info in tpu_information.items() if info['running_status'] == 'free']
         reserved_tpus = [tpu for tpu, info in tpu_information.items() if info['running_status'] == 'reserved']
         running_tpus = [tpu for tpu, info in tpu_information.items() if info['running_status'] == 'running']
-        print(f"{GREEN}Free TPUs{NC}")
+        print(f"{GREEN}Free TPUs{NC} (Total: {len(free_tpus)})")
         for tpu in free_tpus:
             info = tpu_information[tpu]
             print(info['alias'], end='; ')
-        print(f"\n{YELLOW}Reserved TPUs{NC}")
+        print(f"\n{YELLOW}Reserved TPUs{NC} (Total: {len(reserved_tpus)})")
         for tpu in reserved_tpus:
             info = tpu_information[tpu]
             print(f"{info['alias']} ({info['user']}: {info['user_note']})")
-        print(f"{RED}Running TPUs{NC}")
+        print(f"{RED}Running TPUs{NC} (Total: {len(running_tpus)})")
         for tpu in running_tpus:
             info = tpu_information[tpu]
             print(f"{info['alias']} ({info['user']}: {info['user_note']})")

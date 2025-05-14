@@ -95,6 +95,43 @@ def read_sheet_info() -> List[List[str]]:
 
     return tpu_information
 
+def write_sheet_info(info_to_write):
+    """
+    Write the tpu information to the Google Sheet.
+    Args: a dictionary of a specific TPU information, with keys ['zone', 'pre', 'belong', 'running_status', 'user', 'user_note', 'script_note', 'alias', 'version', 'type', 'line']
+    Only updating belong, running_status, user, user_note, script_note
+    """
+    secret_path = SECRET_PATH
+    sheet_id  = "1MFtgLx7uzBFdiPxrIqck00ilrSslZU2w2jRwriVpKMw"
+    sheet_name  = "ka[experimental]"
+
+    # 1. authenticate
+    scopes = ["https://www.googleapis.com/auth/spreadsheets"]
+    creds  = Credentials.from_service_account_file(secret_path, scopes=scopes)
+    client = gspread.authorize(creds)
+
+    # 2. open the sheet
+    ws = client.open_by_key(sheet_id).worksheet(sheet_name)
+
+    # 3. write the data
+    row = info_to_write['line']
+    col = 1
+    # _, tpu, belong, running_status, user, user_note, script_note, env = row[:8]
+    transform_dict = {'free': '闲的'}
+
+    ws.update(f"C{row}:G{row}", [
+        [
+            transform_dict.get(info_to_write['belong'], info_to_write['belong']),
+            transform_dict.get(info_to_write['running_status'], info_to_write['running_status']),
+            transform_dict.get(info_to_write['user'], info_to_write['user']),
+            transform_dict.get(info_to_write['user_note'], info_to_write['user_note']),
+            transform_dict.get(info_to_write['script_note'], info_to_write['script_note']),
+        ]
+    ], value_input_option='USER_ENTERED')
+
+    print(f"{INFO} write_sheet_info: TPU {info_to_write['alias']} information updated in the sheet")
+    return True
+
 def read_tpu_info_from_type(args):
     """
     Read the TPU information from specific args.

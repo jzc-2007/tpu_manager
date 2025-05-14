@@ -2,6 +2,7 @@ import os, sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from utils import operate, data_io
 from utils import directories as dirs
+from utils.sheet import read_sheet_info, write_sheet_info
 from utils.helpers import *
 
 def test_get_zone_pre(quiet = False):
@@ -140,6 +141,25 @@ def test_check_tpu_status():
     # print(operate.check_tpu_status("kmh-tpuvm-v2-32-1"))
     # print(operate.check_tpu_status("v2-32-p2"))
     print(operate.check_tpu_status("v4-32-py2"))
+
+
+def test_write_sheet_info(tpu):
+    """
+    Test the write_sheet_info function. Write additional notes "test" in 'user_note' on the tpu args 
+    with other information remaining the same.
+    """
+    tpu_information = read_sheet_info()
+    _, _, full_name = operate.get_zone_pre(tpu)
+    if full_name in tpu_information:
+        tpu_info = tpu_information[full_name]
+        tpu_info['running_status'] = 'reserved'
+        tpu_info['user'] = 'jzc'
+        tpu_info['user_note'] = 'test'
+        write_sheet_info(tpu_info)
+    else:
+        print(f"{FAIL} TPU {tpu} not found in the sheet")
+        return None
+    return tpu_information[full_name]
 
 def sanity_check():
     if data_io.check_code_lock():

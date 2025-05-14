@@ -3,6 +3,7 @@ from .helpers import *
 from . import users
 from .data_io import read_and_lock_data, write_and_unlock_data, release_lock_data, read_data
 from .operate import check_tpu_status, apply_tpu, kill_jobs_tpu, get_zone_pre, restart, check_tpu_running
+from .sheet import get_tpu_info_sheet, write_sheet_info
 RULE_DICT ={
     'pre':{
         'preempted': 'reapply',
@@ -208,8 +209,10 @@ def kill_job_or_tpu(user_obj, args):
         all_tpu_list.append(tpu_name)
     
     for arg in args:
-        if arg.startswith('window=') or arg.startswith('-w='):
+        if arg.startswith('window=') or arg.startswith('-w=') or arg.startswith('w='):
             windows_id = arg.split('=')[1]
+        if is_integer(arg):
+            windows_id = arg
         if arg in all_tpu_list:
             print(f"{INFO} kill_job: Killing all jobs using tpu {arg}")
             kill_jobs_tpu(arg, username=user_obj.name)
@@ -271,16 +274,17 @@ def restart_run(user_obj, args):
 def parse_config_args(user_obj, args):
     """
     Parse the config args from the command line arguments to use in `run`.
-    Return: dir_id, dir_path, tpu, tag, rule, monitor, config_args, customized_settings
+    Return: dir_id, dir_path, tpu, tag, rule, monitor, config_args, customized_settings, spreadsheet_notes
     """
     data = read_data()
 
     config_args = ""
     tag, rule, tpu = None, None, None
     monitor = True
-    ignore_keys = ['dir', 'user', 'id', 'tag', 'rule', 'monitor']
+    ignore_keys = ['dir', 'user', 'id', 'tag', 'rule', 'monitor', 'ssn']
     customized_settings = {}
     dir_id = '1'
+    spreadsheet_notes = None
 
     for arg in args:
         if '=' in arg:
@@ -304,9 +308,13 @@ def parse_config_args(user_obj, args):
                     raise ValueError(f"Value {value} is not a valid boolean")
             if key == 'dir':
                 dir_id = value
+            if key == 'ssn':
+                spreadsheet_notes = value
                 
         if arg == '--log-stage':
             customized_settings['log_stage'] = True
+
+
             
         if arg in data['tpu_aliases']:
             tpu = data['tpu_aliases'][arg]
@@ -330,14 +338,14 @@ def parse_config_args(user_obj, args):
         rule = 'pass' if not preemptible else 'pre'
         print(f"Using rule {rule} instead")
 
-    return dir_id, dir_path, tpu, tag, rule, monitor, config_args, customized_settings   
+    return dir_id, dir_path, tpu, tag, rule, monitor, config_args, customized_settings, spreadsheet_notes  
 
 def run(user_obj, args):
     # print('args:', args)
     data = read_data()
     user_obj = users.user_from_dict(data['users'][user_obj.name])
     
-    dir_id, dir_path, tpu, tag, rule, monitor, config_args, customized_settings = parse_config_args(user_obj, args)
+    dir_id, dir_path, tpu, tag, rule, monitor, config_args, customized_settings, spreadsheet_notes = parse_config_args(user_obj, args)
 
     # Check the status of the TPU, and reapply if needed
     if tpu is not None:
@@ -401,6 +409,44 @@ def run(user_obj, args):
             print(f"{INFO} run: Quiting... {tpu}")
             return
 
+    # Check the spreadsheet for the TPU information
+    print(f"{INFO} run: Checking the TPU information in the spreadsheet...")
+    tpu_info = get_tpu_info_sheet(tpu)
+    running_status, running_user, notes = tpu_info['running_status'], tpu_info['user'], tpu_info['user_note']
+    if running_user != user_obj.spreadsheet_name and (running_status == 'running' or running_status == 'reserved'):
+        print(f"{WARNING} run: TPU {tpu} is already {RED}{running_status}{NC} by {running_user} in the spreadsheet")
+        print(f"{WARNING} run: Notes: {notes}")
+        print("DO YOU WANT TO CONTINUE? (y/n)")
+        res = input()
+        if res != 'y' and res != 'Y':
+            print(f"{INFO} run: Quiting... {tpu}")
+            return
+        print(f"{INFO} run: Continuing...")
+    else:
+        if running_status == 'free':
+            print(f"{GOOD} run: TPU {tpu} is free in the spreadsheet")
+        elif running_status == 'reserved':
+            print(f"{GOOD} run: TPU {tpu} is reserved (by yourself) in the spreadsheet")
+        elif running_status == 'running':
+            print(f"{WARNING} run: TPU {tpu} status is {YELLOW}running{NC} (by yourself) in the spreadsheet")
+
+    if running_status != 'running' or running_user != user_obj.spreadsheet_name:
+        print(f"{INFO} run: Changing the status to running by {user_obj.spreadsheet_name} in the spreadsheet...")
+        tpu_info['running_status'] = 'running'
+        tpu_info['user'] = user_obj.spreadsheet_name
+        if spreadsheet_notes is not None:
+            tpu_info['user_note'] = spreadsheet_notes
+        if '-ssn' in args:
+            res = 'y'
+            if spreadsheet_notes is not None:
+                print(f"{WARNING} run: Notes already set to {spreadsheet_notes}, do you want to change it? (y/n)")
+                res = input()
+            if res == 'y' or res == 'Y':
+                print("Please Enter the notes for the job:")
+                notes = input()
+                tpu_info['user_note'] = notes
+        write_sheet_info(tpu_info)
+    print(f"{GOOD} run: TPU {tpu} information updated in the spreadsheet")
 
     # Check if there are jobs running in the tpu
     if tpu is not None:
@@ -548,13 +594,25 @@ def write_error_to_job(user_obj, job_data, error):
             break
     write_and_unlock_data(data)
 
+def is_monitor_config(arg):
+    """
+    Check if the argument is a monitor config
+    """
+    if not arg.startswith('-') or len(arg) < 2:
+        return False
+    for c in arg[1:]:
+        if c not in 'wstdv':
+            return False
+    return True
+
 def check_jobs(user_obj, args, config = None):
     """
     Print the status of all the jobs in the tmux session.
     """
     for arg in args:
-        if arg.startswith('-') and args not in ['-f', '-q', '-apply']:
+        if is_monitor_config(arg):
             config = arg
+            break
 
     if config is None:
         config = 'ws'
@@ -756,13 +814,24 @@ def finish_job(window):
         write_and_unlock_data(data)
     except:
         release_lock_data()
-    
+
+
 def monitor_jobs(user_obj, args):
     config = None
     if len(args) > 0:
         for arg in args:
-            if arg.startswith('-'):
+            if is_monitor_config(arg):
                 config = arg
+                break
+    if config is None:
+        config = 'ws'
+        if user_obj.settings.get("monitor_dir", False):
+            config += 'd'
+        if user_obj.settings.get("monitor_tpu", False):
+            config += 't'
+        if user_obj.settings.get("monitor_verbose", False):
+            config += 'v'
+    
     try:
         while True:
             check_jobs(user_obj, args, config=config)
