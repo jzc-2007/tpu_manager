@@ -227,6 +227,8 @@ def apply_tpu(tpu, preemptible, delete=True):
     except subprocess.TimeoutExpired:
         print(f"{FAIL} apply_{info_str}: applying TPU timed out")
         return 'timeout'
+
+    time.sleep(5)
     
     cmd = f"gcloud compute tpus describe {tpu} --zone={zone} --format='value(state)'"
     try:
@@ -234,18 +236,20 @@ def apply_tpu(tpu, preemptible, delete=True):
     except subprocess.CalledProcessError:
         print(f"{FAIL} apply_{info_str}: Failed to query TPU state")
         return 'describe failed'
+    
     if state == 'READY':
         print(f"{GOOD} Now, TPU VM {tpu} is good, ready to use")
         # mount the disk
         print(f"{INFO} Mounting disk in TPU {tpu}...")
         res = mount_disk(tpu, quiet = True)
         if res != 'success':
-            print(f"{FAIL} apply_{info_str}: mounting disk failed")
-            return 'mount failed'
+            print(f"{FAIL} apply_{info_str}: mounting disk {res}")
+            return f'mount {res}'
         
         print(f"{GOOD} apply_{info_str}: TPU {tpu} is good to use!")
         
         return 'success'
+    
     else:
         print(f"{FAIL} apply_{info_str}: TPU {tpu} not ready, state: {state}")
         return 'unknown'
@@ -395,8 +399,9 @@ def check_env(tpu, quiet = False):
         print(f"{INFO} check_env: Checking environment in TPU {tpu}... This may take a while...")
     try:
         # get the output of the command
-        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout = 120)
+        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout = 600)
         stdout, stderr= result.stdout, result.stderr
+
     except subprocess.CalledProcessError:
         if not quiet:
             print(f"{FAIL} check_env: Failed to query TPU state")
@@ -477,12 +482,12 @@ def mount_disk(tpu, quiet = False):
 
     except subprocess.TimeoutExpired:
         print(f"{FAIL} mount_disk: mounting disk timed out")
-        return 'timeout'
+        return 'mounting timeout'
     except subprocess.CalledProcessError as e:
         print(f"{FAIL} mount_disk: {e}")
         print(f"stderr: {e.stderr}")
         print(f"stdout: {e.stdout}")
-        return 'failed'
+        return 'mounting failed'
     
     print(f"{INFO} Mounting disk in TPU {tpu} done")
     print(f"{INFO} Checking environment in TPU {tpu}...")
@@ -500,7 +505,57 @@ def mount_disk(tpu, quiet = False):
         print(f"{FAIL} Environment in TPU {tpu} is not good")
         print(f"state: {state}")
         print("Unexpected error, please check the TPU manually, or contact the admin")
-        return 'failed'
+        return 'checking env failed'
+
+def test_remote(tpu):
+    zone, pre, tpu = get_zone_pre(tpu)
+    if zone is None: return
+    print(f"{INFO} Testing remote TPU {tpu} in zone {zone}...")
+    print(f"{INFO} Do you want python test? (y/n)")
+    ans = input()
+    if ans == 'y':
+        print(f"{INFO} please enter the python command:")
+        cmd = input()    
+        data = read_data()
+        conda_env = data["conda_env_name"]
+        data_root = "kmh-nfs-ssd-eu-mount" if 'eu' in zone else "kmh-nfs-us-mount"
+        conda_path = f"/{data_root}/code/qiao/anaconda3/envs/{conda_env}/bin/python"
+        cmd = f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --worker=all --command \"{conda_path} -c '{cmd}'\""
+        try:
+            result = subprocess.run(cmd, shell=True, timeout=300, check=True,
+                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            print(f"{INFO} {result.stdout}")
+            print(f"{INFO} {result.stderr}")
+        except subprocess.TimeoutExpired:
+            print(f"{FAIL} test_remote: Timeout expired")
+            return 'timeout'
+        except subprocess.CalledProcessError as e:
+            print(f"{FAIL} test_remote: {e}")
+            print(f"{YELLOW}stdout:{NC} {e.stdout.strip()}")
+            print(f"{YELLOW}stderr:{NC} {e.stderr.strip()}")
+            return 'test failed'
+    elif ans == 'n':
+        print(f"{INFO} please enter the bash command:")
+        cmd = input()
+        cmd = f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --worker=all --command \"{cmd}\""
+        try:
+            result = subprocess.run(cmd, shell=True, timeout=300, check=True,
+                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            print(f"{INFO} \nstdout:\n{result.stdout}")
+            print(f"{INFO} \nstderr:\n{result.stderr}")
+        except subprocess.TimeoutExpired:
+            print(f"{FAIL} test_remote: Timeout expired")
+            return 'timeout'
+        except subprocess.CalledProcessError as e:
+            print(f"{FAIL} test_remote: {e}")
+            print(f"{YELLOW}stdout:{NC} {e.stdout.strip()}")
+            print(f"{YELLOW}stderr:{NC} {e.stderr.strip()}")
+            return 'test failed'
+    else:
+        print(f"{FAIL} test_remote: Unknown command")
+        return 'unknown command'
+    print(f"{GOOD} test_remote: TPU {tpu} tested successfully")
+    return 'success'
     
 def restart(tpu):
     zone, pre, tpu = get_zone_pre(tpu)

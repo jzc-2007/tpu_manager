@@ -175,6 +175,7 @@ tpu apply/reapply tpu_name # Apply/reapply the TPU; reapply deletes and recreate
 Environment operations are also supported:
 
 ```bash
+tpu test tpu_name # Test the TPU environment with commands interactively
 tpu mount-disk tpu_name # Mount the disk and set up wandb for the TPU
 tpu describe tpu_name # Describe the TPU environment
 tpu check-status tpu_name # Check the TPU status (e.g., PREEMPTED, READY, CREATING, etc.)

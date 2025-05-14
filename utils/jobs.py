@@ -111,7 +111,7 @@ def resume_rerun_job(job, new_tpu = None, load_ckpt = True):
         user_obj = users.user_from_dict(user)
         new_stage = int(job['stage']) + 1 if load_ckpt else 0
         print(f"{INFO} {operation}_job: {operationing} job {job['windows_id']} for user {user_obj.name} with new stage {new_stage}")
-        if new_stage > 10:
+        if new_stage > 12:
             print(f"{FAIL} {operation}_job: job {job['windows_id']} for user {user_obj.name} has reached max stage, cannot {operation}")
             release_lock_data()
             return
@@ -135,6 +135,11 @@ def resume_rerun_job(job, new_tpu = None, load_ckpt = True):
             'extra_msgs': job["extra_msgs"] | {"father": job["windows_id"]},
             'customized_settings': job.get("customized_settings", {}),
         }
+
+        # remove the key 'child' from the extra_msgs
+        if 'child' in new_job['extra_msgs']:
+            del new_job['extra_msgs']['child']
+
         if load_ckpt:
             assert job["log_dir"] is not None, f"Job {job['windows_id']} for user {user_obj.name} has no log dir"
         print(f"{INFO} {operation}_job: new job {new_job}")
@@ -196,6 +201,11 @@ def resume_rerun_job(job, new_tpu = None, load_ckpt = True):
     except Exception as e:
         print(f"{FAIL} {operation}_job: Failed to {operation} job {job['windows_id']} for user {user_obj.name}, error: {e}")
         release_lock_data()
+
+    except KeyboardInterrupt:
+        print(f"{INFO} {operation}_job: Stopping {operation}...")
+        release_lock_data()
+        return
 
 def kill_job_or_tpu(user_obj, args):
     """
@@ -649,14 +659,14 @@ def check_jobs(user_obj, args, config = None):
                 tag_str = ''
                 if job_data['job_tags'] is not None:
                     tag_str = f"tag:{job_data['job_tags']}"
-
                 rerun_str = ''
                 if father_job is not None:
-                    if job_data['status'] == 'resumed':
+                    if job_data['stage'] != '0' and job_data['stage'] != 0:
                         rerun_str = f"resume:{father_job}; stage:{job_data['stage']+1}"
-                    elif job_data['status'] == 'rerunned':
+                    else:
                         rerun_str = f"rerun:{father_job}; stage:{job_data['stage']+1}"
                 
+                # print('jzc:',rerun_str)
                 if tag_str != '' and rerun_str != '':
                     print(f"Window {window_id}: ({tag_str}, {rerun_str})")
 

@@ -89,11 +89,12 @@ if __name__ == '__main__':
         elif cmd == 'lock-data': data_io.lock_data()
         elif cmd == 'unlock-data': data_io.release_lock_data()
         elif cmd == 'ack': jobs.ack_MONITOR()
-        elif cmd == 'rs': sheet.read_sheet_info()
+        # elif cmd == 'rs': sheet.read_sheet_info()
         elif cmd == 'find': sheet.find_tpu_from_type(args[2:])
         elif cmd == 'rel' or cmd == 'release': sheet.release_tpu(args[2:])
 
         # ------------ For development only ------------
+        elif cmd == 'test': operate.test_remote(args[2])
         elif cmd == 'add_global_config' or cmd == '-agc': develop.add_global_config(args[2], args[3])
         elif cmd == 'merge_global_config' or cmd == '-mgc': develop.merge_global_config(args[2])
         elif cmd == '-Ml': develop.show_MONITOR_log() if len(args) < 3 else develop.show_MONITOR_log(args[2])

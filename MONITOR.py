@@ -70,7 +70,7 @@ def reapply_worker(ka, result_queue):
             print(f"{GOOD} reapply_worker: Reapply TPU {ka} done")
             add_MONITOR_log(f"{GOOD} reapply_worker: Reapply TPU {ka} done")
         else:
-            raise Exception(f"Reapply TPU {ka} failed, please contact the admin")
+            raise Exception(f"Reapply TPU {ka} failed, please contact the admin, result: {result}")
         result_queue.put(result)
     except Exception as e:
         print(f"{FAIL} reapply_worker: Failed to reapply TPU {ka}: {e}")
