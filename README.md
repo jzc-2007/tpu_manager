@@ -104,6 +104,7 @@ If you don't want `tpu run` to open the monitor window, you can use `tpu set-set
 <!-- BEGIN OF 2D -->
 <details>
 <summary> <strong>2D. Spreadsheet Support(OPTIONAL)</strong></summary>
+
 The `tpu run` command will automatically set the status in the spreadsheet to be running by you. If you want to set the notes, you can add a `-ssn` flag(short for `--set-spreadsheet-notes`) to set the notes interactively, or you can pass `ssn=your_notes` to set the notes directly.(In this case, space will not be supported, and you need to use `_` instead of space.)
 
 You can use `tpu find <all_tpu_types>` to look at the status of the TPUs in the spreadsheet. The format of tpu_types is like `v2`, `v3`, `v234`(or `v*`) or `v2-32`. You can also pass `-n` for normal TPUs and `-p` for preemptible TPUs. For example, to show the status of all non-preemptible v3 and v4 TPUs, you can do:
