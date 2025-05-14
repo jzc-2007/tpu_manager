@@ -65,7 +65,7 @@ def check_job_status(job):
 def reapply_worker(ka, result_queue):
     sys.stdout = open(os.devnull, 'w')
     try:
-        result = operate.apply_pre(ka, delete=True)
+        result = operate.apply_tpu(ka, preemptible=True, delete=True)
         if result == 'success':
             print(f"{GOOD} reapply_worker: Reapply TPU {ka} done")
             add_MONITOR_log(f"{GOOD} reapply_worker: Reapply TPU {ka} done")
@@ -255,6 +255,7 @@ if __name__ == "__main__":
             time_used = time.time()- last_time # in seconds
             print(f"{INFO} Time: {convert_utcstr_to_edtstr(get_abs_time_str())}")
             print(f"Loop {num_loops} finished, time used: {time_used:.2f} seconds")
+            add_MONITOR_log(f"{INFO} Loop {num_loops} finished, time used: {time_used:.2f} seconds")
             while time.time() - last_time < checking_freq:
                 data = data_io.read_data()
                 time.sleep(10)

@@ -2,7 +2,7 @@ import os, re, time, json, copy
 from .helpers import *
 from . import users
 from .data_io import read_and_lock_data, write_and_unlock_data, release_lock_data, read_data
-from .operate import check_tpu_status, apply_pre, kill_jobs_tpu, get_zone_pre, restart, check_tpu_running
+from .operate import check_tpu_status, apply_tpu, kill_jobs_tpu, get_zone_pre, restart, check_tpu_running
 RULE_DICT ={
     'pre':{
         'preempted': 'reapply',
@@ -160,7 +160,7 @@ def resume_rerun_job(job, new_tpu = None, load_ckpt = True):
             tpu_status = check_tpu_status(tpu)
             if tpu_status == 'preempted':
                 print(f"{WARNING} {operation}_job: TPU {tpu} is preempted, trying to reapply...")
-                res = apply_pre(tpu, delete=True)
+                res = apply_tpu(tpu, preemptible=True, delete=True)
                 if res == 'success':
                     print(f"{GOOD} {operation}_job: Reapply TPU {tpu} done")
                 else:
@@ -361,7 +361,7 @@ def run(user_obj, args):
                     REAPPLY = False
             if not REAPPLY: return
             try:
-                apply_pre(tpu, delete=True)
+                apply_tpu(tpu, preemptible=True, delete=True)
             except Exception as e:
                 print(f"{FAIL} run: Failed to reapply TPU {tpu}: {e}")
                 return
@@ -379,7 +379,7 @@ def run(user_obj, args):
             res = input()
             if res == 'y' or res == 'Y':
                 print(f"{INFO} run: Re-applying TPU {tpu}...")
-                try: apply_pre(tpu, delete=False)
+                try: apply_tpu(tpu, preemptible=True, delete=False)
                 except Exception as e:
                     print(f"{FAIL} run: Failed to reapply TPU {tpu}: {e}")
                     return

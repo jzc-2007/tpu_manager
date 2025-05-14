@@ -132,10 +132,10 @@ def display_tpu_information(tpu_information, style = None, **kwargs):
         print(f"\n{YELLOW}Reserved TPUs{NC}")
         for tpu in reserved_tpus:
             info = tpu_information[tpu]
-            print(f"{info['alias']}({info['user']}: {info['user_note']})")
+            print(f"{info['alias']} ({info['user']}: {info['user_note']})")
         print(f"{RED}Running TPUs{NC}")
         for tpu in running_tpus:
             info = tpu_information[tpu]
-            print(f"{info['alias']}({info['user']}: {info['user_note']})")
+            print(f"{info['alias']} ({info['user']}: {info['user_note']})")
     else:
         raise ValueError(f"Style {style} not recognized")

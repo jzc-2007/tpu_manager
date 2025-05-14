@@ -2,7 +2,7 @@ import json
 import os, time
 from .helpers import *
 from .data_io import read_and_lock_data, write_and_unlock_data, release_lock_data, read_data, write_data
-from .operate import get_zone_pre, check_env, mount_disk, check_tpu_status, apply_pre
+from .operate import get_zone_pre, check_env, mount_disk, check_tpu_status, apply_tpu
 from .jobs import resume_rerun_job
 
 def clear_zombie_windows(user_obj):
@@ -40,7 +40,7 @@ def solve_env(tpu):
     tpu_status = check_tpu_status(tpu)
     if tpu_status == 'preempted':
         print(f"{INFO} solve_env: TPU {tpu} is preempted, trying to reapply...")
-        res = apply_pre(tpu, delete=True)
+        res = apply_tpu(tpu, preemptible=True, delete=True)
         if res == 'success':
             print(f"{GOOD} solve_env: Reapply TPU {tpu} done")
             return 'success'
