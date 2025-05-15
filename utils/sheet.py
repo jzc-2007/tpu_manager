@@ -225,6 +225,31 @@ def release_tpu(args):
     else:
         print(f"{FAIL} TPU {tpu} not found in the sheet")
 
+def set_spreadsheet_notes(tpu, notes):
+    """
+    Set the spreadsheet notes for a specific TPU.
+    Args: TPU name or alias, notes
+    """
+    tpu_information = get_tpu_info_sheet(tpu)
+    if tpu_information is not None:
+        tpu_information['user_note'] = notes
+        write_sheet_info(tpu_information)
+        print(f"{INFO} TPU {tpu} notes updated")
+    else:
+        print(f"{FAIL} TPU {tpu} not found in the sheet")
+
+def add_spreadsheet_notes(tpu, notes):
+    """
+    Set the spreadsheet notes for a specific TPU.
+    Args: TPU name or alias, notes
+    """
+    tpu_information = get_tpu_info_sheet(tpu)
+    if tpu_information is not None:
+        tpu_information['user_note'] += notes
+        write_sheet_info(tpu_information)
+        print(f"{INFO} TPU {tpu} notes updated")
+    else:
+        print(f"{FAIL} TPU {tpu} not found in the sheet")
 
 
 

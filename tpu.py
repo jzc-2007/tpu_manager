@@ -60,6 +60,8 @@ if __name__ == '__main__':
         ############### JOBS that don't require a user ###############
         if cmd == 'tldr': desc.tldr()
         # elif cmd == 'docs' or cmd == 'doc': desc.full_doc()
+        elif cmd == 'ssn': sheet.set_spreadsheet_notes(args[2], args[3])
+        elif cmd == 'asn': sheet.add_spreadsheet_notes(args[2], args[3])
         elif cmd == 'change-ip': handler.change_ip()
         elif cmd == 'upd-log': jobs.upd_log(args[2], args[3], args[4], args[5], args[6]) #windows, log_dir, stage_dir, ka, time
         elif cmd == 'finish-job': jobs.finish_job(args[2])

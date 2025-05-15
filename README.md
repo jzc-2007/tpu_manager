@@ -107,6 +107,8 @@ If you don't want `tpu run` to open the monitor window, you can use `tpu set-set
 
 The `tpu run` command will automatically set the status in the spreadsheet to be running by you. If you want to set the notes, you can add a `-ssn` flag(short for `--set-spreadsheet-notes`) to set the notes interactively, or you can pass `ssn="your notes"` to set the notes directly.
 
+You can also set the notes afterwards by `tpu ssn/asn <tpu> <notes>`, for example `tpu ssn v2-32-6 "This is a test"`. `ssn` resets the notes to be `This is a test`, while `asn` appends the notes to the current notes.
+
 You can use `tpu find <all_tpu_types>` (or `tfind` for short) to look at the status of the TPUs in the spreadsheet. The format of tpu_types is like `v2`, `v3`, `v234`(or `v*`) or `v2-32`. You can also pass `-n` for normal TPUs and `-p` for preemptible TPUs. For example, to show the status of all non-preemptible v3-32 and v4 TPUs, you can do:
 `tpu find v3-32 v4 -n`. If no `v?` is passed, it will show all the TPUs.
 

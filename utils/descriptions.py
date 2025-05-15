@@ -212,7 +212,7 @@ def full_doc():
 - A numbered *working directory* points to a source‑code folder.
 - `tpu set-cur <n> <username>` — mark *pwd* as dir *n* (default 1).
 - `tpu ls <username>` — list all saved directories.
-- `tpu run <tpu> <username> [dir=1] [tag=<tag>] [key=value …] [rule=<rule>]`
+- `tpu run <tpu> <username> [dir=1] [tag=<tag>] [key=value …] [rule=<rule>] [ssn="my notes"]`
   · `tpu` can be an alias (e.g. `v2-32-6`) or the full TPU name.
   · Pre‑emptible TPUs auto‑resume/on‑GRPC; non‑preemptible default *pass* — override with `rule=`.
   · `-apply` flag skips confirmation when (re)applying.
@@ -242,6 +242,7 @@ tpu run v2-32-p1 lyy dir=2 tag=bird  # run in dir 2 with tag
 - Provision: `tpu apply/reapply <tpu>`.
 - Inspect: `tpu describe <tpu>`  |  Status: `tpu check-status <tpu>`.
 - Fix common mount/wandb issues: `tpu solve <tpu>` (community‑extendable).
+- Read Spredsheet to find available TPUs: `tpu find [types]`
 
 {YELLOW}== Config Aliases & Tags=={NC}
 - Add alias: `tpu -a <alias> <full_config_key> <username>`.
