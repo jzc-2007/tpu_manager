@@ -136,6 +136,7 @@ def read_tpu_info_from_type(args):
     """
     Read the TPU information from specific args.
     Supported args: ['v2', 'v3', 'v4', 'v23', 'v24', 'v34', 'v234'/'-a'/'-all'/'--all'/'v*', 'v2-8',  'v2-16', 'v2-32', 'v2-64', 'v2-128', 'v3-8',  'v4-16', 'v3-32', 'v3-64', 'v3-128', 'v4-8', 'v4-16', 'v4-32', 'v4-64', 'v4-128', 'v2/3/4+', 'v2/3/4-', '-p'/'-pre', '-n'/'-norm']
+    Return: a dictionary of dictionaries with TPU information.
     """
     v2_list = ['v2-8', 'v2-16', 'v2-32', 'v2-64', 'v2-128']
     v3_list = ['v3-8', 'v3-16', 'v3-32', 'v3-64', 'v3-128']
@@ -221,7 +222,7 @@ def release_tpu(args):
         tpu_information['user'] = '闲的'
         tpu_information['user_note'] = ''
         write_sheet_info(tpu_information)
-        print(f"{INFO} TPU {tpu} released")
+        print(f"{GOOD} TPU {tpu} released")
     else:
         print(f"{FAIL} TPU {tpu} not found in the sheet")
 

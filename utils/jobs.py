@@ -3,7 +3,7 @@ from .helpers import *
 from . import users
 from .data_io import read_and_lock_data, write_and_unlock_data, release_lock_data, read_data
 from .operate import check_tpu_status, apply_tpu, kill_jobs_tpu, get_zone_pre, restart, check_tpu_running
-from .sheet import get_tpu_info_sheet, write_sheet_info
+from .sheet import get_tpu_info_sheet, write_sheet_info, read_tpu_info_from_type, find_tpu_from_type
 RULE_DICT ={
     'pre':{
         'preempted': 'reapply',
@@ -197,6 +197,11 @@ def resume_rerun_job(job, new_tpu = None, load_ckpt = True):
         
         write_and_unlock_data(data)
 
+        tpu_info = get_tpu_info_sheet(tpu)
+        tpu_info['running_status'] = 'running'
+        tpu_info['user'] = user_obj.spreadsheet_name
+        write_sheet_info(tpu_info)
+
 
     except Exception as e:
         print(f"{FAIL} {operation}_job: Failed to {operation} job {job['windows_id']} for user {user_obj.name}, error: {e}")
@@ -281,6 +286,53 @@ def restart_run(user_obj, args):
 
     # read config args
 
+def select_tpu(args, auto = False):
+    if not auto:
+        print(f"{INFO} select_tpu: Querying all available tpus...")
+        find_tpu_from_type(args)
+        tpu = input('Please select a tpu, or `q` to quit:')
+        if tpu == 'q':
+            print(f"{INFO} select_tpu: Quitting...")
+            return None
+        return tpu
+    else:
+        print(f"{INFO} select_tpu: Auto selecting tpu...")
+        tpu_info = read_tpu_info_from_type(args)
+        free_tpu_list = []
+        reserved_tpu_list = []
+        for tpu, info in tpu_info.items():
+            if info['running_status'] == 'free':
+                free_tpu_list.append(tpu)
+            elif info['running_status'] == 'reserved':
+                reserved_tpu_list.append(tpu)
+        if len(free_tpu_list) > 0:
+            print(f"{INFO} select_tpu: Found free tpus: {free_tpu_list}")
+            print(f"{INFO} select_tpu: selecting free tpu {GREEN}{free_tpu_list[0]}{NC}")
+            return free_tpu_list[0]
+        else:
+            print(f"{INFO} select_tpu: {RED}No free tpus found{NC}")
+            if len(reserved_tpu_list) > 0:
+                print(f"Found {YELLOW}reserved tpus{NC}:")
+                for tpu in reserved_tpu_list:
+                    print(f"{YELLOW}{tpu_info[tpu]['alias']}{NC} -> {tpu_info[tpu]['user']}: {tpu_info[tpu]['user_note']}")
+                print("Do you want to use one of them? (y/n)")
+                res = input()
+                if res == 'y' or res == 'Y':
+                    tpu_selected = input("Please select a tpu:")
+                    if tpu_selected in reserved_tpu_list:
+                        print(f"{INFO} select_tpu: Selected tpu: {tpu_selected}")
+                        return tpu_selected
+                    else:
+                        print(f"{FAIL} select_tpu: Invalid tpu selected")
+                        return None
+                else:
+                    print(f"{INFO} select_tpu: Quitting...")
+                    return None
+            else:
+                print(f"{FAIL} select_tpu: No free or reserved tpus found")
+                return None
+
+
 def parse_config_args(user_obj, args):
     """
     Parse the config args from the command line arguments to use in `run`.
@@ -295,6 +347,10 @@ def parse_config_args(user_obj, args):
     customized_settings = {}
     dir_id = '1'
     spreadsheet_notes = None
+    all_tpu_list = []
+    for alias, tpu_name in data['tpu_aliases'].items():
+        all_tpu_list.append(alias)
+        all_tpu_list.append(tpu_name)
 
     for arg in args:
         if '=' in arg:
@@ -324,10 +380,18 @@ def parse_config_args(user_obj, args):
         if arg == '--log-stage':
             customized_settings['log_stage'] = True
 
+        if arg in all_tpu_list:
+            tpu = data['tpu_aliases'].get(arg, arg)
+            print(f"{INFO} run: Using tpu {tpu}")
 
+        if arg in ['v2', 'v3', 'v4', 'v2-32', 'v3-32', 'v4-32', 'v234', 'v23', 'v24', 'v34', 'v*', 'v2+', 'v3+', 'v4+', 'v2-', 'v3-', 'v4-', 'v2-8', 'v3-8', 'v4-8', 'v2-32', 'v3-32', 'v4-32', 'v2-128', 'v3-128', 'v4-128']:
+            tpu = select_tpu(args, auto = ('auto' in args or '-auto' in args))
+
+            if tpu is None:
+                print(f"{FAIL} run: No tpu selected")
+                raise ValueError(f"TPU {tpu} not found")
             
-        if arg in data['tpu_aliases']:
-            tpu = data['tpu_aliases'][arg]
+            tpu = data['tpu_aliases'].get(tpu, tpu)
             print(f"{INFO} run: Using tpu {tpu}")
 
     if '-ssn' in args or '--ssn' in args:
@@ -465,7 +529,7 @@ def run(user_obj, args):
         else:
             tpu_info['user_note'] = ''
         write_sheet_info(tpu_info)
-    print(f"{GOOD} run: TPU {tpu} information updated in the spreadsheet")
+    # print(f"{GOOD} run: TPU {tpu} information updated in the spreadsheet")
 
     # Check if there are jobs running in the tpu
     if tpu is not None:
@@ -677,13 +741,13 @@ def check_jobs(user_obj, args, config = None):
                 
                 # print('jzc:',rerun_str)
                 if tag_str != '' and rerun_str != '':
-                    print(f"Window {window_id}: ({tag_str}, {rerun_str})")
+                    print(f"Window {window_id} ({tag_str}; {rerun_str})")
 
                 elif tag_str != '':
-                    print(f"Window {window_id}: ({tag_str})")
+                    print(f"Window {window_id} ({tag_str})")
 
                 elif rerun_str != '':
-                    print(f"Window {window_id}: ({rerun_str})")
+                    print(f"Window {window_id} ({rerun_str})")
 
                 else:
                     print(f"Window {window_id}")

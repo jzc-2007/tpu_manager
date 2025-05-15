@@ -38,15 +38,18 @@ tpu ls username # List all the working directories
 tpu run tpu_name username [dir=1] # Run the job in working directory <dir>
 ```
 
-The `tpu_name` is of the format of the **pre-defined tpu aliases** , like `v2-32-6`, `v2-32-p1`, or `v4-32-py2`. You can also pass full-name such as `kmh-tpuvm-v2-32-1`.
+The `tpu_name` is of the format of the **pre-defined tpu aliases** , like `v2-32-6`, `v2-32-p1`, or `v4-32-py2`. You can also pass full-name such as `kmh-tpuvm-v2-32-1`. 
+
+We also suppport only passing the tpu type, like `v2`, `v3`, `v23`(`v2` or `v3`), `v3+`(`v3` or `v4`), or `v3-32`, and `-n` and `-p` for normal/preemptible TPUs. If you pass only the tpu type, it will show all the TPUs of that type for you to choose interactively. Alternatively, you can pass `-auto` to auto-select a free TPU of that type. If there's no free TPUs, it will show all the reserved TPUs for you to choose.
 
 For all the aliases, use `tpu -lta/-sta` (list/show TPU aliases) to see. You can also add aliases by `tpu -ata alias FULL_TPU_NAME`(add TPU aliases). Please don't add aliases that may lead to contradictions to other things, for example `username` or `tag` or `config` or `s`.
 
 **Example:**
 
 ```bash
-trun/tpu run v2-32-6 xibo # Default: run the job in working directory 1
-trun/tpu run v2-32-p1 lyy dir=2 # Run the job in working directory 2 
+trun/tpu run v2-32-6 xibo # Run the job in working directory 1 using tpu v2-32-6
+trun/tpu run v2-32-p1 lyy dir=2 # Run the job in working directory 2 using tpu v2-32-p1
+trun/tpu run v2-32 v3-32 -p xibo -auto # Auto-select a free preemptible TPU of type v2-32 or v3-32
 ```
 
 The `tpu run` command opens a monitor window to track all your jobs. Alternatively, you can use:
