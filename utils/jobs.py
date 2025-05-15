@@ -330,7 +330,20 @@ def parse_config_args(user_obj, args):
             tpu = data['tpu_aliases'][arg]
             print(f"{INFO} run: Using tpu {tpu}")
 
-    if (tag is None) and (spreadsheet_notes is not None) and ('no-tag' not in args):
+    if '-ssn' in args or '--ssn' in args:
+        if spreadsheet_notes is not None:
+            print(f"{WARNING} run: Notes already set to {spreadsheet_notes}, do you want to change it? (y/n)")
+            res = input()
+            if res == 'y' or res == 'Y':
+                print("Please Enter the notes for the job:")
+                notes = input()
+                spreadsheet_notes = notes
+        else:
+            print("Please Enter the notes for the job:")
+            notes = input()
+            spreadsheet_notes = notes 
+
+    if (tag is None) and (spreadsheet_notes is not None) and ('-no-tag' not in args):
         tag = spreadsheet_notes
 
     dir_path = user_obj.working_dir[dir_id]
@@ -449,15 +462,8 @@ def run(user_obj, args):
         tpu_info['user'] = user_obj.spreadsheet_name
         if spreadsheet_notes is not None:
             tpu_info['user_note'] = spreadsheet_notes
-        if '-ssn' in args:
-            res = 'y'
-            if spreadsheet_notes is not None:
-                print(f"{WARNING} run: Notes already set to {spreadsheet_notes}, do you want to change it? (y/n)")
-                res = input()
-            if res == 'y' or res == 'Y':
-                print("Please Enter the notes for the job:")
-                notes = input()
-                tpu_info['user_note'] = notes
+        else:
+            tpu_info['user_note'] = ''
         write_sheet_info(tpu_info)
     print(f"{GOOD} run: TPU {tpu} information updated in the spreadsheet")
 
