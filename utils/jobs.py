@@ -330,6 +330,9 @@ def parse_config_args(user_obj, args):
             tpu = data['tpu_aliases'][arg]
             print(f"{INFO} run: Using tpu {tpu}")
 
+    if (tag is None) and (spreadsheet_notes is not None) and ('no-tag' not in args):
+        tag = spreadsheet_notes
+
     dir_path = user_obj.working_dir[dir_id]
 
     if not os.path.exists(dir_path):
