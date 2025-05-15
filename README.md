@@ -88,7 +88,7 @@ You can change the default rules for resuming/rerunning by passing `rule=<rule>`
 
 <!-- BEGIN OF 2C -->
 <details>
-<summary> <strong>2C. Advanced Monitor Configs(OPTIONAL)</strong></summary>
+<summary> <strong>2C. Advanced Monitor Configs (OPTIONAL)</strong></summary>
 
 The monitor will show four things: the windows number(`w`), the directory(`d`), the tpu(`t`), and the job status(`s`). You can choose which to show by adding commands. There's also an additional flag "verbose"(`v`) available, meaning to show the messages(cut) from tmux windows even for the running jobs with known status.(Should be used with `s`) For example, to only show the working directory and the job status and detailed output of xibo, use:
 
@@ -103,7 +103,7 @@ If you don't want `tpu run` to open the monitor window, you can use `tpu set-set
 
 <!-- BEGIN OF 2D -->
 <details>
-<summary> <strong>2D. Spreadsheet Support(OPTIONAL, RECOMMENDED)</strong></summary>
+<summary> <strong>2D. Spreadsheet Support (OPTIONAL, RECOMMENDED)</strong></summary>
 
 The `tpu run` command will automatically set the status in the spreadsheet to be running by you. If you want to set the notes, you can add a `-ssn` flag(short for `--set-spreadsheet-notes`) to set the notes interactively, or you can pass `ssn="your notes"` to set the notes directly.
 
@@ -141,7 +141,7 @@ Jobs with children jobs that were rerun/resumed will be killed based on the stat
 
 **IMPORTANT**: If you have a job that has rerun setting, and it has been grpc, please remember to use `clean` to clear it if you **manually kill the window**, otherwise it may be rerunned.
 <details>
-<summary> <strong>3A. Other killing commands(OPTIONAL)</strong></summary>
+<summary> <strong>3A. Other killing commands (OPTIONAL)</strong></summary>
 To kill a specific tmux window (NOT RECOMMENDED):
 
 ```bash
@@ -164,7 +164,7 @@ The `clean` command integrates these actions, so using `kill-job + clean` is str
 </details>
 
 <details>
-<summary> <strong>4. Environment Operations(OPTIONAL)</strong></summary>
+<summary> <strong>4. Environment Operations (OPTIONAL)</strong></summary>
 
 We support common operations, such as:
 
@@ -192,7 +192,7 @@ tpu solve tpu_name # Integrated automatic environment solver
 
 
 <details>
-<summary> <strong>5. Passing Configs in Command Line(OPTIONAL)</strong></summary>
+<summary> <strong>5. Passing Configs in Command Line (OPTIONAL)</strong></summary>
 
 We support passing configs in the command line by config aliases or full config name. You can also set your own config alias by:
 
@@ -235,7 +235,7 @@ tpu run v2-32-6 xibo config.training.learning_rate=0.01 # This is also supported
 </details>
 
 <details>
-<summary> <strong>6. More on Resuming/Rerunning(OPTIONAL)</strong></summary>
+<summary> <strong>6. More on Resuming/Rerunning (OPTIONAL)</strong></summary>
 You can manually resume/rerun a job by:
 
 ```bash
@@ -287,7 +287,7 @@ Then after no more than 3 mins you should expect the job to be resumed(if not, c
 </details>
 
 <details>
-<summary> <strong>7. Customizing User Settings(OPTIONAL)</strong></summary>
+<summary> <strong>7. Customizing User Settings (OPTIONAL)</strong></summary>
 
 We support customizing settings for users, and you can set/get them by:
 
@@ -332,6 +332,8 @@ Please be careful not to have conflicts with current jobs.
 tpu tldr
 tpu -h command # details of the command
 ```
+
+Some of the help of the commands are **not updated**, please refer to **this README** for the latest usage.
 
 </details>
 
