@@ -113,6 +113,9 @@ def display_tpu_information(tpu_information, style = None, **kwargs):
         free_tpus = [tpu for tpu, info in tpu_information.items() if info['running_status'] == 'free']
         reserved_tpus = [tpu for tpu, info in tpu_information.items() if info['running_status'] == 'reserved']
         running_tpus = [tpu for tpu, info in tpu_information.items() if info['running_status'] == 'running']
+        free_tpus = sorted(free_tpus, key=lambda x: tpu_information[x]['alias'])
+        reserved_tpus = sorted(reserved_tpus, key=lambda x: tpu_information[x]['alias'])
+        running_tpus = sorted(running_tpus, key=lambda x: tpu_information[x]['alias'])
         print(f"{GREEN}Free TPUs{NC} (Total: {len(free_tpus)})")
         for tpu in free_tpus:
             print(tpu_information[tpu]['alias'], end='; ')
@@ -127,6 +130,9 @@ def display_tpu_information(tpu_information, style = None, **kwargs):
         free_tpus = [tpu for tpu, info in tpu_information.items() if info['running_status'] == 'free']
         reserved_tpus = [tpu for tpu, info in tpu_information.items() if info['running_status'] == 'reserved']
         running_tpus = [tpu for tpu, info in tpu_information.items() if info['running_status'] == 'running']
+        free_tpus = sorted(free_tpus, key=lambda x: tpu_information[x]['alias'])
+        reserved_tpus = sorted(reserved_tpus, key=lambda x: tpu_information[x]['alias'])
+        running_tpus = sorted(running_tpus, key=lambda x: tpu_information[x]['alias'])
         print(f"{GREEN}Free TPUs{NC} (Total: {len(free_tpus)})")
         for tpu in free_tpus:
             info = tpu_information[tpu]

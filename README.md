@@ -103,12 +103,12 @@ If you don't want `tpu run` to open the monitor window, you can use `tpu set-set
 
 <!-- BEGIN OF 2D -->
 <details>
-<summary> <strong>2D. Spreadsheet Support(OPTIONAL)</strong></summary>
+<summary> <strong>2D. Spreadsheet Support(OPTIONAL, RECOMMENDED)</strong></summary>
 
-The `tpu run` command will automatically set the status in the spreadsheet to be running by you. If you want to set the notes, you can add a `-ssn` flag(short for `--set-spreadsheet-notes`) to set the notes interactively, or you can pass `ssn=your_notes` to set the notes directly.(In this case, space will not be supported, and you need to use `_` instead of space.)
+The `tpu run` command will automatically set the status in the spreadsheet to be running by you. If you want to set the notes, you can add a `-ssn` flag(short for `--set-spreadsheet-notes`) to set the notes interactively, or you can pass `ssn="your notes"` to set the notes directly.
 
-You can use `tpu find <all_tpu_types>` to look at the status of the TPUs in the spreadsheet. The format of tpu_types is like `v2`, `v3`, `v234`(or `v*`) or `v2-32`. You can also pass `-n` for normal TPUs and `-p` for preemptible TPUs. For example, to show the status of all non-preemptible v3 and v4 TPUs, you can do:
-`tpu find v34 -n`.
+You can use `tpu find <all_tpu_types>` (or `tfind` for short) to look at the status of the TPUs in the spreadsheet. The format of tpu_types is like `v2`, `v3`, `v234`(or `v*`) or `v2-32`. You can also pass `-n` for normal TPUs and `-p` for preemptible TPUs. For example, to show the status of all non-preemptible v3-32 and v4 TPUs, you can do:
+`tpu find v3-32 v4 -n`. If no `v?` is passed, it will show all the TPUs.
 
 You can release the TPU by `tpu release/rel <tpu_name>`, which set the status and the user to be free('闲的') in the spreadsheet. You can also use `tpu release/rel <tpu_name> <username>` to make sure that the TPU is currently owned by you(recommended).
 
@@ -164,7 +164,7 @@ The `clean` command integrates these actions, so using `kill-job + clean` is str
 </details>
 
 <details>
-<summary> <strong>4. Environment Operations </strong></summary>
+<summary> <strong>4. Environment Operations(OPTIONAL)</strong></summary>
 
 We support common operations, such as:
 
@@ -192,7 +192,7 @@ tpu solve tpu_name # Integrated automatic environment solver
 
 
 <details>
-<summary> <strong>5. Passing Configs in Command Line</strong></summary>
+<summary> <strong>5. Passing Configs in Command Line(OPTIONAL)</strong></summary>
 
 We support passing configs in the command line by config aliases or full config name. You can also set your own config alias by:
 
@@ -235,7 +235,7 @@ tpu run v2-32-6 xibo config.training.learning_rate=0.01 # This is also supported
 </details>
 
 <details>
-<summary> <strong>6. More on Resuming/Rerunning </strong></summary>
+<summary> <strong>6. More on Resuming/Rerunning(OPTIONAL)</strong></summary>
 You can manually resume/rerun a job by:
 
 ```bash
@@ -287,7 +287,7 @@ Then after no more than 3 mins you should expect the job to be resumed(if not, c
 </details>
 
 <details>
-<summary> <strong>7. Customizing User Settings </strong></summary>
+<summary> <strong>7. Customizing User Settings(OPTIONAL)</strong></summary>
 
 We support customizing settings for users, and you can set/get them by:
 

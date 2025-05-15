@@ -29,7 +29,7 @@ def read_sheet_info() -> List[List[str]]:
 
     # 3. find the number of rows
     last_row = 0
-    for sentinel_col in range(1, 10):
+    for sentinel_col in range(2, 4): # COL B, C (ka, belonging)
         col_values = ws.col_values(sentinel_col)
         last_row = max(last_row, len(col_values))
 
@@ -135,23 +135,30 @@ def write_sheet_info(info_to_write):
 def read_tpu_info_from_type(args):
     """
     Read the TPU information from specific args.
-    Supported args: ['v2', 'v3', 'v4', 'v23', 'v24', 'v34', 'v234'/'-a'/'-all'/'--all'/'v*', 'v2-8', 'v2-32', 'v2-64', 'v2-128', 'v3-8', 'v3-32', 'v3-64', 'v3-128', 'v4-8', 'v4-32', 'v4-64', 'v4-128', '-p'/'-pre', '-n'/'-norm']
+    Supported args: ['v2', 'v3', 'v4', 'v23', 'v24', 'v34', 'v234'/'-a'/'-all'/'--all'/'v*', 'v2-8',  'v2-16', 'v2-32', 'v2-64', 'v2-128', 'v3-8',  'v4-16', 'v3-32', 'v3-64', 'v3-128', 'v4-8', 'v4-16', 'v4-32', 'v4-64', 'v4-128', 'v2/3/4+', 'v2/3/4-', '-p'/'-pre', '-n'/'-norm']
     """
-    v2_list = ['v2-8', 'v2-32', 'v2-64', 'v2-128']
-    v3_list = ['v3-8', 'v3-32', 'v3-64', 'v3-128']
-    v4_list = ['v4-8', 'v4-32', 'v4-64', 'v4-128']
+    v2_list = ['v2-8', 'v2-16', 'v2-32', 'v2-64', 'v2-128']
+    v3_list = ['v3-8', 'v3-16', 'v3-32', 'v3-64', 'v3-128']
+    v4_list = ['v4-8', 'v4-16', 'v4-32', 'v4-64', 'v4-128']
+    all_type_list = v2_list + v3_list + v4_list
     type_list = []
     pre_filter = None
+
     for arg in args:
-        if arg == 'v2': type_list += v2_list
-        elif arg == 'v3': type_list += v3_list
-        elif arg == 'v4': type_list += v4_list
-        elif arg == 'v23': type_list += v2_list + v3_list
-        elif arg == 'v24': type_list += v2_list + v4_list
-        elif arg == 'v34': type_list += v3_list + v4_list
-        elif arg in ['v234', '-a', '-all', '--all', 'v*']: type_list += v2_list + v3_list + v4_list
+        if arg in ['v2', 'v2-']: type_list += v2_list
+        elif arg in ['v3']: type_list += v3_list
+        elif arg in ['v4', 'v4+']: type_list += v4_list
+        elif arg in ['v23', 'v3-']: type_list += v2_list + v3_list
+        elif arg in ['v24']: type_list += v2_list + v4_list
+        elif arg in ['v34', 'v3+']: type_list += v3_list + v4_list
+        elif arg in ['v234', '-a', '-all', '--all', 'v*', 'v2+', 'v4-']: type_list += all_type_list
+        elif arg in all_type_list: type_list.append(arg)
         elif arg in ['-p', '-pre']: pre_filter = True
         elif arg in ['-n', '-norm']: pre_filter = False
+
+    if len(type_list) == 0:
+        type_list = all_type_list
+
     tpu_information = read_sheet_info()
 
     if pre_filter is not None:
