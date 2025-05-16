@@ -176,6 +176,8 @@ def resume_rerun_job(job, new_tpu = None, load_ckpt = True):
             elif tpu_status == 'failed':
                 print(f"{FAIL} {operation}_job: Failed to query status")
                 print(f"{FAIL} {operation}_job: This may indicate that this TPU is deleted, please contact the admin")
+                
+            tpu_status = check_tpu_status(tpu)
             assert tpu_status == 'ready', f"TPU {tpu} is not ready, status: {tpu_status}"
 
         # kill the old job
@@ -385,7 +387,7 @@ def parse_config_args(user_obj, args):
             print(f"{INFO} run: Using tpu {tpu}")
 
         if arg in ['v2', 'v3', 'v4', 'v2-32', 'v3-32', 'v4-32', 'v234', 'v23', 'v24', 'v34', 'v*', 'v2+', 'v3+', 'v4+', 'v2-', 'v3-', 'v4-', 'v2-8', 'v3-8', 'v4-8', 'v2-32', 'v3-32', 'v4-32', 'v2-128', 'v3-128', 'v4-128']:
-            tpu = select_tpu(args, auto = ('auto' in args or '-auto' in args))
+            tpu = select_tpu(args, auto = ('auto' in args or '-auto' in args or '--auto' in args))
 
             if tpu is None:
                 print(f"{FAIL} run: No tpu selected")

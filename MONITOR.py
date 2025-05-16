@@ -239,6 +239,7 @@ if __name__ == "__main__":
     num_loops = 0
     last_test_time = time.time()
     last_clean_time = time.time()
+    print(f"{INFO} MONITOR: Starting MONITOR...")
     add_MONITOR_log(f"{GOOD} Starting monitor...")
 
     if data_io.check_code_lock():
