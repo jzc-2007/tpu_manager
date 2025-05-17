@@ -356,7 +356,7 @@ def parse_config_args(user_obj, args):
 
     for arg in args:
         if '=' in arg:
-            key, value = arg.split('=')
+            key, value = arg.split('=')[0], arg.split('=')[1]
             if key not in ignore_keys:
                 if key in user_obj.config_aliases:
                     config_args += f" --{user_obj.config_aliases[key]}={value}"

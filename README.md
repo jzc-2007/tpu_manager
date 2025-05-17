@@ -110,7 +110,7 @@ If you don't want `tpu run` to open the monitor window, you can use `tpu set-set
 <details>
 <summary> <strong>2D. Spreadsheet Support (OPTIONAL, RECOMMENDED)</strong></summary>
 
-The `tpu run` command will automatically set the status in the spreadsheet to be running by you. If you want to set the notes, you can add a `-ssn` flag(short for `--set-spreadsheet-notes`) to set the notes interactively, or you can pass `ssn="your notes"` to set the notes directly. The notes set by `ssn` will be shown as tag in the monitor window. If you don't want it, add `-no-tag` flag to skip that.
+The `tpu run` command will automatically set the status in the spreadsheet to be running by you. If you want to set the notes, you can add a `-ssn` flag(short for `--set-spreadsheet-notes`) to set the notes interactively, or you can pass `ssn="your notes"` to set the notes directly. (Notice: please don't include `=` in the notes, which may introduce parsing errors, e.g. `ssn="ssn = test"`) The notes set by `ssn` will be shown as tag in the monitor window. If you don't want it, add `-no-tag` flag to skip that.
 
 You can also set the notes afterwards by `tpu ssn/asn <tpu> <notes>`, for example `tpu ssn v2-32-6 "This is a test"`. `ssn` resets the notes to be `This is a test`, while `asn` appends the notes to the current notes.
 
