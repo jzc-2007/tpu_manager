@@ -48,7 +48,7 @@ For all the aliases, use `tpu -lta/-sta` (list/show TPU aliases) to see. You can
 
 ```bash
 trun/tpu run v2-32-6 xibo # Run the job in working directory 1 using tpu v2-32-6
-trun/tpu run v2-32-p1 lyy dir=2 # Run the job in working directory 2 using tpu v2-32-p1
+trun/tpu run v2-32-p1 lyy 2/dir=2 # Run the job in working directory 2 using tpu v2-32-p1
 trun/tpu run v2-32 v3-32 -p xibo -auto # Auto-select a free preemptible TPU of type v2-32 or v3-32
 ```
 

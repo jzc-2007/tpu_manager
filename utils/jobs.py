@@ -396,6 +396,13 @@ def parse_config_args(user_obj, args):
             tpu = data['tpu_aliases'].get(tpu, tpu)
             print(f"{INFO} run: Using tpu {tpu}")
 
+        if is_integer(arg):
+            dir_id = arg
+            if dir_id not in user_obj.working_dir:
+                print(f"{FAIL} run: Directory id {dir_id} not found")
+                raise ValueError(f"Directory id {dir_id} not found")
+            print(f"{INFO} run: Using directory id {dir_id}")
+
     if '-ssn' in args or '--ssn' in args:
         if spreadsheet_notes is not None:
             print(f"{WARNING} run: Notes already set to {spreadsheet_notes}, do you want to change it? (y/n)")
