@@ -266,30 +266,35 @@ if __name__ == "__main__":
                     data['ack_MONITOR'] = False
                     data_io.write_and_unlock_data(data)
                     break
+            
+            if num_loops > 24:
+                print(f"{GOOD} successfully run {num_loops} loops, exiting...")
+                add_MONITOR_log(f"{GOOD} successfully run {num_loops} loops, exiting...")
+                sys.exit(0)
 
-            if time.time() - last_test_time > test_freq:
-                try:
-                    print(f"{INFO} Running unit tests...")
-                    passed, failed = unit_tests.sanity_check()
-                    tot = passed + failed
-                    if failed == 0:
-                        add_MONITOR_log(f"{GOOD} All unit tests passed")
-                    else:
-                        add_MONITOR_log(f"{FAIL} {failed}/{tot} unit tests failed")
-                except Exception as e:
-                    print(f"{FAIL} Unit tests failed: {e}")
-                last_test_time = time.time()
+            # if time.time() - last_test_time > test_freq:
+            #     try:
+            #         print(f"{INFO} Running unit tests...")
+            #         passed, failed = unit_tests.sanity_check()
+            #         tot = passed + failed
+            #         if failed == 0:
+            #             add_MONITOR_log(f"{GOOD} All unit tests passed")
+            #         else:
+            #             add_MONITOR_log(f"{FAIL} {failed}/{tot} unit tests failed")
+            #     except Exception as e:
+            #         print(f"{FAIL} Unit tests failed: {e}")
+            #     last_test_time = time.time()
 
-            if time.time() - last_clean_time > clean_freq:
-                try:
-                    print(f"{INFO} Running clean...")
-                    clean.clean_us(safe=False, quiet=True)
-                    clean.clean_eu(safe=False, quiet=True)
-                    print(f"{GOOD} Clean finished")
-                    add_MONITOR_log(f"{GOOD} Clean finished")
-                except Exception as e:
-                    print(f"{FAIL} Clean failed: {e}")
-                last_clean_time = time.time()
+            # if time.time() - last_clean_time > clean_freq:
+            #     try:
+            #         print(f"{INFO} Running clean...")
+            #         clean.clean_us(safe=False, quiet=True)
+            #         clean.clean_eu(safe=False, quiet=True)
+            #         print(f"{GOOD} Clean finished")
+            #         add_MONITOR_log(f"{GOOD} Clean finished")
+            #     except Exception as e:
+            #         print(f"{FAIL} Clean failed: {e}")
+            #     last_clean_time = time.time()
                 
     except KeyboardInterrupt:
         print("KeyboardInterrupt, exiting...")
@@ -298,3 +303,5 @@ if __name__ == "__main__":
             process.terminate()
             process.join()
         print("All processes killed")
+        add_MONITOR_log(f"{FAIL} KeyboardInterrupt, all processes killed")
+        sys.exit(1)

@@ -64,6 +64,8 @@ which updates the monitor window every 10 seconds. For one-time checks, use:
 tck/tpu check username
 ```
 
+The `run` command will automatically resume the preempted TPU jobs, and you can see more in section **2B** or **6.More on Resuming/Rerunning**. Please notice that an **common failure mode** for resuming is that if a job A has be resumed and the new job A' gets an error before it stores a checkpoint, then the third job A'' resuming from this new job A' will restart **from the beginning** instead of the checkpoint from A. So please be careful with your jobs and make sure that the checkpoint is stored correctly.
+
 <details>
     <summary> <strong>2A. More Directory Operations (OPTIONAL)</strong></summary>
 
