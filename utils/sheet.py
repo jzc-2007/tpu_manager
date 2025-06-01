@@ -46,7 +46,8 @@ def read_sheet_info() -> List[List[str]]:
             assert zone is not None, f"line {i+1} tpu {tpu} not found in zone"
             assert zone.startswith(env), f"line {i+1} zone {zone} does not start with env {env}"
 
-            assert running_status in ['running', 'reserved', '闲的'], f"line {i+1} running status {running_status} cannot be recognized"
+            # print(running_status, user, user_note, script_note)
+            assert running_status in ['running', 'reserved', '闲的', '没了!'], f"line {i+1} running status {running_status} cannot be recognized"
             if running_status == '闲的':
                 running_status = 'free'
 
@@ -116,7 +117,6 @@ def write_sheet_info(info_to_write):
     # 3. write the data
     row = info_to_write['line']
     col = 1
-    # _, tpu, belong, running_status, user, user_note, script_note, env = row[:8]
     transform_dict = {'free': '闲的'}
 
     ws.update(f"C{row}:G{row}", [

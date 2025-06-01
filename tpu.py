@@ -65,6 +65,7 @@ if __name__ == '__main__':
         elif cmd == 'change-ip': handler.change_ip()
         elif cmd == 'upd-log': jobs.upd_log(args[2], args[3], args[4], args[5], args[6]) #windows, log_dir, stage_dir, ka, time
         elif cmd == 'finish-job': jobs.finish_job(args[2])
+        elif cmd == 'fail-job': jobs.fail_job(args[2])
         elif cmd == 'help' or cmd == '-h': desc.explain(args[2])
         elif cmd == 'add-tpu-alias' or cmd == '-ta' or cmd == '-ata': logger.add_tpu_alias(args[2], args[3])
         elif cmd == 'check-status' or cmd == '-cktpu': print(operate.check_tpu_status(args[2]))

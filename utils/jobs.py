@@ -527,17 +527,16 @@ def run(user_obj, args):
         elif running_status == 'reserved':
             print(f"{GOOD} run: TPU {tpu} is reserved (by yourself) in the spreadsheet")
         elif running_status == 'running':
-            print(f"{WARNING} run: TPU {tpu} status is {YELLOW}running{NC} (by yourself) in the spreadsheet")
+            print(f"{WARNING} run: TPU {tpu} status is {YELLOW}running{NC} (by yourself) in the spreadsheet, notes: {notes}")
 
-    if running_status != 'running' or running_user != user_obj.spreadsheet_name:
-        print(f"{INFO} run: Changing the status to running by {user_obj.spreadsheet_name} in the spreadsheet...")
-        tpu_info['running_status'] = 'running'
-        tpu_info['user'] = user_obj.spreadsheet_name
-        if spreadsheet_notes is not None:
-            tpu_info['user_note'] = spreadsheet_notes
-        else:
-            tpu_info['user_note'] = ''
-        write_sheet_info(tpu_info)
+    print(f"{INFO} run: Changing the status to running by {user_obj.spreadsheet_name} in the spreadsheet...")
+    tpu_info['running_status'] = 'running'
+    tpu_info['user'] = user_obj.spreadsheet_name
+    if spreadsheet_notes is not None:
+        tpu_info['user_note'] = spreadsheet_notes
+    else:
+        tpu_info['user_note'] = ''
+    write_sheet_info(tpu_info)
     # print(f"{GOOD} run: TPU {tpu} information updated in the spreadsheet")
 
     # Check if there are jobs running in the tpu
@@ -608,8 +607,22 @@ def run(user_obj, args):
             assert tpu_status == 'ready', f"TPU {tpu} is not ready, status: {tpu_status}"
 
         # create the tmux window
-        os.system(f"tmux new-window -t {session_name}:{id} -n {tag}")
-        time.sleep(0.5)
+        os.system(f"tmux new-window -t {session_name}:{id}")
+        print(f"{INFO} run: Creating job in tmux window {session_name}:{id}")
+        time.sleep(2)
+        # check if the window<id> created
+        windows = os.popen(f"tmux list-windows -t {session_name}").read().splitlines()
+        found_window = False
+        for window in windows:
+            if window.startswith(f"{id}:"):
+                found_window = True
+                break
+        if not found_window:
+            print(f"{FAIL} run: Failed to create job in tmux window {session_name}:{id}")
+            print(f"{FAIL} run: Window {id} not found")
+            print(f"{FAIL} run: This may indicate that this window is already created, please check the tmux session")
+            release_lock_data()
+            return
         os.system(f"tmux send-keys -t {session_name}:{id} 'cd {dir_path}' Enter")
         if tpu is None:
             os.system(f"tmux send-keys -t {session_name}:{id} 'source staging.sh {config_args}' Enter")
@@ -617,6 +630,8 @@ def run(user_obj, args):
             os.system(f"tmux send-keys -t {session_name}:{id} 'source staging.sh ka={tpu} {config_args}' Enter") 
         
         print(f"{GOOD} run: Successfully created job in tmux window {session_name}:{id}")
+
+        time.sleep(4)
 
         write_and_unlock_data(data)
     
@@ -834,12 +849,13 @@ def check_jobs(user_obj, args, config = None):
                     if 'v' in config:
                         print(f"msg: {msg}")
 
-                elif re.search(r'[eE]poch\s([0-9]{1,4})', last_line_cut) and 's' in config:
+                elif re.search(r'[eE]poch\s([0-9]{1,4})', last_line_cut) and ('s' in config):
                     epoch = re.search(r'[eE]poch\s([0-9]{1,6})', last_line_cut).group(1)
                     print(f"Status: {GREEN}Running{NC} (ep={epoch})")
                     if 'v' in config: print(f"msg: {msg}")
-                elif re.search(r'ep=([0-9]){1,4}\.([0-9]){1,6}', last_line_cut) and 's' in config:
-                    epoch = re.search(r'ep=([0-9]){1,4}\.([0-9]){1,6}', last_line_cut).group(0)[3:]
+                elif re.search(r'ep\s*=\s*([0-9]){1,4}\.([0-9]){1,6}', last_line_cut) and ('s' in config):
+                    epoch = re.search(r'ep\s*=\s*([0-9]){1,4}\.([0-9]){1,6}', last_line_cut).group(0).split('=')[1]
+                    epoch = epoch.strip()
                     print(f"Status: {GREEN}Running{NC} (ep={float(epoch):.2f})")
                     if 'v' in config: print(f"msg: {msg}")
                 elif re.search(r'[iI]nitializing', last_line_cut) and 's' in config:
@@ -850,6 +866,8 @@ def check_jobs(user_obj, args, config = None):
                     if 'v' in config: print(f"msg: {msg}")
                 elif 's' in config:
                     print(f"Status: {YELLOW}Unknown{NC}\nmsg: {msg}")
+                    # print(f"last line: {last_line_cut}")
+                    # print(re.search(r'ep=([0-9]){1,4}\.([0-9]){1,6}', last_line_cut))
         print('-'*40)
 
 
@@ -886,7 +904,30 @@ def kill_window(user_obj, args):
         print(f"Error: {e}")
         release_lock_data()
 
-
+def fail_job(window):
+    session_name, window_num = window.split(':')
+    window_num = int(window_num)
+    data = read_and_lock_data()
+    try:
+        for user in data['users']:
+            if data['users'][user]['tmux_name'] == session_name:
+                for job in data['users'][user]['job_data']:
+                    if job['windows_id'] == window_num:
+                        job['extra_msgs']['fail_time_abs'] = get_abs_time_str()
+                        job['extra_msgs']['fail_time_chn'] = get_chn_time_str()
+                        job['extra_msgs']['fail_time_edt'] = get_edt_time_str()
+                        break
+                break
+        write_and_unlock_data(data)
+        # set the status to be reserved for this TPU
+        tpu = job['tpu']
+        if tpu is not None:
+            tpu_info = get_tpu_info_sheet(tpu)
+            tpu_info['running_status'] = 'reserved'
+            write_sheet_info(tpu_info)
+        print(f"{INFO} fail_job: Job {window_num} in session {session_name} failed")
+    except:
+        release_lock_data()
 
 def finish_job(window):
     session_name, window_num = window.split(':')
@@ -1062,9 +1103,15 @@ def clear_error_jobs(user_object, clear_rerun = False):
                         next_job = next(jb for jb in all_jobs if jb['windows_id'] == next_id)
                         resume_chain.append(next_job)
                         cur_job = next_job
-                except (StopIteration, KeyError):
+                except (StopIteration, KeyError):                    
+                    for jb in resume_chain:
+                        print(f"{INFO} clear_error_jobs: Clearing error job {jb['windows_id']}")
+                        # print(f"{PURPLE}[DEBUG] {NC}clear_error_jobs: Killing tmux window {user_object.tmux_name}:{jb['windows_id']}")
+                        ret = os.system(f"tmux kill-window -t {user_object.tmux_name}:{jb['windows_id']}")
+                        if ret != 0:
+                            print(f"{WARNING} clear_error_jobs: Failed to kill tmux window {user_object.tmux_name}:{jb['windows_id']}")
                     continue
-                if cur_job['status'] in ['error', 'killed']:
+                if cur_job['status'] in ['error', 'killed', 'resumed', 'rerunned']:
                     for jb in resume_chain:
                         print(f"{INFO} clear_error_jobs: Clearing error job {jb['windows_id']}")
                         # print(f"{PURPLE}[DEBUG] {NC}clear_error_jobs: Killing tmux window {user_object.tmux_name}:{jb['windows_id']}")
