@@ -184,7 +184,7 @@ def resume_rerun_job(job, new_tpu = None, load_ckpt = True):
         kill_jobs_tpu(tpu)
 
         # create the tmux window
-        os.system(f"tmux new-window -t {session_name}:{id} -n {tags}")
+        os.system(f"tmux new-window -t {session_name}:{id}")
         time.sleep(0.5)
         os.system(f"tmux send-keys -t {session_name}:{id} 'cd {stage_dir}' Enter")
         if load_ckpt:
