@@ -123,8 +123,8 @@ def read_and_lock_data():
                 json.dump(lock, file, indent=4)
             break
         else:
-            time.sleep(20)
-        if num_ack > 90:
+            time.sleep(10)
+        if num_ack > 180:
             print(f"{FAIL} read_and_lock_data: Lock not released after 30 mins, this may indicate a deadlock. Please check the lock file and release it manually.")
             raise Exception("Lock not released after 30 mins, this may indicate a deadlock. Please check the lock file and release it manually.")
     with open(DATA_PATH, 'r') as file:
