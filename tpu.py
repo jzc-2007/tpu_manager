@@ -79,6 +79,7 @@ if __name__ == '__main__':
         elif cmd == 'check-rules': jobs.check_rules()
         elif cmd == 'reapply': operate.reapply(args[2:])
         elif cmd == 'apply': operate.apply(args[2:])
+        elif cmd == 'delete': operate.delete_tpu(args[2])
         elif cmd == 'restart': operate.restart(args[2])
         elif cmd == 'apply-norm': operate.apply_tpu(args[2], preemptible=False, delete=False)
         elif cmd == 'reapply-norm': operate.apply_tpu(args[2], preemptible=False, delete=True)
