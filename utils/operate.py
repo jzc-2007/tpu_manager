@@ -209,6 +209,7 @@ def apply_tpu(tpu, preemptible, delete=True):
     acc_type = None
     if 'v3-32' in tpu: acc_type = 'v3-32'
     elif 'v2-32' in tpu: acc_type = 'v2-32'
+    elif 'v3-64' in tpu: acc_type = 'v3-64'
     elif 'v4-32' in tpu: acc_type = 'v4-32'
     elif 'v4-8' in tpu: acc_type = 'v4-8'
     else: raise ValueError(f"{FAIL} apply_{info_str}: Unknown TPU type {tpu}")
@@ -253,6 +254,17 @@ def apply_tpu(tpu, preemptible, delete=True):
     else:
         print(f"{FAIL} apply_{info_str}: TPU {tpu} not ready, state: {state}")
         return 'unknown'
+
+def delete_tpu(tpu):
+    zone, pre, tpu = get_zone_pre(tpu)
+    if zone is None: return
+    print(f"{INFO} Deleting TPU {tpu} in zone {zone}...")
+    cmd = f"gcloud compute tpus tpu-vm delete {tpu} --zone={zone} --quiet"
+    try:
+        subprocess.run(cmd.split(), timeout=300, check=True, stdout=subprocess.DEVNULL)
+    except subprocess.CalledProcessError as e:
+        print(f"{FAIL} delete_tpu: TPU deletion failed: {e}")
+        return 'delete failed'
     
 def check_tpu_status(tpu):
     """
