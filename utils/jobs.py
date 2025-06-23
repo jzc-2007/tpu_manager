@@ -73,6 +73,36 @@ def resume(user_obj, args):
         print(f"{FAIL} resume: Job {windows_id} not found")
         return
 
+def ignore_error(user_obj, args):
+    """
+    change the status of the job to 'running', and error to None.
+    """
+    window_id = args[0]
+    if not is_integer(window_id):
+        print(f"{FAIL} ignore_error: Window id {window_id} is not an integer")
+        return
+    data = read_and_lock_data()
+    try:
+        for user in data['users']:
+            if data['users'][user]['tmux_name'] == user_obj.tmux_name:
+                for job in data['users'][user]['job_data']:
+                    if str(job['windows_id']) == str(window_id):
+                        print(f"{INFO} ignore_error: Ignoring error for job {window_id} for user {user}")
+                        job['status'] = 'running'
+                        job['error'] = None
+                        job['extra_msgs'].update({'ignore_error': True})
+                        break
+                else:
+                    print(f"{FAIL} ignore_error: Job {window_id} not found")
+                    return
+                break
+        else:
+            print(f"{FAIL} ignore_error: User {user_obj.name} not found")
+            return
+        write_and_unlock_data(data)
+    except Exception as e:
+        print(f"{FAIL} ignore_error: Failed to ignore error for job {window_id} for user {user_obj.name}, error: {e}")
+        release_lock_data()
 
 def rerun(user_obj, args):
     # Check if the window is in the job data, if it is, then rerun the job
@@ -386,7 +416,7 @@ def parse_config_args(user_obj, args):
             tpu = data['tpu_aliases'].get(arg, arg)
             print(f"{INFO} run: Using tpu {tpu}")
 
-        if arg in ['v2', 'v3', 'v4', 'v2-32', 'v3-32', 'v4-32', 'v234', 'v23', 'v24', 'v34', 'v*', 'v2+', 'v3+', 'v4+', 'v2-', 'v3-', 'v4-', 'v2-8', 'v3-8', 'v4-8', 'v2-32', 'v3-32', 'v4-32', 'v2-128', 'v3-128', 'v4-128']:
+        if arg in ['v2', 'v3', 'v4', 'v2-32', 'v3-32', 'v4-32', 'v234', 'v23', 'v24', 'v34', 'v*', 'v2+', 'v3+', 'v4+', 'v2-', 'v3-', 'v4-', 'v2-8', 'v3-8', 'v4-8', 'v2-32', 'v3-64', 'v4-32', 'v2-128', 'v3-128', 'v4-128']:
             tpu = select_tpu(args, auto = ('auto' in args or '-auto' in args or '--auto' in args))
 
             if tpu is None:

@@ -129,6 +129,10 @@ def write_sheet_info(info_to_write):
         ]
     ], value_input_option='USER_ENTERED')
 
+    # print("" + str(resp))  # Debugging output to see the response from the update
+
+    # print(f"{INFO} update row {row} in the sheet with TPU information: {info_to_write}")
+
     print(f"{INFO} write_sheet_info: TPU {info_to_write['alias']} information updated in the sheet")
     return True
 

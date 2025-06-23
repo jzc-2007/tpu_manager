@@ -10,6 +10,7 @@ import utils.data_io as data_io
 import utils.unit_tests as unit_tests
 import utils.develop as develop
 import utils.sheet as sheet
+import utils.clean as clean
 from utils.helpers import *
 
 def find_user(data, args):
@@ -95,6 +96,8 @@ if __name__ == '__main__':
         # elif cmd == 'rs': sheet.read_sheet_info()
         elif cmd == 'find': sheet.find_tpu_from_type(args[2:])
         elif cmd == 'rel' or cmd == 'release': sheet.release_tpu(args[2:])
+        elif cmd == 'clean-eu': clean.clean_eu(safe = ('-f' not in args), quiet = ('-q' in args))
+        elif cmd == 'clean-us': clean.clean_us(safe = ('-f' not in args), quiet = ('-q' in args))
 
         # ------------ For development only ------------
         elif cmd == 'test': operate.test_remote(args[2])
@@ -129,6 +132,7 @@ if __name__ == '__main__':
             elif cmd == 'run': jobs.run(user_object, args[2:])
             elif cmd == 'resume': jobs.resume(user_object, args[2:])
             elif cmd == 'rerun': jobs.rerun(user_object, args[2:])
+            elif cmd == 'ignore-error': jobs.ignore_error(user_object, args[2:])
             elif cmd == 'restart-run': jobs.restart_run(user_object, args[2:])
             elif cmd == 'ls' or cmd == 'lsdir': dirs.list_dir(user_object, args[2:])
             elif cmd == 'kill-window' or cmd == '-kw': jobs.kill_window(user_object, args[2:])

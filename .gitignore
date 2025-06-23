@@ -4,3 +4,4 @@ config.sh
 test*
 **__pycache__**
 **/__pycache__/**
+*.pyc

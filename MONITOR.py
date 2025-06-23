@@ -268,6 +268,11 @@ if __name__ == "__main__":
                     break
             
             if num_loops > 24:
+                print(f"{INFO} MONITOR: cleaning up after {num_loops} loops...")
+                add_MONITOR_log(f"{INFO} MONITOR: cleaning up after {num_loops} loops...")
+                clean.clean_us(safe=False, quiet=True)
+                clean.clean_eu(safe=False, quiet=True)
+                print(f"{GOOD} MONITOR: cleanup finished")
                 print(f"{GOOD} successfully run {num_loops} loops, exiting...")
                 add_MONITOR_log(f"{GOOD} successfully run {num_loops} loops, exiting...")
                 sys.exit(0)
