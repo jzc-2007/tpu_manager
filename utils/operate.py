@@ -254,6 +254,17 @@ def apply_tpu(tpu, preemptible, delete=True):
     else:
         print(f"{FAIL} apply_{info_str}: TPU {tpu} not ready, state: {state}")
         return 'unknown'
+
+def delete_tpu(tpu):
+    zone, pre, tpu = get_zone_pre(tpu)
+    if zone is None: return
+    print(f"{INFO} Deleting TPU {tpu} in zone {zone}...")
+    cmd = f"gcloud compute tpus tpu-vm delete {tpu} --zone={zone} --quiet"
+    try:
+        subprocess.run(cmd.split(), timeout=300, check=True, stdout=subprocess.DEVNULL)
+    except subprocess.CalledProcessError as e:
+        print(f"{FAIL} delete_tpu: TPU deletion failed: {e}")
+        return 'delete failed'
     
 def check_tpu_status(tpu):
     """

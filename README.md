@@ -246,10 +246,10 @@ tpu run v2-32-6 xibo config.training.learning_rate=0.01 # This is also supported
 You can manually resume/rerun a job by:
 
 ```bash
-tpu resume windows=<windows_id> username # resume the job
-tpu resume windows=<windows_id> tpu=<tpu> username # resume the job in a new TPU
-tpu rerun windows=<windows_id> username # rerun the job
-tpu rerun windows=<windows_id> tpu=<tpu> username # rerun the job in a new TPU
+tpu resume window=<windows_id> username # resume the job
+tpu resume window=<windows_id> tpu=<tpu> username # resume the job in a new TPU
+tpu rerun window=<windows_id> username # rerun the job
+tpu rerun window=<windows_id> tpu=<tpu> username # rerun the job in a new TPU
 ```
 
 The difference between `resume` and `rerun` is that `resume` will load the job from the last checkpoint, while `rerun` will start a new job from the beginning.
