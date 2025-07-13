@@ -351,6 +351,7 @@ def select_tpu(args, auto = False):
                 res = input()
                 if res == 'y' or res == 'Y':
                     tpu_selected = input("Please select a tpu:")
+                    zone, _, tpu_selected = get_zone_pre(tpu_selected)
                     if tpu_selected in reserved_tpu_list:
                         print(f"{INFO} select_tpu: Selected tpu: {tpu_selected}")
                         return tpu_selected
