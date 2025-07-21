@@ -40,6 +40,32 @@ def add_tpu_alias(alias, name):
         print(f"{FAIL} Failed to add tpu alias")
         release_lock_data()
 
+def add_applied_tpu():
+    tpu_alias, spreadsheet_name, full_name, zone, pre = None, None, None, None, False
+    try:
+        tpu_alias = input("Enter TPU alias(e.g. v4-32-py): ")
+        spreadsheet_name = input("Enter spreadsheet name(e.g. v4-32-preemptible-yiyang): ")
+        full_name = input("Enter full name(e.g. kmh-tpuvm-v4-32-preemptible-yiyang): ")
+        zone = input("Enter zone(e.g. us-central1-a): ")
+        pre = input("Is it preemptible? (yes/no): ").strip().lower() == 'yes'
+    except Exception as e:
+        print(f"{FAIL} Failed to read input: {e}")
+        return
+    data = read_and_lock_data()
+    try:
+        if tpu_alias in data['tpu_aliases']:
+            raise ValueError(f"TPU alias {tpu_alias} already exists")
+        data['tpu_aliases'][tpu_alias] = full_name
+        data['tpu_aliases'][spreadsheet_name] = full_name
+        data['all_tpus'][zone].append(full_name)
+        if pre:
+            data['all_tpus']['preemptible'].append(full_name)
+        write_and_unlock_data(data)
+        print(f"Added applied TPU {tpu_alias} with full name {full_name}")
+    except Exception as e:
+        print(f"{FAIL} Failed to add applied TPU: {e}")
+        release_lock_data()
+
 def get_settings(user_object):
     for key, value in user_object.settings.items():
         print(f"{key}: {value}")

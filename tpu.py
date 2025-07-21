@@ -69,6 +69,7 @@ if __name__ == '__main__':
         elif cmd == 'fail-job': jobs.fail_job(args[2])
         elif cmd == 'help' or cmd == '-h': desc.explain(args[2])
         elif cmd == 'add-tpu-alias' or cmd == '-ta' or cmd == '-ata': logger.add_tpu_alias(args[2], args[3])
+        elif cmd == 'add-applied-tpu' or cmd =='add-applied' or cmd == '-atpu': logger.add_applied_tpu()
         elif cmd == 'check-status' or cmd == '-cktpu': print(operate.check_tpu_status(args[2]))
         elif cmd == 'describe' or cmd == '-dtpu': operate.describe_tpu(args[2])
         elif cmd == '-lta' or cmd == '-sta': logger.explain_tpu_aliases()
