@@ -179,6 +179,18 @@ We support common operations, such as:
 tpu apply/reapply tpu_name # Apply/reapply the TPU; reapply deletes and recreates the TPU
 ```
 
+If you applied or want to apply for a new tpu that is not recorded(e.g. v4-32-pre-newname), please run
+```bash
+tpu register
+```
+to register the new tpu in the spreadsheet, so that you can use it in `tpu run` command.
+
+To delete the registration, you can use:
+
+```bash
+tpu del-registered/del-reg/del-info tpu_alias # Delete the TPU registration
+```
+
 Environment operations are also supported:
 
 ```bash

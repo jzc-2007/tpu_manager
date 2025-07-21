@@ -40,7 +40,7 @@ def add_tpu_alias(alias, name):
         print(f"{FAIL} Failed to add tpu alias")
         release_lock_data()
 
-def add_applied_tpu():
+def register_tpu():
     tpu_alias, spreadsheet_name, full_name, zone, pre = None, None, None, None, False
     try:
         tpu_alias = input("Enter TPU alias(e.g. v4-32-py): ")
@@ -57,13 +57,34 @@ def add_applied_tpu():
             raise ValueError(f"TPU alias {tpu_alias} already exists")
         data['tpu_aliases'][tpu_alias] = full_name
         data['tpu_aliases'][spreadsheet_name] = full_name
+        if zone not in data['all_tpus']:
+            data['all_tpus'][zone] = []
+            print(f"{WARNING} Zone {zone} not found, creating new zone entry")
         data['all_tpus'][zone].append(full_name)
         if pre:
             data['all_tpus']['preemptible'].append(full_name)
         write_and_unlock_data(data)
-        print(f"Added applied TPU {tpu_alias} with full name {full_name}")
+        print(f"{GOOD} Successfully registered TPU {tpu_alias} with full name {full_name}")
     except Exception as e:
-        print(f"{FAIL} Failed to add applied TPU: {e}")
+        print(f"{FAIL} Failed to register TPU: {e}")
+        release_lock_data()
+
+def del_registered_tpu(alias):
+    data = read_and_lock_data()
+    try:
+        if alias not in data['tpu_aliases']:
+            raise ValueError(f"TPU alias {alias} not found")
+        full_name = data['tpu_aliases'][alias]
+        all_aliases = [alias for alias in list(data['tpu_aliases'].keys()) if data['tpu_aliases'][alias] == full_name]
+        for alias_ in all_aliases:
+            del data['tpu_aliases'][alias_]
+        for zone in data['all_tpus']:
+            if full_name in data['all_tpus'][zone]:
+                data['all_tpus'][zone].remove(full_name)
+        write_and_unlock_data(data)
+        print(f"{GOOD} Successfully deleted TPU alias {alias}")
+    except Exception as e:
+        print(f"{FAIL} Failed to delete TPU alias: {e}")
         release_lock_data()
 
 def get_settings(user_object):
