@@ -206,13 +206,15 @@ def apply_tpu(tpu, preemptible, delete=True):
         print(f"{INFO} Apply TPU {tpu} in zone {zone}...")
     else:
         print(f"{INFO} Re-apply TPU {tpu} in zone {zone}...")
+   
     acc_type = None
-    if 'v3-32' in tpu: acc_type = 'v3-32'
-    elif 'v2-32' in tpu: acc_type = 'v2-32'
-    elif 'v3-64' in tpu: acc_type = 'v3-64'
-    elif 'v4-32' in tpu: acc_type = 'v4-32'
-    elif 'v4-8' in tpu: acc_type = 'v4-8'
-    else: raise ValueError(f"{FAIL} apply_{info_str}: Unknown TPU type {tpu}")
+    for key in NAME_TO_TYPE:
+        if key in tpu:
+            acc_type = NAME_TO_TYPE[key]
+    
+    if acc_type is None:
+        raise ValueError(f"{FAIL} apply_{info_str}: Unknown TPU type {tpu}")
+    
     if delete:
         cmd = f"gcloud compute tpus tpu-vm delete {tpu} --zone={zone} --quiet"
         try:

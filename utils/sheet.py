@@ -54,31 +54,16 @@ def read_sheet_info() -> List[List[str]]:
             if user == '闲的':
                 user = 'free'
 
-            tpu_type = None
+            tpu_type, tpu_version = None, None
+            for key in NAME_TO_VER:
+                if key in full_name:
+                    tpu_version = NAME_TO_VER[key]
 
-            if 'v2' in full_name: 
-                tpu_version = 'v2'
-                if 'v2-8' in full_name: tpu_type = 'v2-8'
-                elif 'v2-32' in full_name: tpu_type = 'v2-32'
-                elif 'v2-64' in full_name: tpu_type = 'v2-64'
-                elif 'v2-128' in full_name: tpu_type = 'v2-128'
-                else: raise ValueError(f"line {i+1} tpu {tpu} type cannot be recognized")
-            elif 'v3' in full_name:
-                tpu_version = 'v3'
-                if 'v3-8' in full_name: tpu_type = 'v3-8'
-                elif 'v3-32' in full_name: tpu_type = 'v3-32'
-                elif 'v3-64' in full_name: tpu_type = 'v3-64'
-                elif 'v3-128' in full_name: tpu_type = 'v3-128'
-                else: raise ValueError(f"line {i+1} tpu {tpu} type cannot be recognized")
-            elif 'v4' in full_name:
-                tpu_version = 'v4'
-                if 'v4-8' in full_name: tpu_type = 'v4-8'
-                elif 'v4-32' in full_name: tpu_type = 'v4-32'
-                elif 'v4-64' in full_name: tpu_type = 'v4-64'
-                elif 'v4-128' in full_name: tpu_type = 'v4-128'
-                else: raise ValueError(f"line {i+1} tpu {tpu} type cannot be recognized")
+            for key in NAME_TO_TYPE:
+                if key in full_name:
+                    tpu_type = NAME_TO_TYPE[key]
 
-            assert tpu_version is not None, f"line {i+1} tpu {tpu} type cannot be recognized"
+            assert (tpu_version is not None) and (tpu_type is not None), f"line {i+1} tpu {tpu} name cannot be recognized"
 
             tpu_information[full_name] = {
                 'zone': zone,
@@ -139,27 +124,20 @@ def write_sheet_info(info_to_write):
 def read_tpu_info_from_type(args):
     """
     Read the TPU information from specific args.
-    Supported args: ['v2', 'v3', 'v4', 'v23', 'v24', 'v34', 'v234'/'-a'/'-all'/'--all'/'v*', 'v2-8',  'v2-16', 'v2-32', 'v2-64', 'v2-128', 'v3-8',  'v4-16', 'v3-32', 'v3-64', 'v3-128', 'v4-8', 'v4-16', 'v4-32', 'v4-64', 'v4-128', 'v2/3/4+', 'v2/3/4-', '-p'/'-pre', '-n'/'-norm']
+    Supported args: ['v<num>', 'v<num>+', 'v<num>-<num>', 'v*/-a/--all', '-p'/'-pre', '-n'/'-norm']
     Return: a dictionary of dictionaries with TPU information.
     """
-    v2_list = ['v2-8', 'v2-16', 'v2-32', 'v2-64', 'v2-128']
-    v3_list = ['v3-8', 'v3-16', 'v3-32', 'v3-64', 'v3-128']
-    v4_list = ['v4-8', 'v4-16', 'v4-32', 'v4-64', 'v4-128']
-    all_type_list = v2_list + v3_list + v4_list
     type_list = []
     pre_filter = None
 
     for arg in args:
-        if arg in ['v2', 'v2-']: type_list += v2_list
-        elif arg in ['v3']: type_list += v3_list
-        elif arg in ['v4', 'v4+']: type_list += v4_list
-        elif arg in ['v23', 'v3-']: type_list += v2_list + v3_list
-        elif arg in ['v24']: type_list += v2_list + v4_list
-        elif arg in ['v34', 'v3+']: type_list += v3_list + v4_list
-        elif arg in ['v234', '-a', '-all', '--all', 'v*', 'v2+', 'v4-']: type_list += all_type_list
-        elif arg in all_type_list: type_list.append(arg)
-        elif arg in ['-p', '-pre']: pre_filter = True
-        elif arg in ['-n', '-norm']: pre_filter = False
+        if arg in ARG_TO_LIST: 
+            if isinstance(ARG_TO_LIST[arg], list):
+                type_list += ARG_TO_LIST[arg]
+            else:
+                type_list.append(ARG_TO_LIST[arg])
+        if arg in ['-p', '-pre']: pre_filter = True
+        if arg in ['-n', '-norm']: pre_filter = False
 
     if len(type_list) == 0:
         type_list = all_type_list
@@ -176,7 +154,7 @@ def read_tpu_info_from_type(args):
 def find_tpu_from_type(args):   
     """
     Find the TPU information from specific args, and display it.
-    Supported args: ['v2', 'v3', 'v4', 'v23', 'v24', 'v34', 'v234'/'-a'/'-all'/'--all'/'v*', 'v2-8', 'v2-32', 'v2-64', 'v2-128', 'v3-8', 'v3-32', 'v3-64', 'v3-128', 'v4-8', 'v4-32', 'v4-64', 'v4-128', '-p'/'-pre', '-n'/'-norm']
+    Supported args: ['v<num>', 'v<num>-<num>', 'v*', 'v<num>+', '-p'/'-pre', '-n'/'-norm']
     Display Style: ['full', 'category', 'category_note'(default)]
     """
     style = None
