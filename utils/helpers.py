@@ -162,3 +162,16 @@ def display_tpu_information(tpu_information, style = None, **kwargs):
         print()
     else:
         raise ValueError(f"Style {style} not recognized")
+
+def safe_input(prompt):
+    """
+    Safely get input from the user, handling EOFError and KeyboardInterrupt.
+    """
+    try:
+        return input(prompt)
+    except EOFError:
+        print("\nYou pressed Ctrl+D. Bye...")
+        exit(0)
+    except KeyboardInterrupt:
+        print("\nYou pressed Ctrl+C. Bye...")
+        exit(0)
