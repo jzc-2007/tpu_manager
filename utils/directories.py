@@ -6,6 +6,12 @@ from .helpers import *
 def get_dir(user_obj, num):
     if not is_integer(num):
         raise ValueError(f"Directory number {num} is not an integer")
+    if num == '0':
+        # return the father dir of the default directory
+        default_dir = user_obj.working_dir['1']
+        if not os.path.exists(default_dir):
+            raise ValueError(f"Default directory {default_dir} does not exist")
+        return os.path.dirname(default_dir)
     if num not in user_obj.working_dir:
         raise ValueError(f"Directory number {num} not found")
     dir = user_obj.working_dir[num]

@@ -1,6 +1,7 @@
 from .helpers import *
 from .data_io import read_and_lock_data, write_and_unlock_data, release_lock_data, read_data
 from .users import user_from_dict
+import os, yaml
 
 
 
@@ -151,3 +152,18 @@ def clear_user_logs(user_object):
     except:
         print(f"{FAIL} Failed to clear user logs")
         release_lock_data()
+
+def get_wandb_notes(dir):
+    # read the config file in dir/configs/remote_run_config.yaml
+    # and check whether there's a key called wandb_notes
+    config_path = os.path.join(dir, 'configs', 'remote_run_config.yml')
+    if not os.path.exists(config_path):
+        print(f"{FAIL} Config file not found at {config_path}")
+        return None
+    with open(config_path, 'r') as f:
+        config = yaml.safe_load(f)
+    if 'wandb_notes' in config:
+        return config['wandb_notes']
+    else:
+        print(f"{WARNING} wandb_notes not found in config file")
+        return None

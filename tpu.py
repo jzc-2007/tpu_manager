@@ -11,6 +11,7 @@ import utils.unit_tests as unit_tests
 import utils.develop as develop
 import utils.sheet as sheet
 import utils.clean as clean
+import utils.autenticate as autenticate
 from utils.helpers import *
 
 def find_user(data, args):
@@ -47,6 +48,11 @@ if __name__ == '__main__':
         sys.exit(1)
 
     cmd = args[1]
+
+    if cmd in ['add-user', 'del-user']:
+        if not autenticate.autenticate(cmd):
+            print(f"{FAIL} Authentication failed, exiting.")
+            sys.exit(1)
 
     if cmd == 'lock':
         data_io.lock(args[2:])

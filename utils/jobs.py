@@ -4,6 +4,8 @@ from . import users
 from .data_io import read_and_lock_data, write_and_unlock_data, release_lock_data, read_data
 from .operate import check_tpu_status, apply_tpu, kill_jobs_tpu, get_zone_pre, restart, check_tpu_running
 from .sheet import get_tpu_info_sheet, write_sheet_info, read_tpu_info_from_type, find_tpu_from_type
+from .logger import get_wandb_notes
+from .autenticate import autenticate
 RULE_DICT ={
     'pre':{
         'preempted': 'reapply',
@@ -345,21 +347,27 @@ def select_tpu(args, auto = False):
             print(f"{INFO} select_tpu: {RED}No free tpus found{NC}")
             if len(reserved_tpu_list) > 0:
                 print(f"Found {YELLOW}reserved tpus{NC}:")
-                for tpu in reserved_tpu_list:
-                    print(f"{YELLOW}{tpu_info[tpu]['alias']}{NC} -> {tpu_info[tpu]['user']}: {tpu_info[tpu]['user_note']}")
-                print("Do you want to use one of them? (y/n)")
-                res = input()
-                if res == 'y' or res == 'Y':
-                    tpu_selected = input("Please select a tpu:")
-                    zone, _, tpu_selected = get_zone_pre(tpu_selected)
-                    if tpu_selected in reserved_tpu_list:
-                        print(f"{INFO} select_tpu: Selected tpu: {tpu_selected}")
-                        return tpu_selected
-                    else:
+                for id, tpu in enumerate(reserved_tpu_list):
+                    print(f"{YELLOW}T{id}({tpu_info[tpu]['alias']}){NC} -> {tpu_info[tpu]['user']}: {tpu_info[tpu]['user_note']}")
+                print("Do you want to use one of them? (T?/n)")
+                tpu_selected = input()
+                if tpu_selected.startswith('T') and tpu_selected[1:].isdigit():
+                    tpu_selected = int(tpu_selected[1:])
+                    if tpu_selected < 0 or tpu_selected >= len(reserved_tpu_list):
                         print(f"{FAIL} select_tpu: Invalid tpu selected")
                         return None
+                    tpu_selected = reserved_tpu_list[tpu_selected]
+                    zone, _, tpu_selected = get_zone_pre(tpu_selected)
+                    if zone is None:
+                        print(f"{FAIL} select_tpu: No zone found for tpu {tpu_selected}")
+                        return None
+                    print(f"{INFO} select_tpu: Using reserved tpu {tpu_selected}")
+                    return tpu_selected
+                elif tpu_selected.lower() == 'n':
+                    print(f"{INFO} select_tpu: Not using reserved tpus")
+                    return None
                 else:
-                    print(f"{INFO} select_tpu: Quitting...")
+                    print(f"{FAIL} select_tpu: Invalid input, please enter T? or n")
                     return None
             else:
                 print(f"{FAIL} select_tpu: No free or reserved tpus found")
@@ -417,7 +425,7 @@ def parse_config_args(user_obj, args):
             tpu = data['tpu_aliases'].get(arg, arg)
             print(f"{INFO} run: Using tpu {tpu}")
 
-        if arg in ['v2', 'v3', 'v4', 'v2-32', 'v3-32', 'v4-32', 'v234', 'v23', 'v24', 'v34', 'v*', 'v2+', 'v3+', 'v4+', 'v2-', 'v3-', 'v4-', 'v2-8', 'v3-8', 'v4-8', 'v2-32', 'v3-64', 'v4-32', 'v2-128', 'v3-128', 'v4-128']:
+        if arg in ARG_TO_LIST:
             tpu = select_tpu(args, auto = ('auto' in args or '-auto' in args or '--auto' in args))
 
             if tpu is None:
@@ -433,6 +441,17 @@ def parse_config_args(user_obj, args):
                 print(f"{FAIL} run: Directory id {dir_id} not found")
                 raise ValueError(f"Directory id {dir_id} not found")
             print(f"{INFO} run: Using directory id {dir_id}")
+        
+
+    dir_path = user_obj.working_dir[dir_id]
+
+    if not os.path.exists(dir_path):
+        raise ValueError(f"Directory {dir_path} does not exist")
+
+    if spreadsheet_notes is None:
+        print(f"{INFO} run: Getting notes from wandb config file...")
+        spreadsheet_notes = get_wandb_notes(dir_path)
+        print(f"{INFO} run: Notes from wandb config file: {spreadsheet_notes}")
 
     if '-ssn' in args or '--ssn' in args:
         if spreadsheet_notes is not None:
@@ -450,10 +469,6 @@ def parse_config_args(user_obj, args):
     if (tag is None) and (spreadsheet_notes is not None) and ('-no-tag' not in args):
         tag = spreadsheet_notes
 
-    dir_path = user_obj.working_dir[dir_id]
-
-    if not os.path.exists(dir_path):
-        raise ValueError(f"Directory {dir_path} does not exist")
 
     if tpu is None:
         print(f'{INFO} run: No TPU Specified, use the TPU in ka.sh instead')

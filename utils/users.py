@@ -115,7 +115,8 @@ def create_user():
         data['users'][name] = user.to_dict()
         write_and_unlock_data(data)
         print(f"{GOOD} create_user: Hello, {name}!\nYour id is {user_id} and your tmux name is {tmux_name}. Let's start working with the cute TPUs!")
-    except:
+    except Exception as e:
+        print(f"{RED}[Error] {NC}{e}")
         print(f"{FAIL} create_user: Creating user {name} failed")
         release_lock_data()
 
