@@ -220,8 +220,8 @@ def apply_tpu(tpu, preemptible, delete=True):
         try:
             subprocess.run(cmd.split(), timeout=300, check=True, stdout=subprocess.DEVNULL)
         except subprocess.CalledProcessError as e:
-            print(f"{FAIL} apply_{info_str}: TPU deletion failed: {e}")
-            return 'delete failed'
+            print(f"{WARNING} apply_{info_str}: TPU deletion failed: {e}")
+            
     cmd = f"gcloud compute tpus tpu-vm create {tpu} --zone={zone} --accelerator-type={acc_type} --version=tpu-ubuntu2204-base"
 
     if 'v6' in acc_type:
@@ -422,7 +422,7 @@ def check_env(tpu, quiet = False):
 
     except subprocess.CalledProcessError:
         if not quiet:
-            print(f"{FAIL} check_env: Failed to query TPU state")
+            print(f"{FAIL} check_env: Failed to query TPU {tpu} state")
         return 'failed'
     except subprocess.TimeoutExpired:
         if not quiet:

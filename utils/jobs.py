@@ -172,6 +172,11 @@ def resume_rerun_job(job, new_tpu = None, load_ckpt = True):
         if 'child' in new_job['extra_msgs']:
             del new_job['extra_msgs']['child']
 
+        # remove the key fail_time* from the extra_msgs
+        for key in list(new_job['extra_msgs'].keys()):
+            if key.startswith('fail_time'):
+                del new_job['extra_msgs'][key]
+
         if load_ckpt:
             assert job["log_dir"] is not None, f"Job {job['windows_id']} for user {user_obj.name} has no log dir"
         print(f"{INFO} {operation}_job: new job {new_job}")
@@ -426,7 +431,7 @@ def parse_config_args(user_obj, args):
             print(f"{INFO} run: Using tpu {tpu}")
 
         if arg in ARG_TO_LIST:
-            tpu = select_tpu(args, auto = ('auto' in args or '-auto' in args or '--auto' in args))
+            tpu = select_tpu(args, auto = ('-auto' in args or '--auto' in args))
 
             if tpu is None:
                 print(f"{FAIL} run: No tpu selected")
@@ -558,7 +563,7 @@ def run(user_obj, args):
     print(f"{INFO} run: Checking the TPU information in the spreadsheet...")
     tpu_info = get_tpu_info_sheet(tpu)
     running_status, running_user, notes = tpu_info['running_status'], tpu_info['user'], tpu_info['user_note']
-    if running_user != user_obj.spreadsheet_name and (running_status == 'running' or running_status == 'reserved'):
+    if running_user != user_obj.spreadsheet_name and (running_status == 'running' or running_status == 'reserved') and (not '--auto' in args):
         print(f"{WARNING} run: TPU {tpu} is already {RED}{running_status}{NC} by {running_user} in the spreadsheet")
         print(f"{WARNING} run: Notes: {notes}")
         print("DO YOU WANT TO CONTINUE? (y/n)")
