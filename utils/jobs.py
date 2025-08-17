@@ -1024,57 +1024,63 @@ def kill_window(user_obj, args):
         print(f"Error: {e}")
         release_lock_data()
 
-def fail_job(window):
-    session_name, window_num = window.split(':')
-    window_num = int(window_num)
+
+def run_job_on_tpu(job: Job, tpu, quiet = True):
     data = read_and_lock_data()
     try:
-        for user in data['users']:
-            if data['users'][user]['tmux_name'] == session_name:
-                for job in data['users'][user]['job_data']:
-                    if job['windows_id'] == window_num:
-                        job['extra_msgs']['fail_time_abs'] = get_abs_time_str()
-                        job['extra_msgs']['fail_time_chn'] = get_chn_time_str()
-                        job['extra_msgs']['fail_time_edt'] = get_edt_time_str()
-                        break
-                break
+        # update logs
+        user = job.user
+        user_obj = users.user_from_dict(data['users'][user])
+        window_id = user_obj.windows_offset
+        data['users'][user_obj.name]['windows_offset'] = window_id + 1
+        user_obj.windows_offset = window_id + 1
+        zone, pre, tpu = get_zone_pre(tpu)
+        if not job.rules:
+            job.rules = RULE_DICT["pre"] if pre else RULE_DICT["pass"]
+        
+        job.windows_id = window_id
+        job.tpu = tpu
+        data['users'][user_obj.name]['job_data'].append(job.to_dict())
+
+        # sanity check
+        session_name = user_obj.tmux_name
+        assert job.stage_dir is not None, f"run_job_on_tpu: Job don't have stagedir"
+
+        tpu_status = check_tpu_status(tpu)
+        assert tpu_status == 'ready', f"run_job_on_tpu: TPU {tpu} is not ready, status: {tpu_status}"
+
+        kill_jobs_tpu(tpu)
+
+        # run the job
+        os.system(f"tmux new-window -t {session_name}:{window_id}")
+        time.sleep(0.5)
+        os.system(f"tmux send-keys -t {session_name}:{window_id} 'cd {job.stage_dir}' Enter")
+        os.system(f"tmux send-keys -t {session_name}:{window_id} 'source staging.sh ka={tpu} {job.extra_configs}' Enter")
+
+        if not quiet:
+            print(f"{GOOD} run_job_on_tpu: Successfully created job in tmux window {session_name}:{window_id}")
+
+            print(f"{INFO} run_job_on_tpu: new job {job.to_dict()}")
+
         write_and_unlock_data(data)
-        # set the status to be reserved for this TPU
-        tpu = job['tpu']
-        if tpu is not None:
-            tpu_info = get_tpu_info_sheet(tpu)
-            tpu_info['running_status'] = 'reserved'
-            write_sheet_info(tpu_info)
-        print(f"{INFO} fail_job: Job {window_num} in session {session_name} failed")
-    except:
+
+        tpu_info = get_tpu_info_sheet(tpu)
+        tpu_info['running_status'] = 'running'
+        tpu_info['user'] = user_obj.spreadsheet_name
+        tpu_info['user_note'] = job.job_tags
+        write_sheet_info(tpu_info)
+
+    except Exception as e:
+        print(f"{FAIL} run_job_on_tpu: Failed to run job for user {user_obj.name}, error: {e}")
         release_lock_data()
 
-def finish_job(window):
-    session_name, window_num = window.split(':')
-    window_num = int(window_num)
-    data = read_and_lock_data()
-    try:
-        for user in data['users']:
-            if data['users'][user]['tmux_name'] == session_name:
-                for job in data['users'][user]['job_data']:
-                    if job['windows_id'] == window_num:
-                        job['status'] = 'finished'
-                        job['extra_msgs']['finish_time_abs'] = get_abs_time_str()
-                        job['extra_msgs']['finish_time_chn'] = get_chn_time_str()
-                        job['extra_msgs']['finish_time_edt'] = get_edt_time_str()
-                        break
-                break
-        write_and_unlock_data(data)
-        # set the status to be reserved for this TPU
-        tpu = job['tpu']
-        if tpu is not None:
-            tpu_info = get_tpu_info_sheet(tpu)
-            tpu_info['running_status'] = 'reserved'
-            write_sheet_info(tpu_info)
-        print(f"{INFO} finish_job: Finished job {window_num} in session {session_name}")
-    except:
+    except KeyboardInterrupt:
+        print(f"{INFO} run_job_on_tpu: Stopping ...")
         release_lock_data()
+        return
 
+    finally:
+        release_lock_data()
 
 def monitor_jobs(user_obj, args):
     config = None

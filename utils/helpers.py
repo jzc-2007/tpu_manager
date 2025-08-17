@@ -173,3 +173,15 @@ def display_tpu_information(tpu_information, style = None, **kwargs):
         print()
     else:
         raise ValueError(f"Style {style} not recognized")
+
+def get_all_tpus():
+    data = read_data()
+    all_tpu_list_ = []
+    for k, v in data['all_tpus'].items():
+        all_tpu_list_.extend(v)
+    all_tpu_list_ = list(set(all_tpu_list_))
+    return all_tpu_list_
+
+def get_all_tpus_from_type(tpu_type):
+    all_tpu_list_ = get_all_tpus()
+    return [tpu for tpu in all_tpu_list_ if tpu_type in tpu]

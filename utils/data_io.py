@@ -140,7 +140,7 @@ def read_and_lock_queue():
     num_ack = 0
     while True:
         num_ack += 1
-        with open(QUEUE_PATH, 'r') as file:
+        with open(LOCK_PATH, 'r') as file:
             lock = json.load(file)
         if lock['queue']['status'] == False:
             lock['queue']['status'] = True
@@ -169,6 +169,13 @@ def release_lock_data():
     with open(LOCK_PATH, 'r') as file:
         lock = json.load(file)
     lock['data']['status'] = False
+    with open(LOCK_PATH, 'w') as file:
+        json.dump(lock, file, indent=4)
+
+def release_lock_queue():
+    with open(LOCK_PATH, 'r') as file:
+        lock = json.load(file)
+    lock['queue']['status'] = False
     with open(LOCK_PATH, 'w') as file:
         json.dump(lock, file, indent=4)
 

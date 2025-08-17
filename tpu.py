@@ -12,6 +12,7 @@ import utils.develop as develop
 import utils.sheet as sheet
 import utils.clean as clean
 import utils.autenticate as autenticate
+import utils.queue as queue
 from utils.helpers import *
 
 def find_user(data, args):
@@ -67,12 +68,14 @@ if __name__ == '__main__':
         ############### JOBS that don't require a user ###############
         if cmd == 'tldr': desc.tldr()
         # elif cmd == 'docs' or cmd == 'doc': desc.full_doc()
+        if cmd == 'vq': queue.visualize_queue()
         elif cmd == 'ssn': sheet.set_spreadsheet_notes(args[2], args[3])
         elif cmd == 'asn': sheet.add_spreadsheet_notes(args[2], args[3])
         elif cmd == 'change-ip': handler.change_ip()
         elif cmd == 'upd-log': jobs.upd_log(args[2], args[3], args[4], args[5], args[6]) #windows, log_dir, stage_dir, ka, time
-        elif cmd == 'finish-job': jobs.finish_job(args[2])
-        elif cmd == 'fail-job': jobs.fail_job(args[2])
+        elif cmd =='upd-staging-info': queue.upd_staging_info(args[2], args[3], args[4])
+        elif cmd == 'finish-job': queue.finish_job(args[2])
+        elif cmd == 'fail-job': queue.fail_job(args[2])
         elif cmd == 'help' or cmd == '-h': desc.explain(args[2])
         elif cmd == 'add-tpu-alias' or cmd == '-ta' or cmd == '-ata': logger.add_tpu_alias(args[2], args[3])
         elif cmd == 'add-applied-tpu' or cmd =='add-applied' or cmd == '-atpu' or cmd == 'register': logger.register_tpu()
@@ -140,8 +143,10 @@ if __name__ == '__main__':
             elif cmd == 'monitor': jobs.monitor_jobs(user_object, args[2:])
             elif cmd == 'kill-job' or cmd == '-kj' or cmd == '-k' or cmd == 'kill': jobs.kill_job_or_tpu(user_object, args[2:])
             elif cmd == 'run': jobs.run(user_object, args[2:])
+            elif cmd == 'queue': queue.Queue(user_object, args[2:])
             elif cmd == 'resume': jobs.resume(user_object, args[2:])
             elif cmd == 'rerun': jobs.rerun(user_object, args[2:])
+            elif cmd == 'dequeue' or cmd == 'dq': queue.dequeue(user_object, args[2:])
             elif cmd == 'ignore-error': jobs.ignore_error(user_object, args[2:])
             elif cmd == 'restart-run': jobs.restart_run(user_object, args[2:])
             elif cmd == 'ls' or cmd == 'lsdir': dirs.list_dir(user_object, args[2:])

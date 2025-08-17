@@ -10,7 +10,7 @@ def read_sheet_info() -> dict:
     Read the TPU information from the Google Sheet.
     Return: a dictionary of dictionaries with TPU information.
     Keys: TPU full name
-    Values: a dictionary with keys ['zone', 'pre', 'belong', 'running_status', 'user', 'user_note', 'script_note', 'alias', 'version', 'type', 'line']
+    Values: a dictionary with keys ['zone', 'pre', 'belong', 'running_status', 'user', 'user_note', 'script_note', 'alias', 'version', 'type', 'other_note', 'env', 'line']
     Logic: Read the lines that COL B starts with 'v'.
     """
     data = read_data()
@@ -40,7 +40,7 @@ def read_sheet_info() -> dict:
     for i, row in enumerate(table):
         if len(row) > 1 and row[1].startswith('v'):
             assert len(row) >= 7, f"line {i+1} is too short: {row}"
-            _, tpu, belong, running_status, user, user_note, script_note, env = row[:8]
+            _, tpu, belong, running_status, user, user_note, script_note, env, other = row[:9]
             zone, pre, full_name = get_zone_pre(tpu)
             
             assert zone is not None, f"line {i+1} tpu {tpu} not found in zone"
@@ -73,9 +73,11 @@ def read_sheet_info() -> dict:
                 'type': tpu_type,
                 'running_status': running_status,
                 'user': user,
+                'env': env,
                 'user_note': user_note,
                 'script_note': script_note,
                 'alias': tpu,
+                'other_note': other,
                 'line': i + 1
             }
 
@@ -84,7 +86,7 @@ def read_sheet_info() -> dict:
 def write_sheet_info(info_to_write):
     """
     Write the tpu information to the Google Sheet.
-    Args: a dictionary of a specific TPU information, with keys ['zone', 'pre', 'belong', 'running_status', 'user', 'user_note', 'script_note', 'alias', 'version', 'type', 'line']
+    Args: a dictionary of a specific TPU information, with keys ['zone', 'pre', 'belong', 'running_status', 'user', 'user_note', 'script_note', 'alias', 'version', 'type', 'other_note', 'line']
     Only updating belong, running_status, user, user_note, script_note
     """
     secret_path = SECRET_PATH
@@ -104,13 +106,15 @@ def write_sheet_info(info_to_write):
     col = 1
     transform_dict = {'free': '闲的'}
 
-    ws.update(f"C{row}:G{row}", [
+    ws.update(f"C{row}:I{row}", [
         [
             transform_dict.get(info_to_write['belong'], info_to_write['belong']),
             transform_dict.get(info_to_write['running_status'], info_to_write['running_status']),
             transform_dict.get(info_to_write['user'], info_to_write['user']),
             transform_dict.get(info_to_write['user_note'], info_to_write['user_note']),
-            transform_dict.get(info_to_write['script_note'], info_to_write['script_note']),
+            transform_dict.get(info_to_write['script_note'], info_to_write['script_note']),            
+            transform_dict.get(info_to_write['env'], info_to_write['env']),
+            transform_dict.get(info_to_write['other_note'], info_to_write['other_note']),
         ]
     ], value_input_option='USER_ENTERED')
 

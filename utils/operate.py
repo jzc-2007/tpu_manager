@@ -239,6 +239,12 @@ def apply_tpu(tpu, preemptible, delete=True):
     
     if state == 'READY':
         print(f"{GOOD} Now, TPU VM {tpu} is good, ready to use")
+
+        print(f"{INFO} Update Spreadsheet info for {tpu}...")
+        tpu_info = get_tpu_info_sheet(tpu)
+        tpu_info['other_note'] = f'Last applied(EDT):{get_edt_time_str()}'
+        write_sheet_info(tpu_info)
+
         # mount the disk
         print(f"{INFO} Mounting disk in TPU {tpu}...")
         res = mount_disk(tpu, quiet = True)
