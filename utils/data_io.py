@@ -1,5 +1,5 @@
-from .helpers import *
-import json, time
+import json, time, os
+from .constants import *
 
 def release_lock(args):
     assert len(args) == 1, "Please specify a lock type to release"
@@ -94,6 +94,11 @@ def read_data():
         data = json.load(file)
     return data
 
+def read_queue():
+    with open(QUEUE_PATH, 'r') as file:
+        queue = json.load(file)
+    return queue
+
 def write_data(data):
     with open(DATA_PATH, 'w') as file:
         json.dump(data, file, indent=4)
@@ -131,6 +136,26 @@ def read_and_lock_data():
         data = json.load(file)
     return data
 
+def read_and_lock_queue():
+    num_ack = 0
+    while True:
+        num_ack += 1
+        with open(QUEUE_PATH, 'r') as file:
+            lock = json.load(file)
+        if lock['queue']['status'] == False:
+            lock['queue']['status'] = True
+            with open(LOCK_PATH, 'w') as file:
+                json.dump(lock, file, indent=4)
+            break
+        else:
+            time.sleep(10)
+        if num_ack > 180:
+            print(f"{FAIL} read_and_lock_queue: Lock not released after 30 mins, this may indicate a deadlock. Please check the lock file and release it manually.")
+            raise Exception("Lock not released after 30 mins, this may indicate a deadlock. Please check the lock file and release it manually.")
+    with open(QUEUE_PATH, 'r') as file:
+        queue = json.load(file)
+    return queue
+
 def write_and_unlock_data(data):
     with open(DATA_PATH, 'w') as file:
         json.dump(data, file, indent=4)
@@ -144,5 +169,14 @@ def release_lock_data():
     with open(LOCK_PATH, 'r') as file:
         lock = json.load(file)
     lock['data']['status'] = False
+    with open(LOCK_PATH, 'w') as file:
+        json.dump(lock, file, indent=4)
+
+def write_and_unlock_queue(queue):
+    with open(QUEUE_PATH, 'w') as file:
+        json.dump(queue, file, indent=4)
+    with open(LOCK_PATH, 'r') as file:
+        lock = json.load(file)
+    lock['queue']['status'] = False
     with open(LOCK_PATH, 'w') as file:
         json.dump(lock, file, indent=4)

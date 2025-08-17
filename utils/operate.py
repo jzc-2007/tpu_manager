@@ -2,37 +2,30 @@ import os, random, time
 import subprocess
 from .data_io import read_and_lock_data, write_and_unlock_data, release_lock_data, read_data
 from .helpers import *
+from .constants import *
+from .sheet import read_sheet_info, write_sheet_info, get_tpu_info_sheet
 
-def get_zone_pre(tpu):
-    """
-    Get the zone of the TPU, and check if it is preemptible.
-    If the input is alias, it will be replaced with the real TPU name.
-    Return zone, pre, tpu_full_name
-    """
-    data = read_data()
-    tpu_aliases = data['tpu_aliases']
-    all_tpus = []
-    for z, tpu_list in data['all_tpus'].items():
-        if z == 'preemptible':
-            continue
-        all_tpus.extend(tpu_list)
-    if tpu in tpu_aliases:
-        tpu = tpu_aliases[tpu]
-    if tpu not in all_tpus:
-        print(f"{FAIL} get_zone_pre: TPU {tpu} not found")
-        return None, None, None
-    all_tpus = data['all_tpus']
-    zone = None
-    for z, tpu_list in all_tpus.items():
-        if z == 'preemptible':
-            continue
-        if tpu in tpu_list:
-            zone = z
-            break
-    if zone is None:
-        print(f"{FAIL} get_zone_pre: TPU {tpu} not found in any zone")
-        return None, None, None
-    return zone, tpu in data['all_tpus']['preemptible'], tpu
+def update_tpu_status_for_spreadsheet():
+    tpu_information = read_sheet_info()
+    for full_name, info in tpu_information.items():
+        result = check_tpu_status(full_name, quiet=True)
+        previous_note = info['script_note']
+
+        if result == 'ready':
+            info['script_note'] = 'READY'
+        elif result == 'preempted':
+            info['script_note'] = 'PREEMPTED'
+        elif result == 'terminated':
+            info['script_note'] = 'TERMINATED'
+        elif result == 'creating':
+            info['script_note'] = 'CREATING'
+        elif result == 'failed':
+            info['script_note'] = 'NOT FOUND'
+        else:
+            info['script_note'] = 'UNKNOWN'
+
+        if previous_note != info['script_note']:
+            write_sheet_info(info)
  
 def kill_jobs_tpu(tpu, username = None):
     zone, pre, tpu = get_zone_pre(tpu)
@@ -272,7 +265,7 @@ def delete_tpu(tpu):
         print(f"{FAIL} delete_tpu: TPU deletion failed: {e}")
         return 'delete failed'
     
-def check_tpu_status(tpu):
+def check_tpu_status(tpu, quiet = False):
     """
     Check whether a TPU is preempted or not.
     return value: ['no tpu found', 'preempted', 'terminated', 'creating', 'ready', 'failed']
@@ -283,7 +276,8 @@ def check_tpu_status(tpu):
     try:
         state = subprocess.check_output(cmd, shell=True, stderr=subprocess.DEVNULL).decode().strip()
     except subprocess.CalledProcessError:
-        print(f"{FAIL} check_tpu_status: Failed to query TPU state")
+        if not quiet:
+            print(f"{FAIL} check_tpu_status: Failed to query TPU {tpu} state")
         return 'failed'
     
     return state.lower()
@@ -426,7 +420,7 @@ def check_env(tpu, quiet = False):
         return 'failed'
     except subprocess.TimeoutExpired:
         if not quiet:
-            print(f"{FAIL} check_env: Timeout expired")
+            print(f"{FAIL} check_env: Checking {tpu}: Timeout expired")
         return 'timeout'
 
     if 'No such file or directory' in stderr:

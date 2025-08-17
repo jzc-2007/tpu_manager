@@ -1,38 +1,97 @@
 import os, re, time, json, copy
 from .helpers import *
+from .constants import *
 from . import users
 from .data_io import read_and_lock_data, write_and_unlock_data, release_lock_data, read_data
 from .operate import check_tpu_status, apply_tpu, kill_jobs_tpu, get_zone_pre, restart, check_tpu_running
 from .sheet import get_tpu_info_sheet, write_sheet_info, read_tpu_info_from_type, find_tpu_from_type
 from .logger import get_wandb_notes
 from .autenticate import autenticate
-RULE_DICT ={
-    'pre':{
-        'preempted': 'reapply',
-        'grpc': 'resume',
-        'locked': 'pass',
-    },
-    'pass':{
-        'preempted': 'pass',
-        'grpc': 'pass',
-        'locked': 'pass',
-    },
-    'reapply':{
-        'preempted': 'reapply',
-        'grpc': 'reapply',
-        'locked': 'pass',
-    },
-    'rerun':{
-        'preempted': 'reapply',
-        'grpc': 'rerun',
-        'locked': 'pass',
-    },
-    'resume':{
-        'preempted': 'pass',
-        'grpc': 'resume',
-        'locked': 'pass',
-    }
-}
+from .gs_buckets import check_gs_logdir_exists
+
+class Job:
+    def __init__(
+        self,
+        user,
+        windows_id=None,
+        job_dir_id="",
+        job_dir=None,
+        tpu=None,
+        job_tags="",
+        log_dir="",
+        stage_dir="",
+        extra_configs="",
+        status=None,
+        error=None,
+        stage=0,
+        monitor=True,
+        rules=None,
+        extra_msgs=None,
+        customized_settings=None,
+        start_time=None
+    ):
+        self.user = user
+        self.windows_id = windows_id
+        self.job_dir_id = job_dir_id
+        self.job_dir = job_dir
+        self.tpu = tpu
+        self.job_tags = job_tags
+        self.log_dir = log_dir
+        self.stage_dir = stage_dir
+        self.extra_configs = extra_configs
+        self.status = status
+        self.error = error
+        self.stage = stage
+        self.monitor = monitor
+        self.rules = rules
+        self.extra_msgs = extra_msgs if extra_msgs is not None else {}
+        self.customized_settings = customized_settings if customized_settings is not None else {}
+        self.start_time = start_time if start_time is not None else {}
+
+    def to_dict(self):
+        return {
+            "user": self.user,
+            "windows_id": self.windows_id,
+            "job_dir_id": self.job_dir_id,
+            "job_dir": self.job_dir,
+            "tpu": self.tpu,
+            "job_tags": self.job_tags,
+            "log_dir": self.log_dir,
+            "stage_dir": self.stage_dir,
+            "extra_configs": self.extra_configs,
+            "status": self.status,
+            "error": self.error,
+            "stage": self.stage,
+            "monitor": self.monitor,
+            "rules": self.rules,
+            "extra_msgs": self.extra_msgs,
+            "customized_settings": self.customized_settings,
+            "start_time": self.start_time
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict):
+        return cls(
+            user=data.get("user"),
+            windows_id=data.get("windows_id"),
+            job_dir_id=data.get("job_dir_id", ""),
+            job_dir=data.get("job_dir"),
+            tpu=data.get("tpu"),
+            job_tags=data.get("job_tags", ""),
+            log_dir=data.get("log_dir", ""),
+            stage_dir=data.get("stage_dir", ""),
+            extra_configs=data.get("extra_configs", ""),
+            status=data.get("status"),
+            error=data.get("error"),
+            stage=data.get("stage", 0),
+            monitor=data.get("monitor", True),
+            rules=data.get("rules"),
+            extra_msgs=data.get("extra_msgs", {}),
+            customized_settings=data.get("customized_settings", {}),
+            start_time=data.get("start_time", {})
+        )
+
+
 
 def check_rules():
     print(f"AVAILABLE RULES:")
@@ -177,9 +236,15 @@ def resume_rerun_job(job, new_tpu = None, load_ckpt = True):
             if key.startswith('fail_time'):
                 del new_job['extra_msgs'][key]
 
+        load_ckpt_path = ""
+
         if load_ckpt:
             assert job["log_dir"] is not None, f"Job {job['windows_id']} for user {user_obj.name} has no log dir"
-        print(f"{INFO} {operation}_job: new job {new_job}")
+            if not check_gs_logdir_exists(job["log_dir"]):
+                print(f"{WARNING} {operation}_job: Log dir {job['log_dir']} does not exist, rerun instead")
+            else:
+                load_ckpt_path = job["log_dir"]
+
         data['users'][user_obj.name]['job_data'].append(new_job)
         user_obj.windows_offset = id + 1
         data['users'][user_obj.name] = user_obj.to_dict()
@@ -224,16 +289,20 @@ def resume_rerun_job(job, new_tpu = None, load_ckpt = True):
         os.system(f"tmux new-window -t {session_name}:{id}")
         time.sleep(0.5)
         os.system(f"tmux send-keys -t {session_name}:{id} 'cd {stage_dir}' Enter")
-        if load_ckpt:
+        if load_ckpt_path:
             if job.get("customized_settings", {}).get("log_stage", False):
-                os.system(f"tmux send-keys -t {session_name}:{id} 'source staging.sh ka={tpu} {config_args} --config.load_from={log_dir} --config.stage={new_stage}' Enter")
-            os.system(f"tmux send-keys -t {session_name}:{id} 'source staging.sh ka={tpu} {config_args} --config.load_from={log_dir} ' Enter") 
+                os.system(f"tmux send-keys -t {session_name}:{id} 'source staging.sh ka={tpu} {config_args} --config.load_from={load_ckpt_path} --config.stage={new_stage}' Enter")
+                new_job['extra_configs'] += f" --config.load_from={load_ckpt_path} --config.stage={new_stage}"
+            else:
+                os.system(f"tmux send-keys -t {session_name}:{id} 'source staging.sh ka={tpu} {config_args} --config.load_from={load_ckpt_path}' Enter") 
+                new_job['extra_configs'] += f" --config.load_from={load_ckpt_path}"
         else:
             os.system(f"tmux send-keys -t {session_name}:{id} 'source staging.sh ka={tpu} {config_args}' Enter")
         
         print(f"{GOOD} {operation}_job: Successfully created job in tmux window {session_name}:{id}")
 
-        
+        print(f"{INFO} {operation}_job: new job {new_job}")
+
         write_and_unlock_data(data)
 
         tpu_info = get_tpu_info_sheet(tpu)
@@ -632,11 +701,11 @@ def run(user_obj, args):
 
         session_name = user_obj.tmux_name
 
-        id = data['users'][user_obj.name]['windows_offset']
-        data['users'][user_obj.name]['windows_offset'] = id + 1
+        window_id = data['users'][user_obj.name]['windows_offset']
+        data['users'][user_obj.name]['windows_offset'] = window_id + 1
         data['users'][user_obj.name]['job_data'].append({
             'user': user_obj.name,
-            'windows_id': id,
+            'windows_id': window_id,
             'job_dir_id': dir_id,
             'job_dir': dir_path,
             'tpu': tpu,
@@ -658,29 +727,29 @@ def run(user_obj, args):
             assert tpu_status == 'ready', f"TPU {tpu} is not ready, status: {tpu_status}"
 
         # create the tmux window
-        os.system(f"tmux new-window -t {session_name}:{id}")
-        print(f"{INFO} run: Creating job in tmux window {session_name}:{id}")
+        os.system(f"tmux new-window -t {session_name}:{window_id}")
+        print(f"{INFO} run: Creating job in tmux window {session_name}:{window_id}")
         time.sleep(2)
         # check if the window<id> created
         windows = os.popen(f"tmux list-windows -t {session_name}").read().splitlines()
         found_window = False
         for window in windows:
-            if window.startswith(f"{id}:"):
+            if window.startswith(f"{window_id}:"):
                 found_window = True
                 break
         if not found_window:
-            print(f"{FAIL} run: Failed to create job in tmux window {session_name}:{id}")
-            print(f"{FAIL} run: Window {id} not found")
+            print(f"{FAIL} run: Failed to create job in tmux window {session_name}:{window_id}")
+            print(f"{FAIL} run: Window {window_id} not found")
             print(f"{FAIL} run: This may indicate that this window is already created, please check the tmux session")
             release_lock_data()
             return
-        os.system(f"tmux send-keys -t {session_name}:{id} 'cd {dir_path}' Enter")
+        os.system(f"tmux send-keys -t {session_name}:{window_id} 'cd {dir_path}' Enter")
         if tpu is None:
-            os.system(f"tmux send-keys -t {session_name}:{id} 'source staging.sh {config_args}' Enter")
+            os.system(f"tmux send-keys -t {session_name}:{window_id} 'source staging.sh {config_args}' Enter")
         else:
-            os.system(f"tmux send-keys -t {session_name}:{id} 'source staging.sh ka={tpu} {config_args}' Enter") 
+            os.system(f"tmux send-keys -t {session_name}:{window_id} 'source staging.sh ka={tpu} {config_args}' Enter") 
         
-        print(f"{GOOD} run: Successfully created job in tmux window {session_name}:{id}")
+        print(f"{GOOD} run: Successfully created job in tmux window {session_name}:{window_id}")
 
         time.sleep(4)
 

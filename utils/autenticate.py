@@ -1,5 +1,6 @@
 import json, os
 from .helpers import *
+from .constants import *
 
 def get_passwords():
     """

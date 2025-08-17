@@ -1,6 +1,4 @@
-import os
-import shutil
-import re
+import os, shutil, re
 
 def file_to_num(file):
     content = re.match(r'checkpoint_(\d+)', file)

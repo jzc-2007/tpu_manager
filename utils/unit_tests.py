@@ -4,13 +4,14 @@ from utils import operate, data_io
 from utils import directories as dirs
 from utils.sheet import read_sheet_info, write_sheet_info
 from utils.helpers import *
+from .constants import *
 
 def test_get_zone_pre(quiet = False):
     try:
-        assert operate.get_zone_pre("kmh-tpuvm-v2-32-preemptible-2") == ("europe-west4-a", True, "kmh-tpuvm-v2-32-preemptible-2"), f"T1, Expected ('europe-west4-a', True, 'kmh-tpuvm-v2-32-preemptible-2'), got {operate.get_zone_pre('kmh-tpuvm-v2-32-preemptible-2')}"
-        assert operate.get_zone_pre("kmh-tpuvm-v2-32-1") == ("us-central1-a", False, "kmh-tpuvm-v2-32-1"), f"T2, Expected ('us-central1-a', False, 'kmh-tpuvm-v2-32-1'), got {operate.get_zone_pre('kmh-tpuvm-v2-32-1')}"
-        assert operate.get_zone_pre("v2-32-p2") == ("europe-west4-a", True, "kmh-tpuvm-v2-32-preemptible-2"), f"T3, Expected ('europe-west4-a', True, 'kmh-tpuvm-v2-32-preemptible-2'), got {operate.get_zone_pre('kmh-tpuvm-v2-32-preemptible-2')}"
-        assert operate.get_zone_pre("v2-32-1") == ("us-central1-a", False, "kmh-tpuvm-v2-32-1"), f"T4, Expected ('us-central1-a', False, 'kmh-tpuvm-v2-32-1'), got {operate.get_zone_pre('kmh-tpuvm-v2-32-1')}"
+        assert get_zone_pre("kmh-tpuvm-v2-32-preemptible-2") == ("europe-west4-a", True, "kmh-tpuvm-v2-32-preemptible-2"), f"T1, Expected ('europe-west4-a', True, 'kmh-tpuvm-v2-32-preemptible-2'), got {get_zone_pre('kmh-tpuvm-v2-32-preemptible-2')}"
+        assert get_zone_pre("kmh-tpuvm-v2-32-1") == ("us-central1-a", False, "kmh-tpuvm-v2-32-1"), f"T2, Expected ('us-central1-a', False, 'kmh-tpuvm-v2-32-1'), got {get_zone_pre('kmh-tpuvm-v2-32-1')}"
+        assert get_zone_pre("v2-32-p2") == ("europe-west4-a", True, "kmh-tpuvm-v2-32-preemptible-2"), f"T3, Expected ('europe-west4-a', True, 'kmh-tpuvm-v2-32-preemptible-2'), got {get_zone_pre('kmh-tpuvm-v2-32-preemptible-2')}"
+        assert get_zone_pre("v2-32-1") == ("us-central1-a", False, "kmh-tpuvm-v2-32-1"), f"T4, Expected ('us-central1-a', False, 'kmh-tpuvm-v2-32-1'), got {get_zone_pre('kmh-tpuvm-v2-32-1')}"
         if not quiet:
             print(f"{GREEN}[PASSED]{NC} test_get_zone_pre")
         return True
@@ -149,7 +150,7 @@ def test_write_sheet_info(tpu):
     with other information remaining the same.
     """
     tpu_information = read_sheet_info()
-    _, _, full_name = operate.get_zone_pre(tpu)
+    _, _, full_name = get_zone_pre(tpu)
     if full_name in tpu_information:
         tpu_info = tpu_information[full_name]
         tpu_info['running_status'] = 'reserved'

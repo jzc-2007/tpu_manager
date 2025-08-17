@@ -2,10 +2,10 @@ import gspread
 from google.oauth2.service_account import Credentials
 from typing import List
 from .helpers import *
+from .constants import *
 from .data_io import *
-from .operate import get_zone_pre
 
-def read_sheet_info() -> List[List[str]]:
+def read_sheet_info() -> dict:
     """
     Read the TPU information from the Google Sheet.
     Return: a dictionary of dictionaries with TPU information.

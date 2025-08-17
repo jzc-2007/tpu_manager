@@ -1,6 +1,6 @@
 from .data_io import read_and_lock_data, write_and_unlock_data, release_lock_data, read_data, write_data
 from .helpers import *
-from .operate import get_zone_pre
+from .constants import *
 import json, subprocess, os, time
 
 def clear_MONITOR_log():

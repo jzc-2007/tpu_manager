@@ -1,8 +1,9 @@
 import json
 import os, time
 from .helpers import *
+from .constants import *
 from .data_io import read_and_lock_data, write_and_unlock_data, release_lock_data, read_data, write_data
-from .operate import get_zone_pre, check_env, mount_disk, check_tpu_status, apply_tpu
+from .operate import check_env, mount_disk, check_tpu_status, apply_tpu
 from .jobs import resume_rerun_job
 
 def clear_zombie_windows(user_obj):
@@ -95,14 +96,18 @@ def change_ip():
     jobs is of status 'running', and resume all of them.
     """
     data = read_data()
-    for user in data['users']:
-        # kill the tmux session and recreate it
-        print(f"{INFO} change-ip: Killing tmux session {data['users'][user]['tmux_name']}")
-        os.system(f'tmux kill-session -t {data["users"][user]["tmux_name"]}')
-        time.sleep(5)
-        print(f"{INFO} change-ip: Recreating tmux session {data['users'][user]['tmux_name']}")
-        os.system(f'tmux new-session -d -s {data["users"][user]["tmux_name"]}')
-        print(f"{GOOD} change-ip: Recreating tmux session {data['users'][user]['tmux_name']} done")
+    try:
+        for user in data['users']:
+            # kill the tmux session and recreate it
+            # print(f"{INFO} change-ip: Killing tmux session {data['users'][user]['tmux_name']}")
+            # os.system(f'tmux kill-session -t {data["users"][user]["tmux_name"]}')
+            # time.sleep(5)
+            print(f"{INFO} change-ip: Recreating tmux session {data['users'][user]['tmux_name']}")
+            os.system(f'tmux new-session -d -s {data["users"][user]["tmux_name"]}')
+            print(f"{GOOD} change-ip: Recreating tmux session {data['users'][user]['tmux_name']} done")
+    except Exception as e:
+        print(f"{FAIL} change-ip: Failed to recreate tmux session: {e}")
+        return
     
     print(f"{GOOD} change-ip: Recreating tmux sessions done")
 

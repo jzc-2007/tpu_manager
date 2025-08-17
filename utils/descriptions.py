@@ -1,4 +1,4 @@
-from .helpers import *
+from .constants import *
 
 def explain(cmd):
     print(f"{INFO} Help for command: {cmd}")
