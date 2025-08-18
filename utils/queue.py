@@ -86,6 +86,7 @@ def ack_queue(ack_information):
     ack_information: dict with keys
         - tpu: TPU full name to be acknowledged
         - status: 'finished' / 'failed'
+        - window: optional dict with keys 'session' and 'window' to identify the tmux window
     """
     queue = read_and_lock_queue()
     try:
@@ -97,7 +98,7 @@ def ack_queue(ack_information):
         for i, task_dict in enumerate(queue):
             task_obj = Task.from_dict(task_dict)
             if check_valid(task_obj, {"tpu": tpu, "info": tpu_information, "status": status}):
-                run_job_on_tpu(task_obj.job, tpu, quiet = False)
+                run_job_on_tpu(task_obj.job, tpu, quiet = False, ignore_window=ack_information.get("window"))
                 idx_to_del = i
                 break
 
@@ -179,8 +180,6 @@ def check_valid(task, information):
 
     own = (user_spreadsheet == info_user) or (info_user == "free")
 
-    print(own)
-
     if own and not allow_own:
         return False
     if (not own) and not allow_other:
@@ -252,6 +251,9 @@ def parse_config_args_for_queue(user_obj, args):
         if arg in all_tpu_tokens:
             explicit_tpus.append(alias_map.get(arg, arg))
 
+        if arg in QUEUE_LIST:
+            tpu_type = arg  # use the type as the filter
+
         # numeric dir id convenience
         if is_integer(arg):
             dir_id = arg
@@ -307,10 +309,6 @@ def parse_config_args_for_queue(user_obj, args):
     # If still empty, fall back to whatever filters read_tpu_info_from_type(args) applies
     if not valid_tpu:
         print(f'{FAIL} parse_config_args_for_queue: NO TPU FOUND')
-
-    # --- rule defaulting/validation ---
-    preemptible_set = set(data.get("all_tpus", {}).get("preemptible", []))
-    any_preemptible = any(t in preemptible_set for t in valid_tpu)
 
     if rule is not None:
         rule = RULE_DICT[rule]
@@ -491,7 +489,7 @@ def visualize_queue(limit: int = None, truncate_tpus: int = 6, return_rows: bool
             "id":   str(other.get("task_id", "-")),
             "perm": _perm_str(priority_info),
             "tpu_type": other.get("tpu_type", "-"),
-            "note": task_dict.get("job",{}).get("job_tags",'-')[:15]
+            "note": task_dict.get("job",{}).get("job_tags",'-')[:20]
         }
         rows.append(row)
 
@@ -550,9 +548,7 @@ def finish_job(window):
     except:
         release_lock_data()
 
-    print('2222222')
-
-    ack_queue({'tpu': tpu, 'status': 'finished'})
+    ack_queue({'tpu': tpu, 'status': 'finished', 'window':{'session': session_name, 'window': window_num}})
 
 def fail_job(window):
     session_name, window_num = window.split(':')
@@ -579,7 +575,7 @@ def fail_job(window):
     except:
         release_lock_data()
 
-    ack_queue({'tpu': tpu, 'status': 'failed'})
+    ack_queue({'tpu': tpu, 'status': 'failed', 'window':{'session': session_name, 'window': window_num}})
 
 def upd_staging_info(unique_id, window, stage_dir):
     """

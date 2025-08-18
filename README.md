@@ -66,6 +66,8 @@ tck/tpu check username
 
 The `run` command will automatically resume the preempted TPU jobs, and you can see more in section **2B** or **6.More on Resuming/Rerunning**. Please notice that an **common failure mode** for resuming is that if a job A has be resumed and the new job A' gets an error before it stores a checkpoint, then the third job A'' resuming from this new job A' will restart **from the beginning** instead of the checkpoint from A. So please be careful with your jobs and make sure that the checkpoint is stored correctly.
 
+If no tpu's are available, you can use the `queue` command instead of `run`. `queue` takes in a tpu type or a tpu name, and will start the job when a valid tpu finished. You can use `tpu vq` or `tvq` to see the queue, and `tpu dequeue <id> <user>` to delete a job in the queue. 
+
 <details>
     <summary> <strong>2A. More Directory Operations (OPTIONAL)</strong></summary>
 

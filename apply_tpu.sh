@@ -19,4 +19,4 @@ while true; do
     sleep 5
 done
 
-python /home/jzc/zhichengjiang/working/xibo_tpu_manager/tpu.py run $input_value 2 bird
+# python /home/jzc/zhichengjiang/working/xibo_tpu_manager/tpu.py run $input_value 2 bird

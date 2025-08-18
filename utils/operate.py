@@ -27,7 +27,7 @@ def update_tpu_status_for_spreadsheet():
         if previous_note != info['script_note']:
             write_sheet_info(info)
  
-def kill_jobs_tpu(tpu, username = None):
+def kill_jobs_tpu(tpu, username = None, ignore_window = None):
     zone, pre, tpu = get_zone_pre(tpu)
     if zone is None:
         print(f"{FAIL} kill_jobs_tpu: Could not determine zone.")
@@ -45,6 +45,9 @@ def kill_jobs_tpu(tpu, username = None):
             for job in data["users"][user]["job_data"]:
                 if job["tpu"] == tpu:
                     window = job["windows_id"]
+                    if ignore_window is not None and window == ignore_window['window'] and ignore_window['session'] == user_tmux_name:
+                        print(f"{INFO} kill_jobs_tpu: Ignoring window {window} for user {user}")
+                        continue
                     if window is not None:
                         subprocess.run(f"tmux send-keys -t {user_tmux_name}:{window} C-c", shell=True, check=False)
 

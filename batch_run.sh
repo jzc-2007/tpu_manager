@@ -1,1 +1,3 @@
-python /home/jzc/zhichengjiang/working/xibo_tpu_manager/tpu.py run v3-32-3 2 bird
+bash apply_tpu.sh py14 &
+bash apply_tpu.sh py15 &
+bash apply_tpu.sh py16 &

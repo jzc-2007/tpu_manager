@@ -24,6 +24,8 @@ v6_list = v6_list + v6e_list
 all_type_list = v2_list + v3_list + v4_list + v5_list + v6_list
 ARG_TO_LIST = NAME_TO_TYPE | {'v2':v2_list, 'v3':v3_list, 'v4': v4_list, 'v5':v5_list, 'v6': v6_list, 'v5e': v5e_list, 'v6e': v6e_list, 'v2+': v2_list + v3_list + v4_list + v5_list + v6_list, 'v3+': v3_list + v4_list + v5_list + v6_list, 'v4+': v4_list + v5_list + v6_list, 'v5+': v5_list + v6_list, 'v6+': v6_list, 'v*': all_type_list, '-a': all_type_list, '--all': all_type_list}
 
+QUEUE_LIST = ['v2', 'v3', 'v4', 'v5', 'v6', 'v3-32', 'v4-32', 'v2-32', 'v4-8', 'v3-64', 'v3-128', 'v2-128', 'v4-32-p', 'v3-32-p', 'v2-32-p']
+
 RULE_DICT ={
     'pre':{
         'preempted': 'reapply',

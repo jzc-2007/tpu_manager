@@ -1025,7 +1025,7 @@ def kill_window(user_obj, args):
         release_lock_data()
 
 
-def run_job_on_tpu(job: Job, tpu, quiet = True):
+def run_job_on_tpu(job: Job, tpu, quiet = True, ignore_window = None):
     data = read_and_lock_data()
     try:
         # update logs
@@ -1049,7 +1049,7 @@ def run_job_on_tpu(job: Job, tpu, quiet = True):
         tpu_status = check_tpu_status(tpu)
         assert tpu_status == 'ready', f"run_job_on_tpu: TPU {tpu} is not ready, status: {tpu_status}"
 
-        kill_jobs_tpu(tpu)
+        kill_jobs_tpu(tpu, ignore_window=ignore_window)
 
         # run the job
         os.system(f"tmux new-window -t {session_name}:{window_id}")
