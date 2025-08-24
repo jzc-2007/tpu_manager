@@ -16,7 +16,7 @@ while true; do
     fi
     
     # 可选：添加延迟以避免过于频繁的重试
-    sleep 5
+    sleep $((8 + RANDOM % 2))
 done
 
 # python /home/jzc/zhichengjiang/working/xibo_tpu_manager/tpu.py run $input_value 2 bird

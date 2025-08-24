@@ -212,7 +212,7 @@ def apply_tpu(tpu, preemptible, delete=True):
         raise ValueError(f"{FAIL} apply_{info_str}: Unknown TPU type {tpu}")
     
     if delete:
-        cmd = f"gcloud compute tpus tpu-vm delete {tpu} --zone={zone} --quiet"
+        delete_tpu(tpu)
         try:
             subprocess.run(cmd.split(), timeout=300, check=True, stdout=subprocess.DEVNULL)
         except subprocess.CalledProcessError as e:
@@ -245,7 +245,7 @@ def apply_tpu(tpu, preemptible, delete=True):
 
         print(f"{INFO} Update Spreadsheet info for {tpu}...")
         tpu_info = get_tpu_info_sheet(tpu)
-        tpu_info['other_note'] = f'Last applied(EDT):{get_edt_time_str()}'
+        tpu_info['other_note'] = f'{get_edt_time_str()}'
         write_sheet_info(tpu_info)
 
         # mount the disk
@@ -264,8 +264,13 @@ def apply_tpu(tpu, preemptible, delete=True):
         return 'unknown'
 
 def delete_tpu(tpu):
+    print(f"{INFO} delete_tpu: Deleting TPU {tpu}...")
     zone, pre, tpu = get_zone_pre(tpu)
     if zone is None: return
+    status = check_tpu_status(tpu, quiet=True)
+    if status == 'failed':
+        print(f"{WARNING} delete_tpu: TPU {tpu} not found")
+        return 'delete failed'
     print(f"{INFO} Deleting TPU {tpu} in zone {zone}...")
     cmd = f"gcloud compute tpus tpu-vm delete {tpu} --zone={zone} --quiet"
     try:
@@ -273,6 +278,7 @@ def delete_tpu(tpu):
     except subprocess.CalledProcessError as e:
         print(f"{FAIL} delete_tpu: TPU deletion failed: {e}")
         return 'delete failed'
+    return 'success'
     
 def check_tpu_status(tpu, quiet = False):
     """
@@ -280,7 +286,7 @@ def check_tpu_status(tpu, quiet = False):
     return value: ['no tpu found', 'preempted', 'terminated', 'creating', 'ready', 'failed']
     """
     zone, pre, tpu = get_zone_pre(tpu)
-    if zone is None: return
+    if zone is None: return 'no tpu found'
     cmd = f"gcloud compute tpus describe {tpu} --zone={zone} --format='value(state)'"
     try:
         state = subprocess.check_output(cmd, shell=True, stderr=subprocess.DEVNULL).decode().strip()
