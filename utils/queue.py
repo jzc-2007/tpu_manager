@@ -115,7 +115,7 @@ def dequeue_and_run(task_id, tpu):
     Find the task with other_info.task_id == task_id, remove it from the queue,
     and run it on the specified TPU.
     """
-    zone, _, tpu = get_zone_pre(tpu)
+    zone, _, _, tpu = get_zone_pre_spot(tpu)
     queue = read_and_lock_queue()
     try:
         target = str(task_id)

@@ -92,7 +92,7 @@ def debug_stats(tpu):
     """
     check whether some jobs is in stats 'D'
     """
-    zone, pre, tpu = get_zone_pre(tpu)
+    zone, pre, spot, tpu = get_zone_pre_spot(tpu)
     if zone is None:
         print(f"{FAIL} debug_stats: TPU {tpu} not found")
         return
@@ -111,7 +111,7 @@ def debug_stats(tpu):
     print(f"stderr: {stderr}")
 
 def kill_jobs_tpu_new(tpu):
-    zone, pre, tpu = get_zone_pre(tpu)
+    zone, pre, spot, tpu = get_zone_pre_spot(tpu)
     if zone is None:
         print(f"{FAIL} kill_jobs_tpu: Could not determine zone.")
         return

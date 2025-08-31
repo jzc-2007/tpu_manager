@@ -12,26 +12,48 @@ def get_zone_pre(tpu):
     tpu_aliases = data['tpu_aliases']
     all_tpus = []
     for z, tpu_list in data['all_tpus'].items():
-        if z == 'preemptible':
-            continue
         all_tpus.extend(tpu_list)
     if tpu in tpu_aliases:
         tpu = tpu_aliases[tpu]
     if tpu not in all_tpus:
         print(f"{FAIL} get_zone_pre: TPU {tpu} not found")
         return None, None, None
-    all_tpus = data['all_tpus']
+    
     zone = None
-    for z, tpu_list in all_tpus.items():
-        if z == 'preemptible':
-            continue
+    for z, tpu_list in data['all_tpus'].items():
         if tpu in tpu_list:
             zone = z
             break
     if zone is None:
         print(f"{FAIL} get_zone_pre: TPU {tpu} not found in any zone")
         return None, None, None
-    return zone, tpu in data['all_tpus']['preemptible'], tpu
+    return zone, tpu in data['pre_info']['preemptible'], tpu
+
+def get_zone_pre_spot(tpu):
+    """
+    Get the zone of the TPU, and check if it is preemptible/spot.
+    If the input is alias, it will be replaced with the real TPU name.
+    Return zone, pre, spot, tpu_full_name
+    """
+    data = read_data()
+    tpu_aliases = data['tpu_aliases']
+    all_tpus = []
+    for z, tpu_list in data['all_tpus'].items():
+        all_tpus.extend(tpu_list)
+    if tpu in tpu_aliases: tpu = tpu_aliases[tpu]
+    if tpu not in all_tpus:
+        print(f"{FAIL} get_zone_pre: TPU {tpu} not found")
+        return None, None, None, None
+    zone = None
+    for z, tpu_list in data['all_tpus'].items():
+        if tpu in tpu_list:
+            zone = z
+            break
+    if zone is None:
+        print(f"{FAIL} get_zone_pre: TPU {tpu} not found in any zone")
+        return None, None, None
+    return zone, tpu in data['pre_info']['preemptible'], tpu in data['pre_info']['spot'], tpu
+
 
 def get_abs_time_str():
     """

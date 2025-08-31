@@ -32,7 +32,7 @@ def clear_zombie_windows(user_obj):
             time.sleep(0.5)
 
 def solve_env(tpu):
-    zone, pre, tpu = get_zone_pre(tpu)
+    zone, pre, spot, tpu = get_zone_pre_spot(tpu)
     if zone is None:
         print(f"{FAIL} solve_env: TPU {tpu} not found")
         return 'failed'

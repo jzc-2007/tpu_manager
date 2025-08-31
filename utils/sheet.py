@@ -41,7 +41,7 @@ def read_sheet_info() -> dict:
         if len(row) > 1 and row[1].startswith('v'):
             assert len(row) >= 7, f"line {i+1} is too short: {row}"
             _, tpu, belong, running_status, user, user_note, script_note, env, other = row[:9]
-            zone, pre, full_name = get_zone_pre(tpu)
+            zone, pre, spot, full_name = get_zone_pre_spot(tpu)
             
             assert zone is not None, f"line {i+1} tpu {tpu} not found in zone"
             assert zone.startswith(env), f"line {i+1} zone {zone} does not start with env {env}"
@@ -176,7 +176,7 @@ def get_tpu_info_sheet(tpu):
     Return: a dictionary with keys ['zone', 'pre', 'belong', 'running_status', 'user', 'user_note', 'script_note', 'alias', 'version', 'type', 'line']
     """
     tpu_information = read_sheet_info()
-    _, _, full_name = get_zone_pre(tpu)
+    _, _, _, full_name = get_zone_pre_spot(tpu)
     if full_name in tpu_information:
         return tpu_information[full_name]
     else:

@@ -51,6 +51,7 @@ def register_tpu():
         full_name = input("Enter full name(e.g. kmh-tpuvm-v4-32-preemptible-yiyang): ")
         zone = input("Enter zone(e.g. us-central1-a): ")
         pre = input("Is it preemptible? (yes/no): ").strip().lower() == 'yes'
+        spot = input("Is it spot? (yes/no): ").strip().lower() == 'yes'
     except Exception as e:
         print(f"{FAIL} Failed to read input: {e}")
         return
@@ -65,7 +66,9 @@ def register_tpu():
             print(f"{WARNING} Zone {zone} not found, creating new zone entry")
         data['all_tpus'][zone].append(full_name)
         if pre:
-            data['all_tpus']['preemptible'].append(full_name)
+            data['pre_info']['preemptible'].append(full_name)
+        if spot:
+            data['pre_info']['spot'].append(full_name)
         write_and_unlock_data(data)
         print(f"{GOOD} Successfully registered TPU {tpu_alias} with full name {full_name}")
     except Exception as e:

@@ -2,8 +2,8 @@ import os, re, time, json, copy
 from .helpers import *
 from .constants import *
 from . import users
-from .data_io import read_and_lock_data, write_and_unlock_data, release_lock_data, read_data
-from .operate import check_tpu_status, apply_tpu, kill_jobs_tpu, get_zone_pre, restart, check_tpu_running
+from .data_io import read_and_lock_data, write_and_unlock_data, release_lock_data, read_data, read_and_lock_legacy, write_legacy, write_and_unlock_legacy, release_lock_legacy
+from .operate import check_tpu_status, apply_tpu, kill_jobs_tpu, restart, check_tpu_running
 from .sheet import get_tpu_info_sheet, write_sheet_info, read_tpu_info_from_type, find_tpu_from_type
 from .logger import get_wandb_notes
 from .autenticate import autenticate
@@ -192,7 +192,7 @@ def resume_rerun_job(job, new_tpu = None, load_ckpt = True):
     operationing = 'Resuming' if load_ckpt else 'Rerunning'
     if new_tpu is not None:
         print(f"{INFO} {operation}_job: Using new tpu {new_tpu}")
-        zone, _, new_tpu = get_zone_pre(new_tpu)
+        zone, _, _, new_tpu = get_zone_pre_spot(new_tpu)
         if zone is None:
             print(f"{FAIL} {operation}_job: No zone found for tpu {new_tpu}")
             return
@@ -377,7 +377,7 @@ def kill_job_or_tpu(user_obj, args):
 
 def restart_run(user_obj, args):
     tpu = args[0]
-    zone, _, tpu = get_zone_pre(tpu)
+    zone, _, _, tpu = get_zone_pre_spot(tpu)
     if zone is None:
         print(f"{FAIL} No zone found for tpu {tpu}")
         return
@@ -431,7 +431,7 @@ def select_tpu(args, auto = False):
                         print(f"{FAIL} select_tpu: Invalid tpu selected")
                         return None
                     tpu_selected = reserved_tpu_list[tpu_selected]
-                    zone, _, tpu_selected = get_zone_pre(tpu_selected)
+                    zone, _, _, tpu_selected = get_zone_pre_spot(tpu_selected)
                     if zone is None:
                         print(f"{FAIL} select_tpu: No zone found for tpu {tpu_selected}")
                         return None
@@ -547,7 +547,8 @@ def parse_config_args(user_obj, args):
     if tpu is None:
         print(f'{INFO} run: No TPU Specified, use the TPU in ka.sh instead')
 
-    preemptible = tpu in data['all_tpus']['preemptible']
+    _, pre, spot, tpu = get_zone_pre_spot(tpu)
+    preemptible = pre or spot
 
     if rule is None:
         rule = 'pass' if not preemptible else 'pre'
@@ -1034,7 +1035,7 @@ def run_job_on_tpu(job: Job, tpu, quiet = True, ignore_window = None):
         window_id = user_obj.windows_offset
         data['users'][user_obj.name]['windows_offset'] = window_id + 1
         user_obj.windows_offset = window_id + 1
-        zone, pre, tpu = get_zone_pre(tpu)
+        zone, pre, spot, tpu = get_zone_pre_spot(tpu)
         if not job.rules:
             job.rules = RULE_DICT["pre"] if pre else RULE_DICT["pass"]
         
@@ -1190,10 +1191,16 @@ def clear_finished_jobs(user_object):
         new_jobs = [job for job in all_jobs if job not in jobs_to_remove]
         data['users'][user_object.name]['job_data'] = new_jobs
         write_and_unlock_data(data)
+        # write all the deleted jobs to legacy, with is a list of jobs
+        legacy = read_and_lock_legacy()
+        legacy.extend(jobs_to_remove)
+        write_and_unlock_legacy(legacy)
 
     except:
         print(f"{RED}[Error] {NC}clear_finished_jobs: Failed to clear finished jobs")
         release_lock_data()
+        release_lock_legacy()
+
 
 def clear_error_jobs(user_object, clear_rerun = False):
     data = read_and_lock_data()
@@ -1248,9 +1255,18 @@ def clear_error_jobs(user_object, clear_rerun = False):
         data['users'][user_object.name]['job_data'] = new_jobs
         write_and_unlock_data(data)
 
+        # write all the deleted jobs to LEGACY_PATH, with is a json file of list of jobs
+        legacy = read_and_lock_legacy()
+        for job in all_jobs:
+            if job['status'] in ['error', 'killed'] or (clear_rerun and (job['status'] == 'resumed' or job['status'] == 'rerunned')):
+                legacy.append(job)
+        write_and_unlock_legacy(legacy)
+
+
     except:
         print(f"{RED}[Error] {NC}clear_error_jobs: Failed to clear error jobs")
         release_lock_data()
+        release_lock_legacy()
 
 def clear_all_jobs(user_object, args = None):
     clear_rerun = False
@@ -1284,10 +1300,17 @@ def clear_zombie_jobs(user_object):
                 new_jobs.append(job)
         data['users'][user_object.name]['job_data'] = new_jobs
         write_and_unlock_data(data)
+        
+        legacy = read_and_lock_legacy()
+        for job in all_jobs:
+            if int(job['windows_id']) not in all_windows:
+                legacy.append(job)
+        write_and_unlock_legacy(legacy)
 
     except:
         print(f"{RED}[Error] {NC}clear_zombie_jobs: Failed to clear zombie jobs")
         release_lock_data()
+        release_lock_legacy()
 
 def ack_MONITOR():
     """

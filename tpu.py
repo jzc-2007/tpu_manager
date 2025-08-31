@@ -147,6 +147,8 @@ if __name__ == '__main__':
             elif cmd == 'queue': queue.Queue(user_object, args[2:])
             elif cmd == 'resume': jobs.resume(user_object, args[2:])
             elif cmd == 'rerun': jobs.rerun(user_object, args[2:])
+            # elif cmd == 'copy-cfg': dirs.read_job_config_to_file(user_object, args[2])
+            elif cmd == 'get-stage-dir': print(dirs.get_job_stage_dir(user_object, args[2]))
             elif cmd == 'dequeue' or cmd == 'dq': queue.dequeue(user_object, args[2:])
             elif cmd == 'ignore-error': jobs.ignore_error(user_object, args[2:])
             elif cmd == 'restart-run': jobs.restart_run(user_object, args[2:])

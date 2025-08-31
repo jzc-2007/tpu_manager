@@ -220,16 +220,11 @@ def mainloop():
             for job in error_jobs[error_type]:
                 rule = job["rules"][error_type]
                 try:
-                    if rule == 'pass':
-                        continue
-                    elif rule == 'reapply':
-                        reapply_resume(job, timeout=1800)
-                    elif rule == 'resume':
-                        kill_resume(job)
-                    elif rule == 'rerun':
-                        kill_rerun(job)
-                    elif rule == 'restart':
-                        restart_rerun(job)
+                    if rule == 'pass':      continue
+                    elif rule == 'reapply': reapply_resume(job, timeout=1800)
+                    elif rule == 'resume':  kill_resume(job)
+                    elif rule == 'rerun':   kill_rerun(job)
+                    elif rule == 'restart': restart_rerun(job)
                 except:
                     print(f"{FAIL} mainloop: Failed to handle job {job['windows_id']} for user {user}, (error type {error_type}, rule {rule})")
                     add_MONITOR_log(f"{FAIL} mainloop: Failed to handle job {job['windows_id']} for user {user}, (error type {error_type}, rule {rule})")
@@ -268,38 +263,9 @@ if __name__ == "__main__":
                     break
             
             if num_loops > 24:
-                # print(f"{INFO} MONITOR: cleaning up after {num_loops} loops...")
-                # add_MONITOR_log(f"{INFO} MONITOR: cleaning up after {num_loops} loops...")
-                # clean.clean_us(safe=False, quiet=True)
-                # clean.clean_eu(safe=False, quiet=True)
-                # print(f"{GOOD} MONITOR: cleanup finished")
                 print(f"{GOOD} successfully run {num_loops} loops, exiting...")
                 add_MONITOR_log(f"{GOOD} successfully run {num_loops} loops, exiting...")
                 sys.exit(0)
-
-            # if time.time() - last_test_time > test_freq:
-            #     try:
-            #         print(f"{INFO} Running unit tests...")
-            #         passed, failed = unit_tests.sanity_check()
-            #         tot = passed + failed
-            #         if failed == 0:
-            #             add_MONITOR_log(f"{GOOD} All unit tests passed")
-            #         else:
-            #             add_MONITOR_log(f"{FAIL} {failed}/{tot} unit tests failed")
-            #     except Exception as e:
-            #         print(f"{FAIL} Unit tests failed: {e}")
-            #     last_test_time = time.time()
-
-            # if time.time() - last_clean_time > clean_freq:
-            #     try:
-            #         print(f"{INFO} Running clean...")
-            #         clean.clean_us(safe=False, quiet=True)
-            #         clean.clean_eu(safe=False, quiet=True)
-            #         print(f"{GOOD} Clean finished")
-            #         add_MONITOR_log(f"{GOOD} Clean finished")
-            #     except Exception as e:
-            #         print(f"{FAIL} Clean failed: {e}")
-            #     last_clean_time = time.time()
                 
     except KeyboardInterrupt:
         print("KeyboardInterrupt, exiting...")

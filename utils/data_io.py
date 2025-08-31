@@ -4,69 +4,43 @@ from .constants import *
 def release_lock(args):
     assert len(args) == 1, "Please specify a lock type to release"
     lock_type = args[0]
-    if lock_type == 'code':
-        print(f"{INFO} release_lock: releasing code lock")
-        with open(LOCK_PATH, 'r') as file:
-            lock = json.load(file)
-        lock['code']['status'] = False
-        lock['code']['user'] = None
-        with open(LOCK_PATH, 'w') as file:
-            json.dump(lock, file, indent=4)
-        print(f"{INFO} release_lock: code lock released")
-    elif lock_type == 'data':
-        print(f"{INFO} release_lock: releasing data lock")
-        with open(LOCK_PATH, 'r') as file:
-            lock = json.load(file)
-        lock['data']['status'] = False
-        with open(LOCK_PATH, 'w') as file:
-            json.dump(lock, file, indent=4)
-        print(f"{INFO} release_lock: data lock released")
-    else:
-        print(f"{FAIL} release_lock: unknown lock type {lock_type}")
-        raise ValueError(f"Unknown lock type {lock_type}")
+    assert lock_type in ['code', 'data', 'queue', 'legacy', 'apply'], f"Unknown lock type {lock_type}"
+    print(f"{INFO} release_lock: releasing {lock_type} lock")
+    with open(LOCK_PATH, 'r') as file:
+        lock = json.load(file)
+    if lock[lock_type]['status'] == False:
+        print(f"{WARNING} release_lock: the {lock_type} lock is not locked.")
+        return
+    lock[lock_type]['status'] = False
+    lock[lock_type]['user'] = None
+    with open(LOCK_PATH, 'w') as file:
+        json.dump(lock, file, indent=4)
     
 def lock(args):
     assert len(args) == 1, "Please specify a lock type to lock"
     lock_type = args[0]
-    if lock_type == 'code':
-        print(f"{INFO} lock: locking code")
-        with open(LOCK_PATH, 'r') as file:
-            lock = json.load(file)
-        if lock['code']['status'] == False:
-            lock['code']['status'] = True
-            with open(LOCK_PATH, 'w') as file:
-                json.dump(lock, file, indent=4)
-        else:
-            print(f"{FAIL} lock: the code is locked now.")
-            raise Exception("Lock not released.")
-    elif lock_type == 'data':
-        print(f"{INFO} lock: locking data")
-        with open(LOCK_PATH, 'r') as file:
-            lock = json.load(file)
-        if lock['data']['status'] == False:
-            lock['data']['status'] = True
-            with open(LOCK_PATH, 'w') as file:
-                json.dump(lock, file, indent=4)
-        else:
-            print(f"{FAIL} lock: the data is locked now.")
-            raise Exception("Lock not released.")
-    else:
-        print(f"{FAIL} lock: unknown lock type {lock_type}")
-        raise ValueError(f"Unknown lock type {lock_type}")
-
-def lock_code(username = None):
-    print(f"{INFO} lock_code: locking code for user {username}")
+    assert lock_type in ['code', 'data', 'queue', 'legacy', 'apply'], f"Unknown lock type {lock_type}"
+    print(f"{INFO} lock: locking {lock_type}")
     with open(LOCK_PATH, 'r') as file:
         lock = json.load(file)
-    if lock['code']['status'] == False:
-        lock['code']['status'] = True
-        if username:
-            lock['code']['user'] = username
-        with open(LOCK_PATH, 'w') as file:
-            json.dump(lock, file, indent=4)
-    else:
+    if lock[lock_type]['status'] == True:
+        print(f"{FAIL} lock: the {lock_type} is locked now.")
+        raise Exception("Lock not released.")
+    lock[lock_type]['status'] = True
+    with open(LOCK_PATH, 'w') as file:
+        json.dump(lock, file, indent=4)
+
+def lock_code(username = None):
+    with open(LOCK_PATH, 'r') as file:
+        lock = json.load(file)
+    if lock['code']['status'] == True:
         print(f"{FAIL} lock_code: the code is locked now.")
         raise Exception("Lock not released.")
+    lock['code']['status'] = True
+    lock['code']['user'] = username
+    with open(LOCK_PATH, 'w') as file:
+        json.dump(lock, file, indent=4)
+    print(f"{INFO} lock_code: code locked by {username}.")
     
 def unlock_code(username = None):
     with open(LOCK_PATH, 'r') as file:
@@ -99,21 +73,59 @@ def read_queue():
         queue = json.load(file)
     return queue
 
+def read_legacy():
+    with open(LEGACY_PATH, 'r') as file:
+        legacy = json.load(file)
+    return legacy
+
+def write_legacy(legacy):
+    with open(LEGACY_PATH, 'w') as file:
+        json.dump(legacy, file, indent=4)
+
+def read_and_lock_legacy():
+    num_ack = 0
+    while True:
+        num_ack += 1
+        with open(LOCK_PATH, 'r') as file:
+            lock = json.load(file)
+        if lock['legacy']['status'] == False:
+            lock['legacy']['status'] = True
+            with open(LOCK_PATH, 'w') as file:
+                json.dump(lock, file, indent=4)
+            break
+        else:
+            time.sleep(10)
+        if num_ack > 180:
+            print(f"{FAIL} read_and_lock_legacy: Lock not released after 30 mins, this may indicate a deadlock. Please check the lock file and release it manually.")
+            raise Exception("Lock not released after 30 mins, this may indicate a deadlock. Please check the lock file and release it manually.")
+    with open(LEGACY_PATH, 'r') as file:
+        legacy = json.load(file)
+    return legacy
+
+def release_lock_legacy():
+    with open(LOCK_PATH, 'r') as file:
+        lock = json.load(file)
+    lock['legacy']['status'] = False
+    with open(LOCK_PATH, 'w') as file:
+        json.dump(lock, file, indent=4)
+
+def write_and_unlock_legacy(legacy):
+    try:
+        with open(LEGACY_PATH, 'w') as file:
+            json.dump(legacy, file, indent=4)
+    except Exception as e:
+        print(f"Error writing file: {e}")
+    with open(LOCK_PATH, 'r') as file:
+        lock = json.load(file)
+    lock['legacy']['status'] = False
+    with open(LOCK_PATH, 'w') as file:
+        json.dump(lock, file, indent=4)
+
 def write_data(data):
     with open(DATA_PATH, 'w') as file:
         json.dump(data, file, indent=4)
 
-def lock_data():
-    print(f"{INFO} lock_data: locking data")
-    with open(LOCK_PATH, 'r') as file:
-        lock = json.load(file)
-    if lock['data']['status'] == False:
-        lock['data']['status'] = True
-        with open(LOCK_PATH, 'w') as file:
-            json.dump(lock, file, indent=4)
-    else:
-        print(f"{FAIL} lock_data: the data is locked now.")
-        raise Exception("Lock not released.")
+def lock_data(): lock(['data'])
     
 
 def read_and_lock_data():

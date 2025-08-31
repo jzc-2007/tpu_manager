@@ -28,7 +28,7 @@ def update_tpu_status_for_spreadsheet():
             write_sheet_info(info)
  
 def kill_jobs_tpu(tpu, username = None, ignore_window = None):
-    zone, pre, tpu = get_zone_pre(tpu)
+    zone, pre, spot, tpu = get_zone_pre_spot(tpu)
     if zone is None:
         print(f"{FAIL} kill_jobs_tpu: Could not determine zone.")
         return
@@ -106,7 +106,7 @@ def kill_jobs_tpu(tpu, username = None, ignore_window = None):
     return 'success'
 
 def kill_jobs_tpu_old(tpu):
-    zone, pre, tpu = get_zone_pre(tpu)
+    zone, pre, spot, tpu = get_zone_pre_spot(tpu)
     if zone is None:
         print("[FAIL] kill_jobs_tpu: Could not determine zone.")
         return
@@ -145,7 +145,7 @@ def kill_jobs_tpu_old(tpu):
     return 'success'
 
 def set_wandb(tpu):
-    zone, pre, tpu = get_zone_pre(tpu)
+    zone, pre, spot, tpu = get_zone_pre_spot(tpu)
     if zone is None:
         print(f"{FAIL} set_wandb: TPU {tpu} not found")
         return
@@ -191,54 +191,79 @@ def reapply(args):
     else:
         return apply_tpu(args[0], preemptible=True, delete=True)
 
-def apply_tpu(tpu, preemptible, delete=True):
+def apply_tpu(tpu, preemptible = False, spot = False, delete=True, repeat_time=None, retry_interval=10):
     info_str = 'pre' if preemptible else 'norm'
-    zone, pre, tpu = get_zone_pre(tpu)
-    if zone is None: return
-    if pre != preemptible:
+    zone, pre, spot, tpu = get_zone_pre_spot(tpu)
+    if zone is None:
+        return
+    if pre != (preemptible or spot):
         print(f"{FAIL} apply_tpu: TPU {tpu} in zone {zone} is not {info_str}")
         return
     if not delete:
         print(f"{INFO} Apply TPU {tpu} in zone {zone}...")
     else:
         print(f"{INFO} Re-apply TPU {tpu} in zone {zone}...")
-   
+
     acc_type = None
     for key in NAME_TO_TYPE:
         if key in tpu:
             acc_type = NAME_TO_TYPE[key]
-    
     if acc_type is None:
         raise ValueError(f"{FAIL} apply_{info_str}: Unknown TPU type {tpu}")
-    
+
     if delete:
         try:
             delete_tpu(tpu)
         except subprocess.CalledProcessError as e:
             print(f"{WARNING} apply_{info_str}: TPU deletion failed: {e}")
-            
-    cmd = f"gcloud compute tpus tpu-vm create {tpu} --zone={zone} --accelerator-type={acc_type} --version=tpu-ubuntu2204-base"
 
     if 'v6' in acc_type:
-        cmd = f'gcloud compute tpus tpu-vm create {tpu} --zone={zone} --accelerator-type={acc_type} --version=v2-alpha-tpuv6e'
-
+        base_cmd = f"gcloud compute tpus tpu-vm create {tpu} --zone={zone} --accelerator-type={acc_type} --version=v2-alpha-tpuv6e"
+    else:
+        base_cmd = f"gcloud compute tpus tpu-vm create {tpu} --zone={zone} --accelerator-type={acc_type} --version=tpu-ubuntu2204-base"
     if preemptible:
-        cmd += " --preemptible"
-    try:
-        subprocess.run(cmd, shell=True, timeout=600, check=True, stdout=subprocess.DEVNULL)
-    except subprocess.TimeoutExpired:
-        print(f"{FAIL} apply_{info_str}: applying TPU timed out")
-        return 'timeout'
+        base_cmd += " --preemptible"
+    if spot:
+        base_cmd += " --spot"
 
+    start_time = time.time()
+    attempt = 0
+
+    while True:
+        attempt += 1
+        cmd_timeout = 600
+        try:
+            subprocess.run(base_cmd, shell=True, timeout=cmd_timeout, check=True, stdout=subprocess.DEVNULL)
+            break  # success
+        except subprocess.CalledProcessError as e:
+            print(f"{FAIL} apply_{info_str}: TPU creation failed (attempt {attempt}) with return code {e.returncode}")
+        except subprocess.TimeoutExpired:
+            print(f"{FAIL} apply_{info_str}: applying TPU timed out")
+            return 'timeout'
+
+        # if no repeat_time → only try once
+        if repeat_time is None:
+            return 'create failed'
+
+        # check repeat_time limit
+        if (time.time() - start_time) > repeat_time - cmd_timeout:
+            print(f"{FAIL} apply_{info_str}: repeat_time {repeat_time}s exceeded, giving up")
+            return 'timeout'
+
+        print(f"{INFO} Retrying TPU creation in {retry_interval}s...")
+
+        time.sleep(retry_interval + random.randint(0, 10))
+
+    # short pause before querying state
     time.sleep(5)
-    
+
     cmd = f"gcloud compute tpus describe {tpu} --zone={zone} --format='value(state)'"
     try:
         state = subprocess.check_output(cmd, shell=True).decode().strip()
     except subprocess.CalledProcessError:
         print(f"{FAIL} apply_{info_str}: Failed to query TPU state")
         return 'describe failed'
-    
+
     if state == 'READY':
         print(f"{GOOD} Now, TPU VM {tpu} is good, ready to use")
 
@@ -247,24 +272,21 @@ def apply_tpu(tpu, preemptible, delete=True):
         tpu_info['other_note'] = f'{get_edt_time_str()}'
         write_sheet_info(tpu_info)
 
-        # mount the disk
         print(f"{INFO} Mounting disk in TPU {tpu}...")
-        res = mount_disk(tpu, quiet = True)
+        res = mount_disk(tpu, quiet=True)
         if res != 'success':
             print(f"{FAIL} apply_{info_str}: mounting disk {res}")
             return f'mount {res}'
-        
+
         print(f"{GOOD} apply_{info_str}: TPU {tpu} is good to use!")
-        
         return 'success'
-    
     else:
         print(f"{FAIL} apply_{info_str}: TPU {tpu} not ready, state: {state}")
         return 'unknown'
 
 def delete_tpu(tpu):
     print(f"{INFO} delete_tpu: Deleting TPU {tpu}...")
-    zone, pre, tpu = get_zone_pre(tpu)
+    zone, pre, spot, tpu = get_zone_pre_spot(tpu)
     if zone is None: return
     status = check_tpu_status(tpu, quiet=True)
     if status == 'failed':
@@ -284,7 +306,7 @@ def check_tpu_status(tpu, quiet = False):
     Check whether a TPU is preempted or not.
     return value: ['no tpu found', 'preempted', 'terminated', 'creating', 'ready', 'failed']
     """
-    zone, pre, tpu = get_zone_pre(tpu)
+    zone, pre, spot, tpu = get_zone_pre_spot(tpu)
     if zone is None: return 'no tpu found'
     cmd = f"gcloud compute tpus describe {tpu} --zone={zone} --format='value(state)'"
     try:
@@ -301,7 +323,7 @@ def check_tpu_running(tpu, quiet = True):
     Check whether a TPU is running or not.
     return value: ['running', 'free', 'failed']
     """
-    zone, pre, tpu = get_zone_pre(tpu)
+    zone, pre, spot, tpu = get_zone_pre_spot(tpu)
     if zone is None: return
     cmd = f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --worker=all --command \"sudo lsof -w /dev/accel0\" "
     try:
@@ -336,7 +358,7 @@ def describe_tpu(tpu, quiet = False):
     Describe the TPU.
     Return value: ['no tpu found', 'preempted', 'test env failed', 'file error', 'unknown', 'running', 'free', 'failed']
     """
-    zone, pre, tpu = get_zone_pre(tpu)
+    zone, pre, spot, tpu = get_zone_pre_spot(tpu)
     if zone is None: 
         print(f"{FAIL} describe_tpu: TPU {tpu} not found")
         return 'no tpu found'
@@ -414,7 +436,7 @@ def check_env(tpu, quiet = False):
     Check if the environment in the TPU is good.
     Return value: ['no tpu found', 'success', 'failed', 'file error', 'unknown', 'timeout', 'occupied']
     """
-    zone, pre, tpu = get_zone_pre(tpu)
+    zone, pre, spot, tpu = get_zone_pre_spot(tpu)
     if zone is None: return 'no tpu found'
     data = read_data()
     conda_env = data["conda_env_name"]
@@ -462,7 +484,7 @@ def mount_disk(tpu, quiet = False):
     """
     Mount the disk and setup remote wandb.
     """
-    zone, pre, tpu = get_zone_pre(tpu)
+    zone, pre, spot, tpu = get_zone_pre_spot(tpu)
     if zone is None: return
     print(f"{INFO} Mounting disk in TPU {tpu}...")
 
@@ -534,7 +556,7 @@ def mount_disk(tpu, quiet = False):
         return 'checking env failed'
 
 def test_remote(tpu):
-    zone, pre, tpu = get_zone_pre(tpu)
+    zone, pre, spot, tpu = get_zone_pre_spot(tpu)
     if zone is None: return
     print(f"{INFO} Testing remote TPU {tpu} in zone {zone}...")
     print(f"{INFO} Do you want python test? (y/n)")
@@ -584,7 +606,7 @@ def test_remote(tpu):
     return 'success'
     
 def restart(tpu):
-    zone, pre, tpu = get_zone_pre(tpu)
+    zone, pre, spot, tpu = get_zone_pre_spot(tpu)
 
     print(f"{INFO} Rebooting {tpu}... This may take a while...")
 
