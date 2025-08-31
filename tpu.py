@@ -68,7 +68,8 @@ if __name__ == '__main__':
         ############### JOBS that don't require a user ###############
         if cmd == 'tldr': desc.tldr()
         # elif cmd == 'docs' or cmd == 'doc': desc.full_doc()
-        if cmd == 'vq': queue.visualize_queue()
+        if cmd == 'vq': queue.visualize_queue() if len(args) < 3 else queue.visualize_queue(user = args[2])
+        elif cmd == 'dqr': queue.dequeue_and_run(args[2], args[3])
         elif cmd == 'ssn': sheet.set_spreadsheet_notes(args[2], args[3])
         elif cmd == 'asn': sheet.add_spreadsheet_notes(args[2], args[3])
         elif cmd == 'change-ip': handler.change_ip()

@@ -1,4 +1,4 @@
-import json, os
+import json, os, hashlib
 from .helpers import *
 from .constants import *
 
@@ -31,9 +31,25 @@ def autenticate(command):
     username = input('Enter username: ')
     password = input('Enter password: ')
     for entry in passwords:
-        if entry['user'] == username and entry['password'] == password:
+        if entry['user'] == username and entry['password'] == password_hash(password):
             print(f"{GOOD} Authentication successful for user {username}.")
             return entry['priority']
     print(f"{FAIL} Authentication failed for user {username}.")
     return 0
+
+def add_user_password_priority(username, password, priority):
+    passwords = get_passwords()
+    for entry in passwords:
+        if entry['user'] == username:
+            print(f"{FAIL} User {username} already exists.")
+            return False
+    passwords.append({'user': username, 'password': password_hash(password), 'priority': priority})
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    auth_file_path = os.path.join(current_dir, 'authentication.json')
+    with open(auth_file_path, 'w') as file:
+        json.dump(passwords, file, indent=4)
+    print(f"{GOOD} User {username} added successfully.")
+    return True
     
+def password_hash(password):
+    return hashlib.sha256(password.encode()).hexdigest()

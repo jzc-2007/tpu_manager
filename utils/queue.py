@@ -110,6 +110,40 @@ def ack_queue(ack_information):
         # optional: print(f"{FAIL} ack_queue: error {e}")
         release_lock_queue()
 
+def dequeue_and_run(task_id, tpu):
+    """
+    Find the task with other_info.task_id == task_id, remove it from the queue,
+    and run it on the specified TPU.
+    """
+    zone, _, tpu = get_zone_pre(tpu)
+    queue = read_and_lock_queue()
+    try:
+        target = str(task_id)
+        task_to_run = None
+        idx_to_del: Optional[int] = None
+
+        for i, task_dict in enumerate(queue):
+            other = task_dict.get("other_info", {}) or {}
+            task_id_in_dict = other.get("task_id")
+            if task_id_in_dict is None:
+                continue
+            if str(task_id_in_dict) == target:
+                task_to_run = Task.from_dict(task_dict)
+                idx_to_del = i
+                break
+
+        if task_to_run is not None and idx_to_del is not None:
+            del queue[idx_to_del]
+            write_and_unlock_queue(queue)
+            run_job_on_tpu(task_to_run.job, tpu, quiet=False)
+        else:
+            release_lock_queue()
+            print(f"{FAIL} dequeue_and_run: task {task_id} not found in queue")
+
+    except Exception as e:
+        release_lock_queue()
+        print(f"{FAIL} dequeue_and_run: error running task {task_id} on TPU {tpu}: {e}")
+
 
 def update_staging_info(task_id, stage_dir, stage_time):
     queue = read_and_lock_queue()
@@ -438,7 +472,7 @@ def Queue(user_obj, args):
 
     print(f"{GOOD} Queue: Successfully starting staging in tmux window queue:{unique_id}")
 
-def visualize_queue(limit: int = None, truncate_tpus: int = 6, return_rows: bool = False):
+def visualize_queue(limit: int = None, truncate_tpus: int = 6, return_rows: bool = False, user = None):
     """
     Pretty-print the current queue:
       - time  (prefer stage_time, else queue_time)
@@ -451,6 +485,7 @@ def visualize_queue(limit: int = None, truncate_tpus: int = 6, return_rows: bool
         limit: if set, show at most this many rows (from the front of the queue).
         truncate_tpus: max TPUs to show before collapsing to "... (+N)".
         return_rows: if True, also return the list of row dicts for programmatic use.
+        user: optional user filter to display only the tasks for a specific user.
 
     Returns:
         If return_rows=True, returns the list of dict rows rendered.
@@ -460,6 +495,8 @@ def visualize_queue(limit: int = None, truncate_tpus: int = 6, return_rows: bool
     try:
         # snapshot for rendering
         queue_snapshot = list(q[:limit]) if limit is not None else list(q)
+        if user is not None:
+            queue_snapshot = [task for task in queue_snapshot if task.get("user") == user]
     finally:
         # we didn't modify, so just release; do NOT call write_and_unlock_queue
         release_lock_queue()

@@ -212,9 +212,8 @@ def apply_tpu(tpu, preemptible, delete=True):
         raise ValueError(f"{FAIL} apply_{info_str}: Unknown TPU type {tpu}")
     
     if delete:
-        delete_tpu(tpu)
         try:
-            subprocess.run(cmd.split(), timeout=300, check=True, stdout=subprocess.DEVNULL)
+            delete_tpu(tpu)
         except subprocess.CalledProcessError as e:
             print(f"{WARNING} apply_{info_str}: TPU deletion failed: {e}")
             

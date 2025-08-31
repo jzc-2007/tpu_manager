@@ -119,6 +119,7 @@ def create_user():
     except Exception as e:
         print(f"{RED}[Error] {NC}{e}")
         print(f"{FAIL} create_user: Creating user {name} failed")
+    finally:
         release_lock_data()
 
     # kill the tmux session if it exists

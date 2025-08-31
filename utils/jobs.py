@@ -1072,12 +1072,9 @@ def run_job_on_tpu(job: Job, tpu, quiet = True, ignore_window = None):
 
     except Exception as e:
         print(f"{FAIL} run_job_on_tpu: Failed to run job for user {user_obj.name}, error: {e}")
-        release_lock_data()
 
     except KeyboardInterrupt:
         print(f"{INFO} run_job_on_tpu: Stopping ...")
-        release_lock_data()
-        return
 
     finally:
         release_lock_data()
