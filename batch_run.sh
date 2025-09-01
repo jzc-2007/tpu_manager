@@ -1,3 +1,4 @@
-bash apply_tpu.sh v5-32-p &
-bash apply_tpu.sh v5-32-p2 &
-bash apply_tpu.sh v5-32-p4 &
+python /home/jzc/zhichengjiang/working/xibo_tpu_manager/tpu.py mount-disk sy5 &
+python /home/jzc/zhichengjiang/working/xibo_tpu_manager/tpu.py mount-disk sy6 &
+python /home/jzc/zhichengjiang/working/xibo_tpu_manager/tpu.py mount-disk sy7 &
+python /home/jzc/zhichengjiang/working/xibo_tpu_manager/tpu.py mount-disk sy8 &

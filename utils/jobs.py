@@ -3,7 +3,7 @@ from .helpers import *
 from .constants import *
 from . import users
 from .data_io import read_and_lock_data, write_and_unlock_data, release_lock_data, read_data, read_and_lock_legacy, write_legacy, write_and_unlock_legacy, release_lock_legacy
-from .operate import check_tpu_status, apply_tpu, kill_jobs_tpu, restart, check_tpu_running
+from .operate import check_tpu_status, apply_and_set_env, kill_jobs_tpu, restart, check_tpu_running
 from .sheet import get_tpu_info_sheet, write_sheet_info, read_tpu_info_from_type, find_tpu_from_type
 from .logger import get_wandb_notes
 from .autenticate import autenticate
@@ -268,7 +268,7 @@ def resume_rerun_job(job, new_tpu = None, load_ckpt = True):
             tpu_status = check_tpu_status(tpu)
             if tpu_status == 'preempted':
                 print(f"{WARNING} {operation}_job: TPU {tpu} is preempted, trying to reapply...")
-                res = apply_tpu(tpu, preemptible=True, delete=True)
+                res = apply_and_set_env(tpu, preemptible=True, delete=True)
                 if res == 'success':
                     print(f"{GOOD} {operation}_job: Reapply TPU {tpu} done")
                 else:
@@ -589,7 +589,7 @@ def run(user_obj, args):
                     REAPPLY = False
             if not REAPPLY: return
             try:
-                apply_tpu(tpu, preemptible=True, delete=True)
+                apply_and_set_env(tpu, preemptible=True, delete=True)
             except Exception as e:
                 print(f"{FAIL} run: Failed to reapply TPU {tpu}: {e}")
                 return
@@ -607,7 +607,7 @@ def run(user_obj, args):
             res = input()
             if res == 'y' or res == 'Y':
                 print(f"{INFO} run: Re-applying TPU {tpu}...")
-                try: apply_tpu(tpu, preemptible=True, delete=False)
+                try: apply_and_set_env(tpu, preemptible=True, delete=False)
                 except Exception as e:
                     print(f"{FAIL} run: Failed to reapply TPU {tpu}: {e}")
                     return

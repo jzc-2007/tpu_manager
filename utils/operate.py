@@ -180,24 +180,32 @@ def set_wandb(tpu):
 def apply(args):
     if '-norm' in args:
         tpu = args[1] if args[0] == '-norm' else args[0]
-        return apply_tpu(tpu, preemptible=False, delete=False)
+        return apply_and_set_env(tpu, preemptible=False, delete=False)
     else:
-        return apply_tpu(args[0], preemptible=True, delete=False)
+        return apply_and_set_env(args[0], preemptible=True, delete=False)
+
+def apply_until_success(args):
+    if '-norm' in args:
+        tpu = args[1] if args[0] == '-norm' else args[0]
+        return apply_and_set_env(tpu, preemptible=False, delete=False, repeat_time = 36000)
+    else:
+        return apply_and_set_env(args[0], preemptible=True, delete=False, repeat_time = 36000)
     
 def reapply(args):
     if '-norm' in args:
         tpu = args[1] if args[0] == '-norm' else args[0]
-        return apply_tpu(tpu, preemptible=False, delete=True)
+        return apply_and_set_env(tpu, preemptible=False, delete=True)
     else:
-        return apply_tpu(args[0], preemptible=True, delete=True)
+        return apply_and_set_env(args[0], preemptible=True, delete=True)
 
-def apply_tpu(tpu, preemptible = False, spot = False, delete=True, repeat_time=None, retry_interval=10):
+def apply_and_set_env(tpu, preemptible = False, spot = False, delete=True, repeat_time=None, retry_interval=20):
     info_str = 'pre' if preemptible else 'norm'
     zone, pre, spot, tpu = get_zone_pre_spot(tpu)
+    print(zone, pre, spot, tpu, preemptible)
     if zone is None:
         return
-    if pre != (preemptible or spot):
-        print(f"{FAIL} apply_tpu: TPU {tpu} in zone {zone} is not {info_str}")
+    if preemptible != (pre or spot):
+        print(f"{FAIL} apply_and_set_env: TPU {tpu} in zone {zone} is not {info_str}")
         return
     if not delete:
         print(f"{INFO} Apply TPU {tpu} in zone {zone}...")
@@ -243,11 +251,13 @@ def apply_tpu(tpu, preemptible = False, spot = False, delete=True, repeat_time=N
 
         # if no repeat_time → only try once
         if repeat_time is None:
+            raise NotADirectoryError(f'xibo 活着. create failed')
             return 'create failed'
 
         # check repeat_time limit
         if (time.time() - start_time) > repeat_time - cmd_timeout:
             print(f"{FAIL} apply_{info_str}: repeat_time {repeat_time}s exceeded, giving up")
+            raise NotADirectoryError(f'xibo 活着. timeout')
             return 'timeout'
 
         print(f"{INFO} Retrying TPU creation in {retry_interval}s...")

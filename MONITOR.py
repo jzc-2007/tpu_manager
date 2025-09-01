@@ -65,7 +65,7 @@ def check_job_status(job):
 def reapply_worker(ka, result_queue):
     sys.stdout = open(os.devnull, 'w')
     try:
-        result = operate.apply_tpu(ka, preemptible=True, delete=True)
+        result = operate.apply_and_set_env(ka, preemptible=True, delete=True)
         if result == 'success':
             print(f"{GOOD} reapply_worker: Reapply TPU {ka} done")
             add_MONITOR_log(f"{GOOD} reapply_worker: Reapply TPU {ka} done")
