@@ -201,7 +201,7 @@ def reapply(args):
 def apply_and_set_env(tpu, preemptible = False, spot = False, delete=True, repeat_time=None, retry_interval=20):
     info_str = 'pre' if preemptible else 'norm'
     zone, pre, spot, tpu = get_zone_pre_spot(tpu)
-    print(zone, pre, spot, tpu, preemptible)
+    # print(zone, pre, spot, tpu, preemptible)
     if zone is None:
         return
     if preemptible != (pre or spot):
@@ -236,6 +236,8 @@ def apply_and_set_env(tpu, preemptible = False, spot = False, delete=True, repea
 
     start_time = time.time()
     attempt = 0
+
+    print(f'cmd:{base_cmd}')
 
     while True:
         attempt += 1
