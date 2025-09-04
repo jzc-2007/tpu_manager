@@ -201,7 +201,7 @@ def reapply(args):
 def apply_and_set_env(tpu, preemptible = False, spot = False, delete=True, repeat_time=None, retry_interval=20):
     info_str = 'pre' if preemptible else 'norm'
     zone, pre, spot, tpu = get_zone_pre_spot(tpu)
-    # print(zone, pre, spot, tpu, preemptible)
+    print(zone, pre, spot, tpu, preemptible)
     if zone is None:
         return
     if preemptible != (pre or spot):
@@ -229,7 +229,7 @@ def apply_and_set_env(tpu, preemptible = False, spot = False, delete=True, repea
         base_cmd = f"gcloud compute tpus tpu-vm create {tpu} --zone={zone} --accelerator-type={acc_type} --version=v2-alpha-tpuv6e"
     else:
         base_cmd = f"gcloud compute tpus tpu-vm create {tpu} --zone={zone} --accelerator-type={acc_type} --version=tpu-ubuntu2204-base"
-    if preemptible:
+    if preemptible and (not spot):
         base_cmd += " --preemptible"
     if spot:
         base_cmd += " --spot"

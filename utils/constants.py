@@ -12,7 +12,7 @@ RED, GREEN, YELLOW, PURPLE, NC = "\033[1;31m", "\033[1;32m", "\033[1;33m", "\033
 GOOD, INFO, WARNING, FAIL = f"{GREEN}[GOOD]{NC}", f"{PURPLE}[INFO]{NC}", f"{YELLOW}[WARNING]{NC}", f"{RED}[FAIL]{NC}"
 LOG = f"{PURPLE}[LOG]{NC}"
 
-NAME_TO_TYPE = {'v2-8':'v2-8','v2-32':'v2-32','v2-64':'v2-64','v2-128':'v2-128','v3-8':'v3-8','v3-32':'v3-32','v3-64':'v3-64','v3-128':'v3-128','v4-8':'v4-8','v4-32':'v4-32','v4-64':'v4-64','v4-128':'v4-128','v5e-8':'v5litepod-8','v5e-16':'v5litepod-16','v5e-32':'v5litepod-32','v5e-64':'v5litepod-64','v6e-8':'v6litepod-8','v6e-16':'v6litepod-16','v6e-32':'v6litepod-32','v6e-64':'v6litepod-64'}
+NAME_TO_TYPE = {'v2-8':'v2-8','v2-32':'v2-32','v2-64':'v2-64','v2-128':'v2-128','v3-8':'v3-8','v3-32':'v3-32','v3-64':'v3-64','v3-128':'v3-128','v4-8':'v4-8','v4-32':'v4-32','v4-64':'v4-64','v4-128':'v4-128','v5e-8':'v5litepod-8','v5e-16':'v5litepod-16','v5e-32':'v5litepod-32','v5e-64':'v5litepod-64','v6e-8':'v6e-8','v6e-16':'v6e-16','v6e-32':'v6e-32','v6e-64':'v6e-64'}
 NAME_TO_VER = {'v2':'v2','v3':'v3','v4':'v4','v5e':'v5e','v6e':'v6e'}
 v2_list = ['v2-8', 'v2-16', 'v2-32', 'v2-64', 'v2-128']
 v3_list = ['v3-8', 'v3-16', 'v3-32', 'v3-64', 'v3-128']
