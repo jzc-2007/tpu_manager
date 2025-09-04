@@ -157,7 +157,8 @@ def set_wandb(tpu):
     data_root = "kmh-nfs-ssd-eu-mount" if 'eu' in zone else "kmh-nfs-us-mount"
     conda_path = f"/{data_root}/code/qiao/anaconda3/envs/{conda_env}/bin/python"
 
-    remote_cmd = f'{conda_path} -m wandb login {wandb_key}'
+    # remote_cmd = f'{conda_path} -m wandb login {wandb_key}'
+    remote_cmd = f'python -m wandb login {wandb_key}'
 
 
     cmd = f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --worker=all --command \"{remote_cmd}\" "
@@ -454,7 +455,8 @@ def check_env(tpu, quiet = False):
     conda_env = data["conda_env_name"]
     data_root = "kmh-nfs-ssd-eu-mount" if 'eu' in zone else "kmh-nfs-us-mount"
     conda_path = f"/{data_root}/code/qiao/anaconda3/envs/{conda_env}/bin/python"
-    cmd = f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --worker=all --command \"{conda_path} -c 'import jax; print(jax.devices())'\""
+    # cmd = f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --worker=all --command \"{conda_path} -c 'import jax; print(jax.devices())'\""
+    cmd = f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --worker=all --command \"python -c 'import jax; print(jax.devices())'\""
     if not quiet:
         print(f"{INFO} check_env: Checking environment in TPU {tpu}... This may take a while...")
     try:
@@ -599,7 +601,8 @@ def test_remote(tpu):
         conda_env = data["conda_env_name"]
         data_root = "kmh-nfs-ssd-eu-mount" if 'eu' in zone else "kmh-nfs-us-mount"
         conda_path = f"/{data_root}/code/qiao/anaconda3/envs/{conda_env}/bin/python"
-        cmd = f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --worker=all --command \"{conda_path} -c '{cmd}'\""
+        # cmd = f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --worker=all --command \"{conda_path} -c '{cmd}'\""
+        cmd = f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --worker=all --command \"python -c '{cmd}'\""
         try:
             result = subprocess.run(cmd, shell=True, timeout=300, check=True,
                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
