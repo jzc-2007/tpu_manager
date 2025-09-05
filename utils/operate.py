@@ -199,6 +199,13 @@ def reapply(args):
     else:
         return apply_and_set_env(args[0], preemptible=True, delete=True)
 
+def reapply_until_success(args):
+    if '-norm' in args:
+        tpu = args[1] if args[0] == '-norm' else args[0]
+        return apply_and_set_env(tpu, preemptible=False, delete=True, repeat_time = 36000)
+    else:
+        return apply_and_set_env(args[0], preemptible=True, delete=True, repeat_time = 36000)
+
 def apply_and_set_env(tpu, preemptible = False, spot = False, delete=True, repeat_time=None, retry_interval=20):
     info_str = 'pre' if preemptible else 'norm'
     zone, pre, spot, tpu = get_zone_pre_spot(tpu)
@@ -254,13 +261,13 @@ def apply_and_set_env(tpu, preemptible = False, spot = False, delete=True, repea
 
         # if no repeat_time → only try once
         if repeat_time is None:
-            raise NotADirectoryError(f'xibo 活着. create failed')
+            raise NotADirectoryError(f'xibo lives. create failed')
             return 'create failed'
 
         # check repeat_time limit
         if (time.time() - start_time) > repeat_time - cmd_timeout:
             print(f"{FAIL} apply_{info_str}: repeat_time {repeat_time}s exceeded, giving up")
-            raise NotADirectoryError(f'xibo 活着. timeout')
+            raise NotADirectoryError(f'xibo lives. timeout')
             return 'timeout'
 
         print(f"{INFO} Retrying TPU creation in {retry_interval}s...")

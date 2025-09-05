@@ -92,6 +92,7 @@ if __name__ == '__main__':
         elif cmd == 'check-rules': jobs.check_rules()
         elif cmd == 'upd-status-spreadsheet' or cmd == 'uss': operate.update_tpu_status_for_spreadsheet()
         elif cmd == 'reapply': operate.reapply(args[2:])
+        elif cmd == 'reapplyy': operate.reapply_until_success(args[2:])
         elif cmd == 'apply': operate.apply(args[2:])
         elif cmd == 'applyy': operate.apply_until_success(args[2:])
         elif cmd == 'delete': operate.delete_tpu(args[2])
