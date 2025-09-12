@@ -47,7 +47,7 @@ def read_sheet_info() -> dict:
             assert zone.startswith(env), f"line {i+1} zone {zone} does not start with env {env}"
 
             # print(running_status, user, user_note, script_note)
-            assert running_status in ['running', 'reserved', '闲的', '没了!'], f"line {i+1} running status {running_status} cannot be recognized"
+            assert running_status in ['running', 'reserved', 'reserved(error)', '闲的', '没了!'], f"line {i+1} running status {running_status} cannot be recognized"
             if running_status == '闲的':
                 running_status = 'free'
 
