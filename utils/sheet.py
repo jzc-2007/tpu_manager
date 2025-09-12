@@ -51,6 +51,9 @@ def read_sheet_info() -> dict:
             if running_status == '闲的':
                 running_status = 'free'
 
+            if running_status == 'reserved(error)':
+                running_status = 'reserved'
+
             if user == '闲的':
                 user = 'free'
 
