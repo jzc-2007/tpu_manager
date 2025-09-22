@@ -579,7 +579,7 @@ def finish_job(window):
         tpu = job['tpu']
         if tpu is not None:
             tpu_info = get_tpu_info_sheet(tpu)
-            tpu_info['running_status'] = 'reserved'
+            tpu_info['running_status'] = 'free'
             write_sheet_info(tpu_info)
         print(f"{INFO} finish_job: Finished job {window_num} in session {session_name}")
     except:
@@ -606,7 +606,7 @@ def fail_job(window):
         tpu = job['tpu']
         if tpu is not None:
             tpu_info = get_tpu_info_sheet(tpu)
-            tpu_info['running_status'] = 'reserved'
+            tpu_info['running_status'] = 'reserved(error)'
             write_sheet_info(tpu_info)
         print(f"{INFO} fail_job: Job {window_num} in session {session_name} failed")
     except:
