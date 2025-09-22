@@ -458,6 +458,12 @@ def check_env(tpu, quiet = False):
     """
     zone, pre, spot, tpu = get_zone_pre_spot(tpu)
     if zone is None: return 'no tpu found'
+
+    if 'v5' in tpu:
+        if not quiet:
+            print(f"{INFO} check_env: TPU {tpu} is v5, skipping environment check.")
+        return 'success'
+    
     data = read_data()
     conda_env = data["conda_env_name"]
     data_root = "kmh-nfs-ssd-eu-mount" if 'eu' in zone else "kmh-nfs-us-mount"

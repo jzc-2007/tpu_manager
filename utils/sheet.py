@@ -66,7 +66,7 @@ def read_sheet_info() -> dict:
                 if key in full_name:
                     tpu_type = NAME_TO_TYPE[key]
 
-            assert (tpu_version is not None) and (tpu_type is not None), f"line {i+1} tpu {tpu} name cannot be recognized"
+            assert (tpu_version is not None) and (tpu_type is not None), f"line {i+1} tpu {tpu} name cannot be recognized: {tpu_version}, {tpu_type}, {full_name}"
 
             tpu_information[full_name] = {
                 'zone': zone,
