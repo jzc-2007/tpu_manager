@@ -448,7 +448,7 @@ def describe_tpu(tpu, quiet = False):
             return 'unknown'
     elif res == 'timeout':
         if not quiet:
-            print(f"{FAIL} describe_tpu: Timeout expired")
+            print(f"{FAIL} describe_tpu: Timeout expired. This may probably because the TPU is deleted.")
         return 'timeout'
 
 def check_env(tpu, quiet = False):
@@ -557,6 +557,7 @@ def mount_disk(tpu, quiet = False):
     pip install diffusers dm-tree cached_property ml-collections
     pip install 'wandb==0.19.9'
     pip install gcsfs
+    pip install lpips-j==0.0.6
     "
     """
     try:
