@@ -110,6 +110,35 @@ def ack_queue(ack_information):
         # optional: print(f"{FAIL} ack_queue: error {e}")
         release_lock_queue()
 
+def run_queued_job(user_obj, args):
+    """
+    Run the queued job on the specified TPU in the queue.
+    First, check if the job's user is the same as the user_obj.
+    If not, print a warning and return.
+    If yes, check whether the TPU is allowed for the job, and if it is running, print a warning and return.
+    If the TPU is allowed and the job is not running, run the job on the TPU, and remove the job from the queue.
+
+    args:
+        - tpu: TPU full name to be run on
+    """
+    queue = read_and_lock_queue()
+    try:
+        tpu = args[0]
+        for i, task_dict in enumerate(queue):
+            task_obj = Task.from_dict(task_dict)
+            if task_obj.user == user_obj.name:
+                if tpu in task_obj.tpu_info['valid_tpu']:
+                    if check_tpu_status(tpu) == 'ready':
+                        run_job_on_tpu(task_obj.job, tpu, quiet=False)
+                        del queue[i]
+                        write_and_unlock_queue(queue)
+                    else:
+                        print(f"{FAIL} run_queued_job: TPU {tpu} is not ready")
+                    break
+    except Exception:
+        release_lock_queue()
+        print(f"{FAIL} run_queued_job: error running tasks on TPU {tpu}")
+
 def dequeue_and_run(task_id, tpu):
     """
     Find the task with other_info.task_id == task_id, remove it from the queue,
@@ -378,6 +407,12 @@ def remove_from_queue(number):
     write_and_unlock_queue(queue)
 
 def dequeue(user_obj, args):
+    """
+    Remove the tasks from the queue.
+    args:
+        - user_obj: User object
+        - args: list of task ids to remove, or '--all' to remove all tasks
+    """
     for number in args:
         if not is_integer(number) and number != '--all' and number != '*':
             continue
