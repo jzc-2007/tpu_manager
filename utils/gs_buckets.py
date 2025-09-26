@@ -12,6 +12,7 @@ def convert_to_gs(path):
     for k, v in {
         '/kmh-nfs-ssd-eu-mount/logs/sqa': 'gs://kmh-gcp/qiao_zhicheng_hanhong_files',
         '/kmh-nfs-us-mount/logs/sqa': 'gs://kmh-gcp-us-central2/qiao_zhicheng_hanhong_files',
+        '/kmh-nfs-ssd-us-mount/logs/sqa': 'gs://kmh-gcp-us-central2/qiao_zhicheng_hanhong_files',
     }.items():
         if path.startswith(k):
             return path.replace(k, v)

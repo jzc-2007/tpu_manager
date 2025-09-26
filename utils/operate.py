@@ -154,7 +154,7 @@ def set_wandb(tpu):
 
     data = read_data()
     wandb_key, conda_env = data["wandb_api_key"], data["conda_env_name"]
-    data_root = "kmh-nfs-ssd-eu-mount" if 'eu' in zone else "kmh-nfs-us-mount"
+    data_root = "kmh-nfs-ssd-eu-mount" if 'eu' in zone else "kmh-nfs-ssd-us-mount"
     conda_path = f"/{data_root}/code/qiao/anaconda3/envs/{conda_env}/bin/python"
 
     # remote_cmd = f'{conda_path} -m wandb login {wandb_key}'
@@ -466,7 +466,7 @@ def check_env(tpu, quiet = False):
     
     data = read_data()
     conda_env = data["conda_env_name"]
-    data_root = "kmh-nfs-ssd-eu-mount" if 'eu' in zone else "kmh-nfs-us-mount"
+    data_root = "kmh-nfs-ssd-eu-mount" if 'eu' in zone else "kmh-nfs-ssd-us-mount"
     conda_path = f"/{data_root}/code/qiao/anaconda3/envs/{conda_env}/bin/python"
     # cmd = f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --worker=all --command \"{conda_path} -c 'import jax; print(jax.devices())'\""
     cmd = f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --worker=all --command \"python -c 'import jax; print(jax.devices())'\""
@@ -529,16 +529,22 @@ def mount_disk(tpu, quiet = False):
       "
     '''
 
+    # sudo mkdir -p /kmh-nfs-ssd-eu-mount
+    # sudo mount -t nfs -o vers=3 10.150.179.250:/kmh_nfs_ssd_eu /kmh-nfs-ssd-eu-mount
+    # sudo chmod go+rw /kmh-nfs-ssd-eu-mount
+    # ls /kmh-nfs-ssd-eu-mount
+
     cmd2 = f"""
     gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --worker=all --command "
     sudo mkdir -p /kmh-nfs-us-mount
     sudo mount -t nfs -o vers=3 10.26.72.146:/kmh_nfs_us /kmh-nfs-us-mount
     sudo chmod go+rw /kmh-nfs-us-mount
     ls /kmh-nfs-us-mount
-    sudo mkdir -p /kmh-nfs-ssd-eu-mount
-    sudo mount -t nfs -o vers=3 10.150.179.250:/kmh_nfs_ssd_eu /kmh-nfs-ssd-eu-mount
-    sudo chmod go+rw /kmh-nfs-ssd-eu-mount
-    ls /kmh-nfs-ssd-eu-mount
+
+    sudo mkdir -p /kmh-nfs-ssd-us-mount
+    sudo mount -o vers=3 10.97.81.98:/kmh_nfs_ssd_us /kmh-nfs-ssd-us-mount
+    sudo chmod go+rw /kmh-nfs-ssd-us-mount
+    ls /kmh-nfs-ssd-us-mount
     "
 
     gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} \
@@ -612,7 +618,7 @@ def test_remote(tpu):
         cmd = input()    
         data = read_data()
         conda_env = data["conda_env_name"]
-        data_root = "kmh-nfs-ssd-eu-mount" if 'eu' in zone else "kmh-nfs-us-mount"
+        data_root = "kmh-nfs-ssd-eu-mount" if 'eu' in zone else "kmh-nfs-ssd-us-mount"
         conda_path = f"/{data_root}/code/qiao/anaconda3/envs/{conda_env}/bin/python"
         # cmd = f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --worker=all --command \"{conda_path} -c '{cmd}'\""
         cmd = f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --worker=all --command \"python -c '{cmd}'\""
