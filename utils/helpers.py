@@ -174,6 +174,7 @@ def display_tpu_information(tpu_information, style = None, **kwargs):
             print(f"{tpu_information[tpu]['alias']}({tpu_information[tpu]['user']})", end='; ')
         print()
     elif style == 'category_note':
+        print(tpu_information)
         free_tpus = [tpu for tpu, info in tpu_information.items() if info['running_status'] == 'free']
         reserved_tpus = [tpu for tpu, info in tpu_information.items() if info['running_status'] == 'reserved']
         running_tpus = [tpu for tpu, info in tpu_information.items() if info['running_status'] == 'running']

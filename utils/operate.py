@@ -157,8 +157,8 @@ def set_wandb(tpu):
     data_root = "kmh-nfs-ssd-eu-mount" if 'eu' in zone else "kmh-nfs-ssd-us-mount"
     conda_path = f"/{data_root}/code/qiao/anaconda3/envs/{conda_env}/bin/python"
 
-    # remote_cmd = f'{conda_path} -m wandb login {wandb_key}'
-    remote_cmd = f'python -m wandb login {wandb_key}'
+    remote_cmd = f'{conda_path} -m wandb login {wandb_key}'
+    # remote_cmd = f'python -m wandb login {wandb_key}'
 
 
     cmd = f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --worker=all --command \"{remote_cmd}\" "
@@ -468,8 +468,8 @@ def check_env(tpu, quiet = False):
     conda_env = data["conda_env_name"]
     data_root = "kmh-nfs-ssd-eu-mount" if 'eu' in zone else "kmh-nfs-ssd-us-mount"
     conda_path = f"/{data_root}/code/qiao/anaconda3/envs/{conda_env}/bin/python"
-    # cmd = f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --worker=all --command \"{conda_path} -c 'import jax; print(jax.devices())'\""
-    cmd = f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --worker=all --command \"python -c 'import jax; print(jax.devices())'\""
+    cmd = f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --worker=all --command \"{conda_path} -c 'import jax; print(jax.devices())'\""
+    # cmd = f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --worker=all --command \"python -c 'import jax; print(jax.devices())'\""
     if not quiet:
         print(f"{INFO} check_env: Checking environment in TPU {tpu}... This may take a while...")
     try:
@@ -547,25 +547,29 @@ def mount_disk(tpu, quiet = False):
     ls /kmh-nfs-ssd-us-mount
     "
 
-    gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} \
-    --worker=all --command "
-    sudo rm -rf /home/\$(whoami)/.local
-    echo 'Current dir: '
-    pwd
-    conda create -n NNX python==3.10.14 -y
-    conda activate NNX # These two lines are very smart. If on a device there is no conda, then these two lines error out, but the remaining can still be run.
-    pip install 'setuptools==69.5.1'
-    pip install jax[tpu]==0.4.37 -f https://storage.googleapis.com/jax-releases/libtpu_releases.html
-    pip install jaxlib==0.4.37 flax==0.10.2
-    # pip install -r requirements.txt # other tang dependencies
-    pip install pillow clu tensorflow==2.15.0 'keras<3' 'torch<=2.4' torchvision tensorflow_datasets matplotlib==3.9.2
-    pip install orbax-checkpoint==0.6.4 ml-dtypes==0.5.0 tensorstore==0.1.67
-    pip install diffusers dm-tree cached_property ml-collections
-    pip install 'wandb==0.19.9'
-    pip install gcsfs
-    pip install lpips-j==0.0.6
-    "
     """
+
+    # gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} \
+    # --worker=all --command "
+    # sudo rm -rf /home/\$(whoami)/.local
+    # echo 'Current dir: '
+    # pwd
+    # conda create -n NNX python==3.10.14 -y
+    # conda activate NNX # These two lines are very smart. If on a device there is no conda, then these two lines error out, but the remaining can still be run.
+    # pip install 'setuptools==69.5.1'
+    # pip install jax[tpu]==0.4.37 -f https://storage.googleapis.com/jax-releases/libtpu_releases.html
+    # pip install jaxlib==0.4.37 flax==0.10.2
+    # # pip install -r requirements.txt # other tang dependencies
+    # pip install pillow clu tensorflow==2.15.0 'keras<3' 'torch<=2.4' torchvision tensorflow_datasets matplotlib==3.9.2
+    # pip install orbax-checkpoint==0.6.4 ml-dtypes==0.5.0 tensorstore==0.1.67
+    # pip install diffusers dm-tree cached_property ml-collections
+    # pip install 'wandb==0.19.9'
+    # pip install gcsfs
+    # pip install lpips-j==0.0.6
+    # "
+
+
+
     try:
         download_process = \
             subprocess.run(cmd1, shell=True, timeout=600, check=True,\
@@ -620,8 +624,8 @@ def test_remote(tpu):
         conda_env = data["conda_env_name"]
         data_root = "kmh-nfs-ssd-eu-mount" if 'eu' in zone else "kmh-nfs-ssd-us-mount"
         conda_path = f"/{data_root}/code/qiao/anaconda3/envs/{conda_env}/bin/python"
-        # cmd = f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --worker=all --command \"{conda_path} -c '{cmd}'\""
-        cmd = f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --worker=all --command \"python -c '{cmd}'\""
+        cmd = f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --worker=all --command \"{conda_path} -c '{cmd}'\""
+        # cmd = f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --worker=all --command \"python -c '{cmd}'\""
         try:
             result = subprocess.run(cmd, shell=True, timeout=300, check=True,
                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
