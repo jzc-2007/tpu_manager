@@ -155,7 +155,7 @@ def set_wandb(tpu):
     data = read_data()
     wandb_key, conda_env = data["wandb_api_key"], data["conda_env_name"]
     data_root = "kmh-nfs-ssd-eu-mount" if 'eu' in zone else "kmh-nfs-ssd-us-mount"
-    conda_path = f"/{data_root}/code/qiao/anaconda3/envs/{conda_env}/bin/python"
+    conda_path = '/kmh-nfs-ssd-us-mount/code/eva/miniforge3/bin/python'
 
     remote_cmd = f'{conda_path} -m wandb login {wandb_key}'
     # remote_cmd = f'python -m wandb login {wandb_key}'
@@ -467,7 +467,7 @@ def check_env(tpu, quiet = False):
     data = read_data()
     conda_env = data["conda_env_name"]
     data_root = "kmh-nfs-ssd-eu-mount" if 'eu' in zone else "kmh-nfs-ssd-us-mount"
-    conda_path = f"/{data_root}/code/qiao/anaconda3/envs/{conda_env}/bin/python"
+    conda_path = '/kmh-nfs-ssd-us-mount/code/eva/miniforge3/bin/python'
     cmd = f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --worker=all --command \"{conda_path} -c 'import jax; print(jax.devices())'\""
     # cmd = f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --worker=all --command \"python -c 'import jax; print(jax.devices())'\""
     if not quiet:
@@ -623,7 +623,7 @@ def test_remote(tpu):
         data = read_data()
         conda_env = data["conda_env_name"]
         data_root = "kmh-nfs-ssd-eu-mount" if 'eu' in zone else "kmh-nfs-ssd-us-mount"
-        conda_path = f"/{data_root}/code/qiao/anaconda3/envs/{conda_env}/bin/python"
+        conda_path = '/kmh-nfs-ssd-us-mount/code/eva/miniforge3/bin/python'
         cmd = f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --worker=all --command \"{conda_path} -c '{cmd}'\""
         # cmd = f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --worker=all --command \"python -c '{cmd}'\""
         try:

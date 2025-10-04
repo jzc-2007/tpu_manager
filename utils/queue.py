@@ -646,6 +646,7 @@ def fail_job(window):
         print(f"{INFO} fail_job: Job {window_num} in session {session_name} failed")
     except:
         release_lock_data()
+        return False
 
     ack_queue({'tpu': tpu, 'status': 'failed', 'window':{'session': session_name, 'window': window_num}})
 
