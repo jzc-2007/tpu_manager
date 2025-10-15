@@ -303,6 +303,9 @@ def resume_rerun_job(job, new_tpu = None, load_ckpt = True):
 
         print(f"{INFO} {operation}_job: new job {new_job}")
 
+        # update spreadsheet info
+        
+
         write_and_unlock_data(data)
 
         tpu_info = get_tpu_info_sheet(tpu)
@@ -1300,7 +1303,6 @@ def clear_zombie_jobs(user_object):
                 new_jobs.append(job)
         data['users'][user_object.name]['job_data'] = new_jobs
         write_and_unlock_data(data)
-        
         legacy = read_and_lock_legacy()
         for job in all_jobs:
             if int(job['windows_id']) not in all_windows:

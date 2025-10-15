@@ -106,8 +106,11 @@ def ack_queue(ack_information):
             del queue[idx_to_del]
 
         write_and_unlock_queue(queue)
-    except Exception:
-        # optional: print(f"{FAIL} ack_queue: error {e}")
+
+    except Exception as e:
+        print(f"{FAIL} ack_queue: error {e}")
+
+    finally:
         release_lock_queue()
 
 def run_queued_job(user_obj, args):
@@ -120,13 +123,21 @@ def run_queued_job(user_obj, args):
 
     args:
         - tpu: TPU full name to be run on
+        - id: the id of the task to be run
+        - user_obj: User object
     """
     queue = read_and_lock_queue()
     try:
-        tpu = args[0]
+        # read the tpu and id from the args, tpu contains 'v?', where ? is a number between 0 and 9
+        # id is a pure integer
+        tpu = args[0] if 'v' in args[0] else args[1]
+        id = args[0] if is_integer(args[0]) else args[1]
+        assert is_integer(id), f"run_queued_job: id {id} is not an integer"
+
+        _, _, _, tpu = get_zone_pre_spot(tpu)
         for i, task_dict in enumerate(queue):
             task_obj = Task.from_dict(task_dict)
-            if task_obj.user == user_obj.name:
+            if task_obj.user == user_obj.name and str(task_obj.other_info['task_id']) == str(id):
                 if tpu in task_obj.tpu_info['valid_tpu']:
                     if check_tpu_status(tpu) == 'ready':
                         run_job_on_tpu(task_obj.job, tpu, quiet=False)
@@ -135,9 +146,10 @@ def run_queued_job(user_obj, args):
                     else:
                         print(f"{FAIL} run_queued_job: TPU {tpu} is not ready")
                     break
-    except Exception:
+    except Exception as e:
+        print(f"{FAIL} run_queued_job: error running tasks on TPU {tpu}: {e}")
+    finally:
         release_lock_queue()
-        print(f"{FAIL} run_queued_job: error running tasks on TPU {tpu}")
 
 def dequeue_and_run(task_id, tpu):
     """
@@ -166,12 +178,13 @@ def dequeue_and_run(task_id, tpu):
             write_and_unlock_queue(queue)
             run_job_on_tpu(task_to_run.job, tpu, quiet=False)
         else:
-            release_lock_queue()
             print(f"{FAIL} dequeue_and_run: task {task_id} not found in queue")
 
     except Exception as e:
-        release_lock_queue()
         print(f"{FAIL} dequeue_and_run: error running task {task_id} on TPU {tpu}: {e}")
+
+    finally:
+        release_lock_queue()
 
 
 def update_staging_info(task_id, stage_dir, stage_time):
@@ -186,7 +199,9 @@ def update_staging_info(task_id, stage_dir, stage_time):
                 task_dict.setdefault("job", {})["stage_dir"] = stage_dir
                 break
         write_and_unlock_queue(queue)
-    except Exception:
+    except Exception as e:
+        print(f"{FAIL} update_staging_info: error updating staging info for task {task_id}: {e}")
+    finally:
         release_lock_queue()
 
 
