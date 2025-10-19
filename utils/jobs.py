@@ -285,19 +285,22 @@ def resume_rerun_job(job, new_tpu = None, load_ckpt = True):
         # kill the old job
         kill_jobs_tpu(tpu)
 
+        # zhh: get zone for new script
+        zone, _, _, _ = get_zone_pre_spot(tpu)
+
         # create the tmux window
         os.system(f"tmux new-window -t {session_name}:{id}")
         time.sleep(0.5)
         os.system(f"tmux send-keys -t {session_name}:{id} 'cd {stage_dir}' Enter")
         if load_ckpt_path:
             if job.get("customized_settings", {}).get("log_stage", False):
-                os.system(f"tmux send-keys -t {session_name}:{id} 'source staging.sh ka={tpu} {config_args} --config.load_from={load_ckpt_path} --config.stage={new_stage}' Enter")
+                os.system(f"tmux send-keys -t {session_name}:{id} 'source staging.sh ka={tpu} zone={zone} {config_args} --config.load_from={load_ckpt_path} --config.stage={new_stage}' Enter")
                 new_job['extra_configs'] += f" --config.load_from={load_ckpt_path} --config.stage={new_stage}"
             else:
-                os.system(f"tmux send-keys -t {session_name}:{id} 'source staging.sh ka={tpu} {config_args} --config.load_from={load_ckpt_path}' Enter") 
+                os.system(f"tmux send-keys -t {session_name}:{id} 'source staging.sh ka={tpu} zone={zone} {config_args} --config.load_from={load_ckpt_path}' Enter") 
                 new_job['extra_configs'] += f" --config.load_from={load_ckpt_path}"
         else:
-            os.system(f"tmux send-keys -t {session_name}:{id} 'source staging.sh ka={tpu} {config_args}' Enter")
+            os.system(f"tmux send-keys -t {session_name}:{id} 'source staging.sh ka={tpu} zone={zone} {config_args}' Enter")
         
         print(f"{GOOD} {operation}_job: Successfully created job in tmux window {session_name}:{id}")
 
@@ -749,9 +752,11 @@ def run(user_obj, args):
             return
         os.system(f"tmux send-keys -t {session_name}:{window_id} 'cd {dir_path}' Enter")
         if tpu is None:
+            raise RuntimeError('zhh does not how to handle this case')
             os.system(f"tmux send-keys -t {session_name}:{window_id} 'source staging.sh {config_args}' Enter")
         else:
-            os.system(f"tmux send-keys -t {session_name}:{window_id} 'source staging.sh ka={tpu} {config_args}' Enter") 
+            zone, _, _, _ = get_zone_pre_spot(tpu)
+            os.system(f"tmux send-keys -t {session_name}:{window_id} 'source staging.sh ka={tpu} zone={zone} {config_args}' Enter") 
         
         print(f"{GOOD} run: Successfully created job in tmux window {session_name}:{window_id}")
 
@@ -953,7 +958,12 @@ def check_jobs(user_obj, args, config = None):
                         print(f"Status: {RED}File Error{NC}\nmsg: {msg}")
                         write_error_to_job(user_obj, job_data, 'file error')
                         ack_MONITOR()
+                    elif re.search(r'DEADLINE_EXCEEDED', last_line):
+                        print(f"Status: {RED}DEADLINE EXCEEDED{NC}\nmsg: {msg}")
+                        write_error_to_job(user_obj, job_data, 'deadline exceeded')
+                        ack_MONITOR()
                     else:
+                        # print(f"{RED}last line cut: {last_line}{NC}")
                         print(f"Status: {RED}Unknown Error{NC}\nmsg: {msg}")
                         write_error_to_job(user_obj, job_data, 'unknown')
                         ack_MONITOR()

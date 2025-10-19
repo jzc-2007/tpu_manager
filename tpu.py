@@ -114,6 +114,7 @@ if __name__ == '__main__':
         elif cmd == 'rel' or cmd == 'release': sheet.release_tpu(args[2:])
         elif cmd == 'clean-eu': clean.clean_eu(safe = ('-f' not in args), quiet = ('-q' in args))
         elif cmd == 'clean-us': clean.clean_us(safe = ('-f' not in args), quiet = ('-q' in args))
+        elif cmd == 'kill-remote': operate.kill_jobs_tpu(args[2]) # kill a tpu.
 
         # ------------ For development only ------------
         elif cmd == 'test': operate.test_remote(args[2])
