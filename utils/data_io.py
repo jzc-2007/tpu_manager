@@ -85,6 +85,7 @@ def write_legacy(legacy):
 def read_and_lock_legacy():
     num_ack = 0
     while True:
+        print(num_ack)
         num_ack += 1
         with open(LOCK_PATH, 'r') as file:
             lock = json.load(file)
@@ -95,11 +96,16 @@ def read_and_lock_legacy():
             break
         else:
             time.sleep(10)
+        print(num_ack)
         if num_ack > 180:
             print(f"{FAIL} read_and_lock_legacy: Lock not released after 30 mins, this may indicate a deadlock. Please check the lock file and release it manually.")
             raise Exception("Lock not released after 30 mins, this may indicate a deadlock. Please check the lock file and release it manually.")
-    with open(LEGACY_PATH, 'r') as file:
-        legacy = json.load(file)
+    try:
+        with open(LEGACY_PATH, 'r') as file:
+            legacy = json.load(file)
+    except Exception as e:
+        print(f"Error reading file: {e}")
+        legacy = []
     return legacy
 
 def release_lock_legacy():

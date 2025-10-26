@@ -518,6 +518,11 @@ def mount_disk(tpu, quiet = False):
     cmd1 = f'''
     gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --worker=all \
       --command "
+        systemctl status unattended-upgrades.service || true
+        ps -ef | grep unattended-upgrade | grep -v grep || true
+        systemctl stop unattended-upgrades || true
+        killall unattended-upgrade || true
+
         for i in {{1..3}}; do
           ps -ef | grep -i unattended | grep -v 'grep' | awk '{{print \\$2}}' | xargs -r sudo kill -9
           sleep 2

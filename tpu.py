@@ -144,6 +144,7 @@ if __name__ == '__main__':
             elif cmd == 'reset-settings': users.reset_settings(user_object)
             elif cmd == 'get-dir': print(dirs.get_dir(user_object, args[2]))
             elif cmd == 'check': jobs.check_jobs(user_object, args[2:])
+            elif cmd == 'check-simp': jobs.check_jobs_simp(user_object, args[2:])
             elif cmd == 'monitor': jobs.monitor_jobs(user_object, args[2:])
             elif cmd == 'kill-job' or cmd == '-kj' or cmd == '-k' or cmd == 'kill': jobs.kill_job_or_tpu(user_object, args[2:])
             elif cmd == 'run': jobs.run(user_object, args[2:])

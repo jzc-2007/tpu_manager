@@ -9,6 +9,248 @@ from .logger import get_wandb_notes
 from .autenticate import autenticate
 from .gs_buckets import check_gs_logdir_exists
 
+# --- ANSI helpers ---
+ANSI_RE = re.compile(r'\x1B\[[0-?]*[ -/]*[@-~]')
+
+def _strip_ansi(s: str) -> str:
+    return ANSI_RE.sub('', s)
+
+def _vis_len(s: str) -> int:
+    return len(_strip_ansi(s))
+
+def _ansi_ljust(s: str, width: int) -> str:
+    """Pad with spaces so the *visible* length becomes width."""
+    pad = max(0, width - _vis_len(s))
+    return s + (' ' * pad)
+
+# --- suppression (unchanged semantics, just using helpers) ---
+def _suppress_preview(text: str, limit: int) -> str:
+    """
+    If text (sans ANSI) exceeds 'limit', show prefix and '..(+N)' where N is hidden.
+    Example: 'this is a suppressed te..(+2)'
+    """
+    vis = _strip_ansi(text)
+    if len(vis) <= limit:
+        return text
+    kept = vis[:limit]
+    hidden = len(vis) - limit
+    return kept + f"..(+{hidden})"
+
+def _print_in_columns(blocks, num_columns=2, gap=" │ "):
+    """
+    Pretty print multiple text blocks as a table with full borders.
+
+    Each block is a list of lines (may include ANSI color).
+    """
+    import math
+
+    # safe fallbacks
+    from shutil import get_terminal_size
+    term_width = get_terminal_size((120, 20)).columns
+    col_width = (term_width - (num_columns - 1) * len(gap) - 4) // num_columns  # inner width
+
+    # utility: ANSI-safe pad
+    import re
+    ANSI = re.compile(r'\x1b\[[0-9;]*m')
+    def visible_len(s):
+        return len(ANSI.sub('', s))
+    def ansi_ljust(s, width):
+        return s + ' ' * max(0, width - visible_len(s))
+
+    # horizontal border pieces
+    horiz = "─" * col_width
+    top    = "┌" + "┬".join([horiz] * num_columns) + "┐"
+    mid    = "├" + "┼".join([horiz] * num_columns) + "┤"
+    bottom = "└" + "┴".join([horiz] * num_columns) + "┘"
+
+    # iterate rows of blocks
+    for i in range(0, len(blocks), num_columns):
+        row_blocks = blocks[i:i + num_columns]
+        if len(row_blocks) < num_columns:
+            row_blocks += [[] for _ in range(num_columns - len(row_blocks))]
+
+        # row height
+        h = max(len(b) for b in row_blocks)
+        if i == 0:
+            print(top)
+        for r in range(h):
+            line_parts = []
+            for b in row_blocks:
+                cell = b[r] if r < len(b) else ""
+                line_parts.append(ansi_ljust(cell, col_width))
+            print("│" + "│".join(line_parts) + "│")
+        if i + num_columns < len(blocks):
+            print(mid)
+        else:
+            print(bottom)
+
+
+
+def _kv_rows_to_block(rows):
+    """
+    rows: list of (key, value)
+    Returns list[str]; each line will be ANSI-padded to COL_WIDTH.
+    """
+    if not rows:
+        return [_ansi_ljust("(no info)", COL_WIDTH)]
+
+    # choose key column width
+    keyw = min(KEY_COL_MAX, max(KEY_COL_MIN, max(len(str(k)) for k, _ in rows)))
+    # value preview limit (visible chars)
+    val_limit = max(0, COL_WIDTH - keyw - 1)
+
+    lines = []
+    for k, v in rows:
+        v = "" if v is None else str(v)
+        v_show = _suppress_preview(v, val_limit).replace("\n", " ")
+        # compose the line; pad ANSI-aware to COL_WIDTH
+        line = f"{str(k):<{keyw}}: {v_show}"
+        lines.append(_ansi_ljust(line, COL_WIDTH))
+    return lines
+
+
+# ---------- render one job to rows ----------
+def _render_rows_for_job(job_data, msg, last_line, last_line_cut, config, user_obj):
+    # returns the rows (list of (key,value)) for this job, and may trigger side-effects like write_error_to_job/ack
+    rows = []
+    # Base guard
+    if (job_data.get("status") is None) or ('s' not in config):
+        return rows
+
+    status = job_data["status"]
+    # starting (no logdir yet)
+    if status == 'starting':
+        rows = [("Status", f"{WARNING}Don't have logdir yet{NC}")]
+        return rows
+
+    # error
+    if status == 'error':
+        err = job_data.get("error")
+        if err == 'preempted':
+            rows = [("Status", f"{RED}Preempted{NC}")]
+        elif err == 'OOM':
+            rows = [("Status", f"{RED}OOM{NC}")]
+        else:
+            rows = [("Status", f"{RED}Error{NC}")]
+        return rows
+
+    # killed
+    if status == 'killed':
+        rows = [("Status", f"{YELLOW}Killed{NC}")]
+        if 'v' in config:
+            rows.append(("msg", msg))
+        return rows
+
+    # resumed / rerunned
+    if status in ('resumed', 'rerunned'):
+        try:
+            child = job_data['extra_msgs']['child']
+        except Exception:
+            rows = [("Status", f"{RED}Failed to get child window id{NC}")]
+            child = None
+        rows += [
+            ("Status", f"{YELLOW}{job_data.get('error')}{NC}"),
+            ("State", f'{status}(child={child})')
+        ]
+        return rows
+
+    # finished
+    if status == 'finished':
+        rows = [("Status", f"{GREEN}Finished{NC}")]
+        return rows
+
+    # running / starting (detailed parsing)
+    if status in ('running', 'starting'):
+        # Error patterns
+        if (re.search(r'Job failed', last_line_cut) or
+            re.search(r'[eE]rror', last_line_cut) or
+            re.search(r'FAIL', last_line_cut)) and 's' in config:
+
+            if re.search(r'Allocation type', last_line):
+                rows = [("Status", f"{RED}OOM Error{NC}")]
+                write_error_to_job(user_obj, job_data, 'OOM')
+
+            elif re.search(r'GRPC [Ee]rror', last_line):
+                rows = [("Status", f"{RED}GRPC Error{NC}")]
+                write_error_to_job(user_obj, job_data, 'grpc')
+                ack_MONITOR()
+
+            elif re.search(r'python: No such file or directory', last_line):
+                rows = [("Status", f"{RED}File Error{NC}")]
+                write_error_to_job(user_obj, job_data, 'file error')
+                ack_MONITOR()
+
+            elif re.search(r'DEADLINE_EXCEEDED', last_line):
+                rows = [("Status", f"{RED}DEADLINE EXCEEDED{NC}")]
+                write_error_to_job(user_obj, job_data, 'deadline exceeded')
+                ack_MONITOR()
+
+            else:
+                rows = [("Status", f"{RED}Unknown Error{NC}")]
+                write_error_to_job(user_obj, job_data, 'unknown')
+                ack_MONITOR()
+            return rows
+
+        # Activity patterns
+        if (re.search(r'[cC]ompiling', last_line_cut) or
+            re.search(r'[cC]ompilation', last_line_cut) or
+            re.search(r'[cC]ompile', last_line_cut)) and 's' in config:
+            rows = [("Status", f"{GREEN}Compiling{NC}")]
+            if 'v' in config:
+                rows.append(("msg", msg))
+            return rows
+
+        if re.search(r'[sS]ampling ', last_line_cut) and 's' in config:
+            epoch = None
+            m1 = re.search(r'[eE]poch\s([0-9]{1,6})', last_line_cut)
+            m2 = re.search(r'ep=([0-9]){1,4}\.([0-9]){1,6}', last_line_cut)
+            if m1:
+                epoch = m1.group(1)
+            elif m2:
+                epoch = m2.group(0)[3:]
+            rows = [("Status", f"{GREEN}Sampling{NC}")]
+            if epoch is not None:
+                rows.append(("Epoch", f"{int(float(epoch))}"))
+            if 'v' in config:
+                rows.append(("msg", msg))
+            return rows
+
+        m_epoch1 = re.search(r'[eE]poch\s([0-9]{1,6})', last_line_cut)
+        if m_epoch1 and ('s' in config):
+            epoch = m_epoch1.group(1)
+            rows = [("Status", f"{GREEN}Running{NC}(ep={epoch})")]
+            if 'v' in config:
+                rows.append(("msg", msg))
+            return rows
+
+        m_epoch2 = re.search(r'ep\s*=\s*([0-9]){1,4}\.([0-9]){1,6}', last_line_cut)
+        if m_epoch2 and ('s' in config):
+            epoch = m_epoch2.group(0).split('=')[1].strip()
+            rows = [("Status", f"{GREEN}Running{NC}(ep={float(epoch):.2f})")]
+            if 'v' in config:
+                rows.append(("msg", msg))
+            return rows
+
+        if re.search(r'[iI]nitializing', last_line_cut) and 's' in config:
+            rows = [("Status", f"{GREEN}Initializing{NC}")]
+            if 'v' in config:
+                rows.append(("msg", msg))
+            return rows
+
+        if re.search(r'[sS]taging', last_line_cut) and 's' in config:
+            rows = [("Status", f"{GREEN}Staging{NC}")]
+            if 'v' in config:
+                rows.append(("msg", msg))
+            return rows
+
+        if 's' in config:
+            rows = [("Status", f"{YELLOW}Unknown{NC}")]
+            if 'v' in config:
+                rows.append(("msg", msg))
+            return rows
+
+    return rows
+
 class Job:
     def __init__(
         self,
@@ -310,10 +552,12 @@ def resume_rerun_job(job, new_tpu = None, load_ckpt = True):
         
 
         write_and_unlock_data(data)
-
+        spreadsheet_notes = new_job.get("extra_msgs", {}).get("spreadsheet_notes", None)
         tpu_info = get_tpu_info_sheet(tpu)
         tpu_info['running_status'] = 'running'
         tpu_info['user'] = user_obj.spreadsheet_name
+        tpu_info['user_note'] = spreadsheet_notes
+        print(f"{INFO} {operation}_job: Updating spreadsheet info: {tpu_info}")
         write_sheet_info(tpu_info)
 
 
@@ -725,7 +969,9 @@ def run(user_obj, args):
             'stage': 0,
             'monitor': monitor,
             'rules': copy.deepcopy(RULE_DICT[rule]),
-            'extra_msgs': {},
+            'extra_msgs': {
+                "spreadsheet_notes": spreadsheet_notes
+            },
             'customized_settings': customized_settings
         })
         # make sure that the tpu is ready
@@ -1004,6 +1250,102 @@ def check_jobs(user_obj, args, config = None):
                     # print(re.search(r'ep=([0-9]){1,4}\.([0-9]){1,6}', last_line_cut))
         print('-'*40)
 
+def check_jobs_simp(user_obj, args, config = None):
+    """
+    Print the status of all the jobs in the tmux session.
+    """
+
+    num_columns = 3
+
+    for arg in args:
+        if is_monitor_config(arg):
+            config = arg
+            break
+
+        if arg.startswith('col='):
+            num_columns = int(arg.split('=')[1])
+            continue
+                    
+    if config is None:
+        config = 'wst'
+
+    session_name = user_obj.tmux_name
+    job_blocks = []
+
+    windows = os.popen(f"tmux list-windows -t {session_name}").read().splitlines()
+
+    for window in windows:
+        window_id = window.split(':')[0]
+        window_name = window.split(':')[1].split(' ')[0]
+
+        # find job_data by window id
+        job_data = None
+        for job in user_obj.job_data:
+            if str(job.get('windows_id')) == str(window_id):
+                job_data = job
+                break
+
+        # If job not found in data
+        if job_data is None:
+            if window_id != '0' and 'w' in config:
+                # Make a minimal block for the 2-up view
+                rows = [("Window", f"{window_id}"),
+                        ("Info",   "NOT FOUND IN DATA")]
+                job_blocks.append(_kv_rows_to_block(rows))
+            # else: skip silently
+            continue
+        # ---------- Window meta rows (what you previously printed before status) ----------
+        rows_meta = []
+        if 'w' in config:
+            rows_meta.append(("Window", str(window_id)))
+
+            # Add rerun info if exists
+            father_job = None
+            try:
+                father_job = job_data['extra_msgs']['father']
+            except Exception:
+                father_job = None
+
+            if father_job is not None:
+                if job_data.get('stage') not in ('0', 0):
+                    rows_meta.append(("Resume", f"(father={father_job}, stage={job_data['stage']+1})"))
+                else:
+                    rows_meta.append(("Rerun", f"(father={father_job}, stage={job_data['stage']+1})"))
+
+        if 'd' in config:
+            try:
+                rows_meta.append(("DIR", job_data['job_dir'].split('/')[-1]))
+            except Exception:
+                rows_meta.append(("DIR", "(unknown)"))
+        if 't' in config:
+            try:
+                rows_meta.append(("TPU", job_data['tpu'][10:]))
+            except Exception:
+                rows_meta.append(("TPU", "(unknown)"))
+
+        # ---------- Capture pane & compute msg ----------
+        last_line = os.popen(f"tmux capture-pane -t {session_name}:{window_id} -p").read().rstrip()
+        show_length = user_obj.settings['show_length']
+        monitor_length = user_obj.settings['monitor_length']
+        monitor_verbose = user_obj.settings['monitor_verbose']  # kept for parity; not directly used here
+        last_line_cut = last_line[-monitor_length:]
+        msg = last_line_cut[-show_length:]
+
+        # ---------- Status rows via your helper (does side-effects like write_error_to_job/ack) ----------
+        # Assumes your helper implements suppression via _kv_rows_to_block/_suppress_preview:
+        rows_status = _render_rows_for_job(job_data, msg, last_line, last_line_cut, config, user_obj)
+
+        # If there was no status to show (e.g., 's' not in config), still add meta-only block if any meta exists
+        combined_rows = rows_meta + rows_status
+        if combined_rows:
+            block = _kv_rows_to_block(combined_rows)  # applies per-column preview + "..(+N)"
+            job_blocks.append(block)
+    # ---------- Print two columns for two jobs ----------
+    # Renders blocks 2-up, with a separator after each row of two
+    if job_blocks:
+        _print_in_columns(job_blocks, num_columns=num_columns)
+
+
 
 
 def kill_window(user_obj, args):
@@ -1111,7 +1453,7 @@ def monitor_jobs(user_obj, args):
     
     try:
         while True:
-            check_jobs(user_obj, args, config=config)
+            check_jobs_simp(user_obj, args, config=config)
             time.sleep(user_obj.settings['monitor_upd_time'])
             # clear the screen
             os.system('clear' if os.name == 'posix' else 'cls')
