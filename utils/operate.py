@@ -235,8 +235,11 @@ def apply_and_set_env(tpu, preemptible = False, spot = False, delete=True, repea
 
     if 'v6' in acc_type:
         base_cmd = f"gcloud compute tpus tpu-vm create {tpu} --zone={zone} --accelerator-type={acc_type} --version=v2-alpha-tpuv6e"
+    elif 'v5p' in acc_type:
+        base_cmd = f"gcloud compute tpus tpu-vm create {tpu} --zone={zone} --accelerator-type={acc_type} --version=v2-alpha-tpuv5"
     else:
         base_cmd = f"gcloud compute tpus tpu-vm create {tpu} --zone={zone} --accelerator-type={acc_type} --version=tpu-ubuntu2204-base"
+
     if preemptible and (not spot):
         base_cmd += " --preemptible"
     if spot:

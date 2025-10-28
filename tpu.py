@@ -66,31 +66,43 @@ if __name__ == '__main__':
         sys.exit(1)
     try:
         ############### JOBS that don't require a user ###############
+
+        # ------------ Docs and help ------------
         if cmd == 'tldr': desc.tldr()
         # elif cmd == 'docs' or cmd == 'doc': desc.full_doc()
-        if cmd == 'vq': queue.visualize_queue() if len(args) < 3 else queue.visualize_queue(user = args[2])
-        elif cmd == 'dqr': queue.dequeue_and_run(args[2], args[3])
-        elif cmd == 'ssn': sheet.set_spreadsheet_notes(args[2], args[3])
-        elif cmd == 'asn': sheet.add_spreadsheet_notes(args[2], args[3])
-        elif cmd == 'change-ip': handler.change_ip()
-        elif cmd == 'upd-log': jobs.upd_log(args[2], args[3], args[4], args[5], args[6]) #windows, log_dir, stage_dir, ka, time
-        elif cmd =='upd-staging-info': queue.upd_staging_info(args[2], args[3], args[4])
-        elif cmd == 'finish-job': queue.finish_job(args[2])
-        elif cmd == 'fail-job': queue.fail_job(args[2])
         elif cmd == 'help' or cmd == '-h': desc.explain(args[2])
-        elif cmd == 'add-tpu-alias' or cmd == '-ta' or cmd == '-ata': logger.add_tpu_alias(args[2], args[3])
-        elif cmd == 'add-applied-tpu' or cmd =='add-applied' or cmd == '-atpu' or cmd == 'register': logger.register_tpu()
-        elif cmd == 'del-registered' or cmd == 'del-register' or cmd == 'del-info' or cmd == 'del-reg': logger.del_registered_tpu(args[2])
-        elif cmd == 'check-status' or cmd == '-cktpu': print(operate.check_tpu_status(args[2]))
-        elif cmd == 'describe' or cmd == '-dtpu': operate.describe_tpu(args[2])
-        elif cmd == '-lta' or cmd == '-sta': logger.explain_tpu_aliases()
+
+        # ------------ Queue ------------
+        elif cmd == 'vq': queue.visualize_queue() if len(args) < 3 else queue.visualize_queue(user = args[2])
+        elif cmd == 'dqr': queue.dequeue_and_run(args[2], args[3])
+
+        # ------------ Users ------------
         elif cmd == 'add-user': users.create_user()
         elif cmd == 'del-user': users.del_user()
         elif cmd == 'check-env': operate.check_env(args[2])
         elif cmd == 'list-users' or cmd == '-lu': users.list_users()
         elif cmd == 'init': handler.initialization()
-        elif cmd == 'check-rules': jobs.check_rules()
+
+        # ------------ Job related ------------
+        elif cmd == 'ssn': sheet.set_spreadsheet_notes(args[2], args[3])
+        elif cmd == 'asn': sheet.add_spreadsheet_notes(args[2], args[3])
+
+        # ------------ Error Handling ------------
+        elif cmd == 'change-ip': handler.change_ip()
+        elif cmd == 'solve' or cmd == 'solve-env': handler.solve_env(args[2])
+
+        # ------------ Spreadsheet Operations ------------
         elif cmd == 'upd-status-spreadsheet' or cmd == 'uss': operate.update_tpu_status_for_spreadsheet()
+
+        # ------------ TPU registration ------------
+        elif cmd == 'add-tpu-alias' or cmd == '-ta' or cmd == '-ata': logger.add_tpu_alias(args[2], args[3])
+        elif cmd == 'add-applied-tpu' or cmd =='add-applied' or cmd == '-atpu' or cmd == 'register': logger.register_tpu()
+        elif cmd == 'del-registered' or cmd == 'del-register' or cmd == 'del-info' or cmd == 'del-reg': logger.del_registered_tpu(args[2])
+
+        # ------------ Environment Operations ------------
+        elif cmd == 'check-status' or cmd == '-cktpu': print(operate.check_tpu_status(args[2]))
+        elif cmd == 'describe' or cmd == '-dtpu': operate.describe_tpu(args[2])
+        elif cmd == '-lta' or cmd == '-sta': logger.explain_tpu_aliases()
         elif cmd == 'reapply': operate.reapply(args[2:])
         elif cmd == 'reapplyy': operate.reapply_until_success(args[2:])
         elif cmd == 'apply': operate.apply(args[2:])
@@ -99,22 +111,31 @@ if __name__ == '__main__':
         elif cmd == 'restart': operate.restart(args[2])
         elif cmd == 'apply-norm': operate.apply_and_set_env(args[2], preemptible=False, delete=False)
         elif cmd == 'reapply-norm': operate.apply_and_set_env(args[2], preemptible=False, delete=True)
-        elif cmd == 'solve' or cmd == 'solve-env': handler.solve_env(args[2])
         elif cmd == 'mount-disk': operate.mount_disk(args[2])
         elif cmd == 'set-wandb': operate.set_wandb(args[2])
-        elif cmd == 'set-monitor-config' or cmd == '-smc': logger.set_monitor_config(args[2:])
-        elif cmd == 'get-monitor-config' or cmd == '-gmc': logger.get_monitor_config()
-        elif cmd == 'maj': jobs.monitor_all_jobs()
-        elif cmd == 'caj': jobs.check_all_jobs(args[2:])
-        elif cmd == 'lock-data': data_io.lock_data()
-        elif cmd == 'unlock-data': data_io.release_lock_data()
-        elif cmd == 'ack': jobs.ack_MONITOR()
-        # elif cmd == 'rs': sheet.read_sheet_info()
+        elif cmd == 'kill-remote': operate.kill_jobs_tpu(args[2])
         elif cmd == 'find': sheet.find_tpu_from_type(args[2:])
         elif cmd == 'rel' or cmd == 'release': sheet.release_tpu(args[2:])
         elif cmd == 'clean-eu': clean.clean_eu(safe = ('-f' not in args), quiet = ('-q' in args))
         elif cmd == 'clean-us': clean.clean_us(safe = ('-f' not in args), quiet = ('-q' in args))
-        elif cmd == 'kill-remote': operate.kill_jobs_tpu(args[2]) # kill a tpu.
+
+        # ------------ Monitoring ------------
+        elif cmd == 'set-monitor-config' or cmd == '-smc': logger.set_monitor_config(args[2:])
+        elif cmd == 'get-monitor-config' or cmd == '-gmc': logger.get_monitor_config()
+        elif cmd == 'maj': jobs.monitor_all_jobs()
+        elif cmd == 'caj': jobs.check_all_jobs(args[2:])
+
+
+        # ------------ Locking and unlocking ------------
+        elif cmd == 'lock-data': data_io.lock_data()
+        elif cmd == 'unlock-data': data_io.release_lock_data()
+
+        # ------------ Scripts Acknowledgment ------------
+        elif cmd == 'upd-log': jobs.upd_log(args[2], args[3], args[4], args[5], args[6]) #windows, log_dir, stage_dir, ka, time
+        elif cmd =='upd-staging-info': queue.upd_staging_info(args[2], args[3], args[4])
+        elif cmd == 'finish-job': queue.finish_job(args[2])
+        elif cmd == 'fail-job': queue.fail_job(args[2])
+        elif cmd == 'ack': jobs.ack_MONITOR()
 
         # ------------ For development only ------------
         elif cmd == 'test': operate.test_remote(args[2])
@@ -126,7 +147,6 @@ if __name__ == '__main__':
         elif cmd == 'debug-kill': develop.kill_jobs_tpu_new(args[2])
         elif cmd == 'gtis' or cmd == 'get-tpu-info-sheet': print(sheet.get_tpu_info_sheet(args[2]))
         elif cmd == 'twsi': unit_tests.test_write_sheet_info(args[2])
-        # ------------ End of development only ------------
 
         else: 
         ############### JOBS that require a user ###############
@@ -135,41 +155,54 @@ if __name__ == '__main__':
             if user is None: user = input_user(data)
             user = data['users'][user]
             user_object = users.user_from_dict(user)
+
+            # ------------ Directories ------------
             if cmd == 'set-cur': dirs.set_cur(user_object, args[2:])
             elif cmd == 'set-dir': dirs.set_dir(user_object, args[2:])
             elif cmd == 'del-dir': dirs.del_dir(user_object, args[2:])
             elif cmd == 'swap-dir': dirs.swap_dir(user_object, args[2:])
+            elif cmd == 'ls' or cmd == 'lsdir': dirs.list_dir(user_object, args[2:])
+
+            # ------------ Settings ------------
             elif cmd == 'get-settings': logger.get_settings(user_object)
             elif cmd == 'set-settings': logger.set_settings(user_object, args[2:])
             elif cmd == 'reset-settings': users.reset_settings(user_object)
             elif cmd == 'get-dir': print(dirs.get_dir(user_object, args[2]))
-            elif cmd == 'check': jobs.check_jobs(user_object, args[2:])
-            elif cmd == 'check-simp': jobs.check_jobs_simp(user_object, args[2:])
-            elif cmd == 'monitor': jobs.monitor_jobs(user_object, args[2:])
-            elif cmd == 'kill-job' or cmd == '-kj' or cmd == '-k' or cmd == 'kill': jobs.kill_job_or_tpu(user_object, args[2:])
-            elif cmd == 'run': jobs.run(user_object, args[2:])
-            elif cmd == 'queue': queue.Queue(user_object, args[2:])
-            elif cmd == 'resume': jobs.resume(user_object, args[2:])
-            elif cmd == 'rerun': jobs.rerun(user_object, args[2:])
-            # elif cmd == 'copy-cfg': dirs.read_job_config_to_file(user_object, args[2])
-            elif cmd == 'get-stage-dir': print(dirs.get_job_stage_dir(user_object, args[2]))
-            elif cmd == 'dequeue' or cmd == 'dq': queue.dequeue(user_object, args[2:])
-            elif cmd == 'dqr': queue.run_queued_job(user_object, args[2:])
-            elif cmd == 'ignore-error': jobs.ignore_error(user_object, args[2:])
-            elif cmd == 'restart-run': jobs.restart_run(user_object, args[2:])
-            elif cmd == 'ls' or cmd == 'lsdir': dirs.list_dir(user_object, args[2:])
-            elif cmd == 'kill-window' or cmd == '-kw': jobs.kill_window(user_object, args[2:])
             elif cmd == 'add-config-alias' or cmd == '-a' or cmd == '-alias': logger.add_config_alias(user_object, args[2:])
             elif cmd == 'show-config-alias' or cmd == '-sa' or cmd == '-la': logger.show_config_alias(user_object)
             elif cmd == 'del-config-alias': logger.del_config_alias(user_object, args[2:])
+
+            # ------------ Monitoring ------------
+            elif cmd == 'check': jobs.check_jobs(user_object, args[2:])
+            elif cmd == 'check-simp': jobs.check_jobs_simp(user_object, args[2:])
+            elif cmd == 'monitor': jobs.monitor_jobs(user_object, args[2:])
             elif cmd == 'add-tag': jobs.add_tag(user_object, args[2], args[3])
+
+            # ------------ Job Operations ------------
+            elif cmd == 'kill-job' or cmd == '-kj' or cmd == '-k' or cmd == 'kill': jobs.kill_job_or_tpu(user_object, args[2:])
+            elif cmd == 'run': jobs.run(user_object, args[2:])
+            elif cmd == 'resume': jobs.resume(user_object, args[2:])
+            elif cmd == 'rerun': jobs.rerun(user_object, args[2:])
+            elif cmd == 'get-stage-dir': print(dirs.get_job_stage_dir(user_object, args[2]))
+            elif cmd == 'kill-window' or cmd == '-kw': jobs.kill_window(user_object, args[2:])
+
+            # ------------ Queue Operations ------------
+            elif cmd == 'queue': queue.Queue(user_object, args[2:])
+            elif cmd == 'dequeue' or cmd == 'dq': queue.dequeue(user_object, args[2:])
+
+            # ------------ Cleaning ------------
             elif cmd == 'clear-finished': jobs.clear_finished_jobs(user_object)
             elif cmd == 'clear-error': jobs.clear_error_jobs(user_object)
-            elif cmd == 'clear-all' or cmd == 'clear': jobs.clear_all_jobs(user_object)
-            elif cmd == 'reset-window-num' or cmd == 'reset-window': users.reset_window_num(user_object, args[2:])
+            elif cmd == 'clear-all' or cmd == 'clear': jobs.clear_all_jobs(user_object)            
+            elif cmd == 'clean': jobs.clear_all_jobs(user_object, args[2:]), handler.clear_zombie_windows(user_object), jobs.clear_zombie_jobs(user_object)
             elif cmd == '-czw': handler.clear_zombie_windows(user_object)
             elif cmd == '-czj': jobs.clear_zombie_jobs(user_object)
-            elif cmd == 'clean': jobs.clear_all_jobs(user_object, args[2:]), handler.clear_zombie_windows(user_object), jobs.clear_zombie_jobs(user_object)
+
+            # ------------ Error Handling ------------
+            elif cmd == 'ignore-error': jobs.ignore_error(user_object, args[2:])
+
+            # ------------ Other Operations ------------
+            elif cmd == 'reset-window-num' or cmd == 'reset-window': users.reset_window_num(user_object, args[2:])
 
             else: print(f"{FAIL} Unknown command {cmd}")
     except Exception as e:

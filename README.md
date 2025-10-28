@@ -12,6 +12,18 @@ More usage in **two sentences**: Use ``tpu tldr`` to see useful commands, and ``
 
 **REMEMBER TO UPDATE YOUR SCRIPTS!**
 
+To use our scripts, your repo should have the following structure
+
+- utils
+    - remote_run_config.yml: includes a key called "wandb_notes" representing the notes you want to display on the spreadsheet
+    - ...
+- just_staging.sh
+- staging.sh
+- run_remote.sh
+- ka.sh
+
+The scripts can be found in ZHH's repo. Contact zhh24@mit.edu if you want them. The scripts uses wandb logging to detect. So make sure your code uses wandb for logging.
+
 ## Full docs
 
 <details>

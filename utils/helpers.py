@@ -119,6 +119,7 @@ def filter_tpu_information(tpu_information, **kwargs):
     """
     Filter the TPU information based on the specified criteria.
     Keys: ['zone', 'pre', 'belong', 'running_status', 'user', 'version', 'type']
+    Values: list of strings, boolean, integer, or just a string
     """
     filtered_tpu_information = {}
 
@@ -210,6 +211,4 @@ def get_all_tpus():
     all_tpu_list_ = list(set(all_tpu_list_))
     return all_tpu_list_
 
-def get_all_tpus_from_type(tpu_type):
-    all_tpu_list_ = get_all_tpus()
-    return [tpu for tpu in all_tpu_list_ if tpu_type in tpu]
+

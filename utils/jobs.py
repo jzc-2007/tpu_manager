@@ -117,26 +117,30 @@ def _render_rows_for_job(job_data, msg, last_line, last_line_cut, config, user_o
     if (job_data.get("status") is None) or ('s' not in config):
         return rows
 
+    # add tag if there is any tag in the job_data
+    if job_data.get("job_tags") is not None and 'T' not in config:
+        rows.append(("Tags", job_data.get("job_tags")))
+
     status = job_data["status"]
     # starting (no logdir yet)
     if status == 'starting':
-        rows = [("Status", f"{WARNING}Don't have logdir yet{NC}")]
+        rows += [("Status", f"{WARNING}Don't have logdir yet{NC}")]
         return rows
 
     # error
     if status == 'error':
         err = job_data.get("error")
         if err == 'preempted':
-            rows = [("Status", f"{RED}Preempted{NC}")]
+            rows += [("Status", f"{RED}Preempted{NC}")]
         elif err == 'OOM':
-            rows = [("Status", f"{RED}OOM{NC}")]
+            rows += [("Status", f"{RED}OOM{NC}")]
         else:
-            rows = [("Status", f"{RED}Error{NC}")]
+            rows += [("Status", f"{RED}Error{NC}")]
         return rows
 
     # killed
     if status == 'killed':
-        rows = [("Status", f"{YELLOW}Killed{NC}")]
+        rows += [("Status", f"{YELLOW}Killed{NC}")]
         if 'v' in config:
             rows.append(("msg", msg))
         return rows
@@ -146,7 +150,7 @@ def _render_rows_for_job(job_data, msg, last_line, last_line_cut, config, user_o
         try:
             child = job_data['extra_msgs']['child']
         except Exception:
-            rows = [("Status", f"{RED}Failed to get child window id{NC}")]
+            rows += [("Status", f"{RED}Failed to get child window id{NC}")]
             child = None
         rows += [
             ("Status", f"{YELLOW}{job_data.get('error')}{NC}"),
@@ -156,7 +160,7 @@ def _render_rows_for_job(job_data, msg, last_line, last_line_cut, config, user_o
 
     # finished
     if status == 'finished':
-        rows = [("Status", f"{GREEN}Finished{NC}")]
+        rows += [("Status", f"{GREEN}Finished{NC}")]
         return rows
 
     # running / starting (detailed parsing)
@@ -167,26 +171,26 @@ def _render_rows_for_job(job_data, msg, last_line, last_line_cut, config, user_o
             re.search(r'FAIL', last_line_cut)) and 's' in config:
 
             if re.search(r'Allocation type', last_line):
-                rows = [("Status", f"{RED}OOM Error{NC}")]
+                rows += [("Status", f"{RED}OOM Error{NC}")]
                 write_error_to_job(user_obj, job_data, 'OOM')
 
             elif re.search(r'GRPC [Ee]rror', last_line):
-                rows = [("Status", f"{RED}GRPC Error{NC}")]
+                rows += [("Status", f"{RED}GRPC Error{NC}")]
                 write_error_to_job(user_obj, job_data, 'grpc')
                 ack_MONITOR()
 
             elif re.search(r'python: No such file or directory', last_line):
-                rows = [("Status", f"{RED}File Error{NC}")]
+                rows += [("Status", f"{RED}File Error{NC}")]
                 write_error_to_job(user_obj, job_data, 'file error')
                 ack_MONITOR()
 
             elif re.search(r'DEADLINE_EXCEEDED', last_line):
-                rows = [("Status", f"{RED}DEADLINE EXCEEDED{NC}")]
+                rows += [("Status", f"{RED}DEADLINE EXCEEDED{NC}")]
                 write_error_to_job(user_obj, job_data, 'deadline exceeded')
                 ack_MONITOR()
 
             else:
-                rows = [("Status", f"{RED}Unknown Error{NC}")]
+                rows += [("Status", f"{RED}Unknown Error{NC}")]
                 write_error_to_job(user_obj, job_data, 'unknown')
                 ack_MONITOR()
             return rows
@@ -195,7 +199,7 @@ def _render_rows_for_job(job_data, msg, last_line, last_line_cut, config, user_o
         if (re.search(r'[cC]ompiling', last_line_cut) or
             re.search(r'[cC]ompilation', last_line_cut) or
             re.search(r'[cC]ompile', last_line_cut)) and 's' in config:
-            rows = [("Status", f"{GREEN}Compiling{NC}")]
+            rows += [("Status", f"{GREEN}Compiling{NC}")]
             if 'v' in config:
                 rows.append(("msg", msg))
             return rows
@@ -208,7 +212,7 @@ def _render_rows_for_job(job_data, msg, last_line, last_line_cut, config, user_o
                 epoch = m1.group(1)
             elif m2:
                 epoch = m2.group(0)[3:]
-            rows = [("Status", f"{GREEN}Sampling{NC}")]
+            rows += [("Status", f"{GREEN}Sampling{NC}")]
             if epoch is not None:
                 rows.append(("Epoch", f"{int(float(epoch))}"))
             if 'v' in config:
@@ -218,7 +222,7 @@ def _render_rows_for_job(job_data, msg, last_line, last_line_cut, config, user_o
         m_epoch1 = re.search(r'[eE]poch\s([0-9]{1,6})', last_line_cut)
         if m_epoch1 and ('s' in config):
             epoch = m_epoch1.group(1)
-            rows = [("Status", f"{GREEN}Running{NC}(ep={epoch})")]
+            rows += [("Status", f"{GREEN}Running{NC}(ep={epoch})")]
             if 'v' in config:
                 rows.append(("msg", msg))
             return rows
@@ -226,25 +230,25 @@ def _render_rows_for_job(job_data, msg, last_line, last_line_cut, config, user_o
         m_epoch2 = re.search(r'ep\s*=\s*([0-9]){1,4}\.([0-9]){1,6}', last_line_cut)
         if m_epoch2 and ('s' in config):
             epoch = m_epoch2.group(0).split('=')[1].strip()
-            rows = [("Status", f"{GREEN}Running{NC}(ep={float(epoch):.2f})")]
+            rows += [("Status", f"{GREEN}Running{NC}(ep={float(epoch):.2f})")]
             if 'v' in config:
                 rows.append(("msg", msg))
             return rows
 
         if re.search(r'[iI]nitializing', last_line_cut) and 's' in config:
-            rows = [("Status", f"{GREEN}Initializing{NC}")]
+            rows += [("Status", f"{GREEN}Initializing{NC}")]
             if 'v' in config:
                 rows.append(("msg", msg))
             return rows
 
         if re.search(r'[sS]taging', last_line_cut) and 's' in config:
-            rows = [("Status", f"{GREEN}Staging{NC}")]
+            rows += [("Status", f"{GREEN}Staging{NC}")]
             if 'v' in config:
                 rows.append(("msg", msg))
             return rows
 
         if 's' in config:
-            rows = [("Status", f"{YELLOW}Unknown{NC}")]
+            rows += [("Status", f"{YELLOW}Unknown{NC}")]
             if 'v' in config:
                 rows.append(("msg", msg))
             return rows
@@ -1106,6 +1110,9 @@ def check_jobs(user_obj, args, config = None):
             config += 'v'
     # print(f'config: {config}')
 
+    if '-nt' in args:
+        config += 'T'
+
     session_name = user_obj.tmux_name
     windows = os.popen(f"tmux list-windows -t {session_name}").read().splitlines()
     for window in windows:
@@ -1250,7 +1257,7 @@ def check_jobs(user_obj, args, config = None):
                     # print(re.search(r'ep=([0-9]){1,4}\.([0-9]){1,6}', last_line_cut))
         print('-'*40)
 
-def check_jobs_simp(user_obj, args, config = None):
+def check_jobs_simp(user_obj, args, config = None, num_columns = 3):
     """
     Print the status of all the jobs in the tmux session.
     """
@@ -1268,6 +1275,8 @@ def check_jobs_simp(user_obj, args, config = None):
                     
     if config is None:
         config = 'wst'
+    if '-nt' in args:
+        config += 'T'
 
     session_name = user_obj.tmux_name
     job_blocks = []
@@ -1437,6 +1446,11 @@ def run_job_on_tpu(job: Job, tpu, quiet = True, ignore_window = None):
 
 def monitor_jobs(user_obj, args):
     config = None
+    num_columns = 3
+    for arg in args:
+        if arg.startswith('col='):
+            num_columns = int(arg.split('=')[1])
+            break
     if len(args) > 0:
         for arg in args:
             if is_monitor_config(arg):
@@ -1451,9 +1465,11 @@ def monitor_jobs(user_obj, args):
         if user_obj.settings.get("monitor_verbose", False):
             config += 'v'
     
+    if '-nt' in args:
+        config += 'T'
     try:
         while True:
-            check_jobs_simp(user_obj, args, config=config)
+            check_jobs_simp(user_obj, args, config=config, num_columns=num_columns)
             time.sleep(user_obj.settings['monitor_upd_time'])
             # clear the screen
             os.system('clear' if os.name == 'posix' else 'cls')

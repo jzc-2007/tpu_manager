@@ -88,6 +88,7 @@ def ack_queue(ack_information):
         - status: 'finished' / 'failed'
         - window: optional dict with keys 'session' and 'window' to identify the tmux window
     """
+    print(f"{INFO} ack_queue: acknowledging task on TPU {ack_information['tpu']} with status {ack_information['status']}")
     queue = read_and_lock_queue()
     try:
         tpu = ack_information["tpu"]
@@ -97,6 +98,7 @@ def ack_queue(ack_information):
         idx_to_del: Optional[int] = None
         for i, task_dict in enumerate(queue):
             task_obj = Task.from_dict(task_dict)
+            # print(f"check_valid: {check_valid(task_obj, {"tpu": tpu, "info": tpu_information, "status": status})}")
             if check_valid(task_obj, {"tpu": tpu, "info": tpu_information, "status": status}):
                 run_job_on_tpu(task_obj.job, tpu, quiet = False, ignore_window=ack_information.get("window"))
                 idx_to_del = i
@@ -222,10 +224,14 @@ def check_valid(task, information):
     if not stage_dir:
         return False
 
+    print(f"stage_dir: {stage_dir}")
+
     # --- availability: TPU allowed ---
     valid_tpu = getattr(task, "tpu_info", {}).get("valid_tpu", []) if hasattr(task, "tpu_info") else []
     if information.get("tpu") not in valid_tpu:
         return False
+
+    print(f"valid_tpu: {valid_tpu}")
 
     # --- permission decoding ---
     status = information.get("status")
@@ -249,12 +255,14 @@ def check_valid(task, information):
     except ValueError:
         return False
 
+
     allow_own = bool(digit & 1)           # bit0
     allow_other = bool((digit >> 1) & 1)  # bit1
     # --- ownership check ---
     user_spreadsheet = data['users'][task.user]['spreadsheet_name']
     info_user = information.get("info", {}).get("user")
 
+    print(f"digit: {digit}, allow_own: {allow_own}, allow_other: {allow_other}")
 
     own = (user_spreadsheet == info_user) or (info_user == "free")
 
@@ -271,6 +279,10 @@ def parse_config_args_for_queue(user_obj, args):
     Queue-mode parser (no single TPU selection).
     Returns:
         dir_id, dir_path, valid_tpu, tag, rule, config_args, customized_settings, spreadsheet_notes, priority
+    TPU selection possibilities:
+        - explicit TPUs: v?, v?-?, v?+?, v?-?+?, v?+?-?, v?-?+?-?, v?+?-?+?
+        - zones: us, asia, us-central, us-east, asia-northeast, all
+        - tpu types: v4-32, v6e-32, v6e-64, all
     """
     data = read_data()
 
@@ -288,6 +300,10 @@ def parse_config_args_for_queue(user_obj, args):
 
     # keys that should NOT become --config*
     ignore_keys = ["dir", "user", "id", "tag", "rule", "ssn", "pm", "type"]
+
+    # accept zones/tpu types
+    accept_zones = []
+    accept_tpu_types = []
 
     # alias helpers
     alias_map = data.get("tpu_aliases", {})
@@ -329,8 +345,10 @@ def parse_config_args_for_queue(user_obj, args):
         if arg in all_tpu_tokens:
             explicit_tpus.append(alias_map.get(arg, arg))
 
-        if arg in QUEUE_LIST:
-            tpu_type = arg  # use the type as the filter
+        if arg in TYPE_DICT:
+            accept_tpu_types.extend(TYPE_DICT[arg])
+        if arg in ZONE_DICT:
+            accept_zones.extend(ZONE_DICT[arg])
 
         # numeric dir id convenience
         if is_integer(arg):
@@ -339,6 +357,13 @@ def parse_config_args_for_queue(user_obj, args):
                 print(f"{FAIL} queue: Directory id {dir_id} not found")
                 raise ValueError(f"Directory id {dir_id} not found")
             print(f"{INFO} queue: Using directory id {dir_id}")
+
+    
+
+    if not accept_zones:
+        accept_zones = ZONE_DICT['all']
+    if not accept_tpu_types:
+        accept_tpu_types = TYPE_DICT['all']
 
     # --- resolve directory path ---
     if dir_id not in user_obj.working_dir:
@@ -373,17 +398,13 @@ def parse_config_args_for_queue(user_obj, args):
     valid_tpu = list(dict.fromkeys(explicit_tpus))  # de-dup preserving order
 
     # If a type filter was provided, union in all TPUs of that type
-    if tpu_type:
-        try:
-            type_tpus = get_all_tpus_from_type(tpu_type)  # from .helpers
-        except Exception:
-            type_tpus = []
-        # Extend and de-dup
-        for t in type_tpus:
-            full = alias_map.get(t, t)
-            if full not in valid_tpu:
-                valid_tpu.append(full)
+    if not valid_tpu:
+        valid_tpu = list(filter_tpu_information(read_sheet_info(), zone=accept_zones, type=accept_tpu_types).keys())
 
+    tpu_type_to_log = ','.join(accept_tpu_types) if accept_tpu_types else 'v'+valid_tpu[0].split('v')[-1]+f'(+{len(valid_tpu)-1})'
+
+    
+    print(f"valid_tpu: {valid_tpu}")
     # If still empty, fall back to whatever filters read_tpu_info_from_type(args) applies
     if not valid_tpu:
         print(f'{FAIL} parse_config_args_for_queue: NO TPU FOUND')
@@ -401,7 +422,7 @@ def parse_config_args_for_queue(user_obj, args):
         customized_settings,
         spreadsheet_notes,
         priority,
-        tpu_type if tpu_type is not None else 'v'+valid_tpu[0].split('v')[-1]+f'(+{len(valid_tpu)-1})'
+        tpu_type_to_log
     )
 
 def remove_from_queue(number):
@@ -510,13 +531,18 @@ def Queue(user_obj, args):
         release_lock_queue()
         raise
 
+    # make sure the just_staging.sh file exists
+    if not os.path.exists(f"{dir_path}/just_staging.sh"):
+        print(f"{FAIL} Queue: just_staging.sh file not found in {dir_path}")
+        return
+
     # start staging
     subprocess.run(
         ["tmux", "send-keys", "-t", f"queue:{unique_id}", f"cd {shlex.quote(dir_path)}", "Enter"],
         check=True,
     )
     subprocess.run(
-        ["tmux", "send-keys", "-t", f"queue:{unique_id}", f"source just_staging.sh {unique_id}; sleep 10; exit", "Enter"],
+        ["tmux", "send-keys", "-t", f"queue:{unique_id}", f"source just_staging.sh {unique_id}; sleep 600; exit", "Enter"],
         check=True,
     )
 
@@ -560,8 +586,10 @@ def visualize_queue(limit: int = None, truncate_tpus: int = 6, return_rows: bool
         if not isinstance(priority_info, dict):
             return "00"
         perm = str(priority_info.get("permission", "00"))
-        # normalize to 2-digit display
-        return (perm if len(perm) >= 2 else perm.zfill(2))[:2]
+        # normalize to 2-digit display, display "3:os, 2:o-, 1:-s, 0:--"
+        # For example, "00" -> '----', "31" -> 'os-s'
+        displat_dict = {'0':'--', '1':'-s', '2':'o-', '3':'os'}
+        return ''.join([displat_dict[p] for p in perm])
 
     # --- build rows ---
     rows = []
