@@ -280,7 +280,7 @@ def apply_and_set_env(tpu, preemptible = False, spot = False, delete=True, repea
     # short pause before querying state
     time.sleep(5)
 
-    cmd = f"gcloud compute tpus describe {tpu} --zone={zone} --format='value(state)'"
+    cmd = f"gcloud compute tpus tpu-vm describe {tpu} --zone={zone} --format='value(state)'"
     try:
         state = subprocess.check_output(cmd, shell=True).decode().strip()
     except subprocess.CalledProcessError:
@@ -331,7 +331,7 @@ def check_tpu_status(tpu, quiet = False):
     """
     zone, pre, spot, tpu = get_zone_pre_spot(tpu)
     if zone is None: return 'no tpu found'
-    cmd = f"gcloud compute tpus describe {tpu} --zone={zone} --format='value(state)'"
+    cmd = f"gcloud compute tpus tpu-vm describe {tpu} --zone={zone} --format='value(state)'"
     try:
         state = subprocess.check_output(cmd, shell=True, stderr=subprocess.DEVNULL).decode().strip()
     except subprocess.CalledProcessError:
