@@ -20,9 +20,9 @@ def convert_to_gs(path: str):
             if is_checkpoint(new_path): yield new_path
             new_path = path.replace('/kmh-nfs-ssd-us-mount/logs/sqa', 'gs://kmh-gcp-us-central1/qiao_zhicheng_hanhong_files')
             if is_checkpoint(new_path): yield new_path
-            new_path = path.replace('/kmh-nfs-ssd-us-mount/logs/sqa', 'gs://kmh-gcp-asia-northeast1/qiao_zhicheng_hanhong_files')
+            new_path = path.replace('/kmh-nfs-ssd-us-mount/logs/sqa', 'gs://kmh-gcp-asia-northeast1-b/qiao_zhicheng_hanhong_files')
             if is_checkpoint(new_path): yield new_path
-        if 'kmh-tpuvm-v5e' in path:
+        if 'kmh-tpuvm-v5' in path:
             new_path = path.replace('/kmh-nfs-ssd-us-mount/logs/sqa', 'gs://kmh-gcp-us-central1/qiao_zhicheng_hanhong_files')
             if is_checkpoint(new_path): yield new_path
         new_path = path.replace('/kmh-nfs-ssd-us-mount/logs/sqa', 'gs://kmh-gcp-us-central2/qiao_zhicheng_hanhong_files')
@@ -37,9 +37,9 @@ def convert_to_gs(path: str):
             if is_checkpoint(new_path): yield new_path
             new_path = path.replace('/kmh-nfs-us-mount/logs/sqa', 'gs://kmh-gcp-us-central1/qiao_zhicheng_hanhong_files')
             if is_checkpoint(new_path): yield new_path
-            new_path = path.replace('/kmh-nfs-us-mount/logs/sqa', 'gs://kmh-gcp-asia-northeast1/qiao_zhicheng_hanhong_files')
+            new_path = path.replace('/kmh-nfs-us-mount/logs/sqa', 'gs://kmh-gcp-asia-northeast1-b/qiao_zhicheng_hanhong_files')
             if is_checkpoint(new_path): yield new_path
-        if 'kmh-tpuvm-v5e' in path:
+        if 'kmh-tpuvm-v5' in path:
             new_path = path.replace('/kmh-nfs-us-mount/logs/sqa', 'gs://kmh-gcp-us-central1/qiao_zhicheng_hanhong_files')
             if is_checkpoint(new_path): yield new_path
         new_path = path.replace('/kmh-nfs-us-mount/logs/sqa', 'gs://kmh-gcp-us-central2/qiao_zhicheng_hanhong_files')
