@@ -814,7 +814,7 @@ def parse_config_args(user_obj, args):
 
     return dir_id, dir_path, tpu, tag, rule, monitor, config_args, customized_settings, spreadsheet_notes  
 
-def run(user_obj, args):
+def run(user_obj, args, monitor_job = True):
     # print('args:', args)
     data = read_data()
     user_obj = users.user_from_dict(data['users'][user_obj.name])
@@ -1026,7 +1026,7 @@ def run(user_obj, args):
 
     time.sleep(3)
 
-    if user_obj.settings['monitor_after_run'] and '-q' not in args:
+    if user_obj.settings['monitor_after_run'] and '-q' not in args and monitor_job:
         monitor_jobs(user_obj, args)
 
 def check_all_jobs(args):

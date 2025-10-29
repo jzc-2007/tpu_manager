@@ -382,7 +382,7 @@ def _run_apply_then_resume(username: str, window_id: str, alias: str, pre_str: O
             args += ["-norm", alias]
         else:
             args += [alias]
-        
+            
         code, out = call_cli(*args)
         last = out
         log_output += f"Attempt {i+1}/{times}:\n{out}\n\n"
@@ -811,10 +811,10 @@ BASE_HTML = r"""
       
       <!-- Step 1: Select TPU Type -->
       <div id="picker-step1" class="run-step">
-        <div class="row" style="margin-bottom:8px">
+      <div class="row" style="margin-bottom:8px">
           <span class="muted">Choose a TPU type:</span>
-        </div>
-        <table>
+      </div>
+      <table>
           <tbody id="tpu-types-tbody"></tbody>
         </table>
       </div>
@@ -825,8 +825,8 @@ BASE_HTML = r"""
           <span class="muted">Choose a TPU:</span>
         </div>
         <table>
-          <tbody id="tpus-tbody"></tbody>
-        </table>
+        <tbody id="tpus-tbody"></tbody>
+      </table>
       </div>
       
       <div class="run-controls" style="margin-top:10px;justify-content:flex-end">
@@ -1064,8 +1064,18 @@ async function loadPendingOperations(){
       `;
       tbody.appendChild(tr);
     }
+    
+    // Set up auto-refresh for pending operations
+    if(!window.pendingOpsInterval){
+      window.pendingOpsInterval = setInterval(loadPendingOperations, 3000); // Refresh every 3 seconds
+    }
   } else {
     pendingDiv.style.display = 'none';
+    // Clear the interval if no pending operations
+    if(window.pendingOpsInterval){
+      clearInterval(window.pendingOpsInterval);
+      window.pendingOpsInterval = null;
+    }
   }
 }
 
@@ -1422,8 +1432,8 @@ function loadRunStep1(){
           tr.style.cursor = 'pointer';
           tr.onclick = () => selectDir(dir, index);
           tr.innerHTML = `
-            <td class="mono">${index}</td>
-            <td class="mono">${dir}</td>
+            <td class="mono">${dir.num}</td>
+            <td class="mono">${dir.path}</td>
           `;
           tbody.appendChild(tr);
         });
@@ -1440,7 +1450,11 @@ function loadRunStep1(){
 }
 
 function selectDir(dir, index){
-  runState.selectedDir = { dir, index };
+  runState.selectedDir = { 
+    dir: dir.path, 
+    num: dir.num, 
+    index 
+  };
   
   // Remove previous selection highlighting
   const tbody = document.getElementById('dirs-tbody');
@@ -1596,7 +1610,7 @@ function applyAndRun(alias){
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({
-      dir: runState.selectedDir.dir,
+      dir: `dir=${runState.selectedDir.num}`,
       tpu: alias
     })
   })
@@ -1650,7 +1664,7 @@ function executeRun(){
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({
-      dir: runState.selectedDir.dir,
+      dir: `dir=${runState.selectedDir.num}`,
       tpu: runState.selectedTpu.alias
     })
   })
@@ -1813,15 +1827,14 @@ async function loadPanel(){
     `;
     tbody.appendChild(tr);
     
-    // Check for ongoing operations for this TPU
-    if(canApply || canReapply){
-      checkOngoingOperations(r.alias);
-    }
+    // Check for ongoing operations for this TPU (including run operations)
+    checkOngoingOperations(r.alias);
   }
 }
 
 async function checkOngoingOperations(alias){
   try{
+    // Check for apply/reapply operations
     const res = await fetch(`{{ url_for('api_tpu_ongoing_operations', alias='__ALIAS__') }}`.replace('__ALIAS__', alias));
     const data = await res.json();
     
@@ -1841,6 +1854,31 @@ async function checkOngoingOperations(alias){
       
       // Start polling for this operation
       pollApplyWithProgress(op.tid, alias, 12);
+      return;
+    }
+    
+    // Also check for run operations that use this TPU
+    const runRes = await fetch(`{{ url_for('api_ongoing_apply_run_operations') }}`);
+    const runData = await runRes.json();
+    
+    if(runData.operations && runData.operations.length > 0){
+      // Find run operations that use this TPU
+      const runOp = runData.operations.find(op => op.meta && op.meta.tpu === alias);
+      if(runOp){
+        // Hide button and show progress
+        document.getElementById('btn-'+alias).style.display = 'none';
+        document.getElementById('progress-'+alias).style.display = 'block';
+        
+        // Set task ID on log button
+        const logBtn = document.getElementById('log-btn-'+alias);
+        if(logBtn) {
+          logBtn.setAttribute('data-tid', runOp.tid);
+          logBtn.style.display = 'block';
+        }
+        
+        // Start polling for this operation
+        pollApplyWithProgress(runOp.tid, alias, 12);
+      }
     }
   } catch(e){
     console.log('Error checking ongoing operations for', alias, e);
@@ -1968,7 +2006,7 @@ async function pollApplyWithProgress(tid, alias, totalTimes){
       progressFill.style.background = 'linear-gradient(90deg,#20c997,#66d9ef)';
     }, 3000);
     
-    loadPanel(); // Refresh the panel
+    // Don't call loadPanel() here as it resets the progress bar
     break;
   }
 }
@@ -2325,17 +2363,19 @@ def api_user_dirs(username: str):
         if code != 0:
             return jsonify({"ok": False, "msg": out, "dirs": []})
         
-        # Parse output to extract directories
+        # Parse output to extract directories with their numbers
         lines = out.split('\n')
         dirs = []
         for line in lines:
             line = line.strip()
             if line and not line.startswith('#'):
-                # Extract directory name (assuming format like "0: /path/to/dir")
+                # Extract directory number and path (format like "1: /path/to/dir")
                 if ':' in line:
-                    dir_path = line.split(':', 1)[1].strip()
+                    parts = line.split(':', 1)
+                    dir_num = parts[0].strip()
+                    dir_path = parts[1].strip()
                     if dir_path:
-                        dirs.append(dir_path)
+                        dirs.append({"num": dir_num, "path": dir_path})
         
         return jsonify({"ok": True, "dirs": dirs})
     except Exception as e:
@@ -2413,9 +2453,9 @@ def _run_job(username: str, dir_path: str, tpu: str, tid: str):
     """Run tpu run <dir> <tpu> <user> with auto mode to avoid interactive prompts"""
     tpu_py = _ensure_tpu_py()
     if os.path.basename(tpu_py) == "tpu":
-        cmd = [tpu_py, "run", dir_path, tpu, username, "--auto", "-f"]
+        cmd = [tpu_py, "run", dir_path, tpu, username, "-f", "-q"]
     else:
-        cmd = [sys.executable, tpu_py, "run", dir_path, tpu, username, "--auto", "-f"]
+        cmd = [sys.executable, tpu_py, "run", dir_path, tpu, username, "-f", "-q"]
     
     try:
         p = subprocess.run(cmd, text=True, capture_output=True)
