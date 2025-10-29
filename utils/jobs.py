@@ -1420,7 +1420,7 @@ def run_job_on_tpu(job: Job, tpu, quiet = True, ignore_window = None):
         os.system(f"tmux new-window -t {session_name}:{window_id}")
         time.sleep(0.5)
         os.system(f"tmux send-keys -t {session_name}:{window_id} 'cd {job.stage_dir}' Enter")
-        os.system(f"tmux send-keys -t {session_name}:{window_id} 'source staging.sh ka={tpu} {job.extra_configs}' Enter")
+        os.system(f"tmux send-keys -t {session_name}:{window_id} 'source staging.sh ka={tpu} zone={zone} {job.extra_configs}' Enter")
 
         if not quiet:
             print(f"{GOOD} run_job_on_tpu: Successfully created job in tmux window {session_name}:{window_id}")

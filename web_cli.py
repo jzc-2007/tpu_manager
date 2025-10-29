@@ -1,0 +1,2697 @@
+# -*- coding: utf-8 -*-
+"""
+web_ui.py — TPU 任务可视化网站（Flask）
+特性要点：
+- 顶栏用户切换、Clean/Clean -re、一键刷新(R)
+- 每个 user 的表格：Window/DIR/TPU/Tags/Status/Actions
+  * 隐藏 DIR 或 TPU 为 unknown 的行（更干净）
+  * Tags 与正文字体一致，过长可横向滑动
+  * Sticky 表头不再与内容重叠
+- 按钮：Resume / Rerun / 选择TPU Resume / 选择TPU Rerun / Kill / 查看Log
+  * 点击立即有“已提交”提示 + 行内转圈；后台线程完成后弹出 成功/失败 并刷新
+- 选择 TPU 弹窗（“像 tpu find 一样”的表格）：仅读取 sheet.read_sheet_info()
+  * 只用 spreadsheet 的列表（去重且字段完整）
+  * 支持 “在所选 TPU 上 Resume/Rerun”
+  * 还支持 “申请并 Resume/Rerun”（若 TPU 不存在可直接申请后续上）
+- TPU 面板（类似 spreadsheet）：
+  * 只显示 read_sheet_info() 的行
+  * 状态为空或 NOT FOUND 的行出现 Apply（可设次数/间隔，默认 12/8）
+- 日志页（/log/<username>/<window_id>）：
+  * 采用你提供的版本：?n= 字符数、?ansi=0 去色、跟随尾部、自动刷新、快捷键
+"""
+
+import os, re, sys, json, time, shlex, subprocess, threading, uuid, shutil, html as _html
+from types import SimpleNamespace
+from functools import lru_cache
+from typing import Any, Dict, List, Optional, Tuple
+from flask import Flask, jsonify, redirect, render_template_string, request, url_for, Response
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+TPU_PY_PATH = os.environ.get("TPU_PY_PATH", os.path.join(HERE, "tpu.py"))
+
+# ---------- 可选导入（存在则用，不存在走降级方案） ----------
+DATA_IO_OK = True
+USERS_MODULE_OK = True
+SHEET_MODULE_OK = True
+
+try:
+    from data_io import read_data  # type: ignore
+except Exception:
+    DATA_IO_OK = False
+    def read_data() -> Dict[str, Any]:
+        for p in [os.path.join(HERE, "data.json"), os.path.join(os.path.dirname(HERE), "data.json")]:
+            if os.path.exists(p):
+                with open(p, "r", encoding="utf-8") as f:
+                    return json.load(f)
+        return {"users": {}, "tpu_aliases": {}, "all_tpus": {}}
+
+try:
+    from utils import users as users_mod  # type: ignore
+except Exception:
+    USERS_MODULE_OK = False
+    users_mod = None
+
+try:
+    from utils import sheet as sheet_mod  # type: ignore
+except Exception:
+    SHEET_MODULE_OK = False
+    sheet_mod = None
+
+ANSI_RE = re.compile(r"\x1B\[[0-?]*[ -/]*[@-~]")
+def strip_ansi(s: str) -> str:
+    return ANSI_RE.sub("", s or "")
+
+DEFAULT_SETTINGS = {
+    "monitor_after_run": True,
+    "monitor_upd_time": 5,
+    "monitor_length": 800,
+    "monitor_dir": True,
+    "monitor_tpu": True,
+    "monitor_verbose": False,
+    "show_length": 200,
+    "time_zone": "us",
+    "extra_settings": {},
+}
+
+def _user_from_dict(d: Dict[str, Any]) -> SimpleNamespace:
+    if USERS_MODULE_OK and hasattr(users_mod, "user_from_dict"):
+        return users_mod.user_from_dict(d)  # type: ignore
+    ns = SimpleNamespace()
+    ns.name = d.get("name") or d.get("username")
+    ns.tmux_name = d.get("tmux_name") or ns.name
+    ns.job_data = d.get("job_data", [])
+    ns.settings = d.get("settings", DEFAULT_SETTINGS.copy())
+    ns.windows_offset = d.get("windows_offset", 0)
+    ns.spreadsheet_name = d.get("name", ns.name)
+    return ns
+
+@lru_cache(maxsize=1)
+def list_all_users() -> List[str]:
+    data = read_data()
+    if "user_list" in data and isinstance(data["user_list"], list) and data["user_list"]:
+        return sorted([str(u) for u in data["user_list"]])
+    return sorted(list(data.get("users", {}).keys()))
+
+def get_user_obj(username: str) -> Optional[SimpleNamespace]:
+    data = read_data()
+    u = data.get("users", {}).get(username)
+    if not u:
+        return None
+    return _user_from_dict(u)
+
+def list_tmux_windows(session_name: str) -> List[Tuple[str, str]]:
+    try:
+        out = subprocess.check_output(
+            ["tmux", "list-windows", "-t", session_name],
+            text=True, stderr=subprocess.STDOUT
+        )
+    except subprocess.CalledProcessError:
+        return []
+    res = []
+    for line in out.splitlines():
+        if not line.strip(): continue
+        try:
+            left = line.split(":")[0].strip()
+            name = line.split(":")[1].split(" ")[0].strip()
+            res.append((left, name))
+        except Exception:
+            continue
+    return res
+
+def tmux_capture(session: str, window_id: str, last_n: int = 2000) -> str:
+    try:
+        out = subprocess.check_output(
+            ["tmux", "capture-pane", "-t", f"{session}:{window_id}", "-p"],
+            text=True, stderr=subprocess.STDOUT
+        )
+        out = out.rstrip()
+        if last_n and len(out) > last_n:
+            return out[-last_n:]
+        return out
+    except subprocess.CalledProcessError:
+        return ""
+
+# --------- 状态检测（与 CLI 表达式一致） ---------
+RE_ERR_GENERIC = re.compile(r"(Job failed|[eE]rror|FAIL)")
+RE_OOM_ALLOCTYPE = re.compile(r"Allocation type")
+RE_GRPC = re.compile(r"GRPC [Ee]rror")
+RE_FILE_NOT_FOUND = re.compile(r"python: No such file or directory")
+RE_DEADLINE = re.compile(r"DEADLINE_EXCEEDED")
+RE_COMPILING = re.compile(r"[cC]ompil(ing|ation|e)")
+RE_SAMPLING = re.compile(r"[sS]ampling ")
+RE_EPOCH1 = re.compile(r"[eE]poch\s([0-9]{1,6})")
+RE_EPOCH2 = re.compile(r"ep\s*=\s*([0-9]{1,4}\.[0-9]{1,6})")
+RE_INITIALIZING = re.compile(r"[iI]nitializing")
+RE_STAGING = re.compile(r"[sS]taging")
+
+def parse_status(job_data: Dict[str, Any], last_cut: str, last_full: str) -> Tuple[str, str]:
+    st = job_data.get("status")
+    if st == "starting": return ("Don't have logdir yet", "warn")
+    if st == "error":
+        err = job_data.get("error")
+        if err == "preempted": return ("Preempted", "error")
+        if err == "OOM": return ("OOM", "error")
+        return ("Error", "error")
+    if st == "killed": return ("Killed", "warn")
+    if st in ("resumed", "rerunned"):
+        child = (job_data.get("extra_msgs") or {}).get("child")
+        msg = job_data.get("error") or st
+        return (f"{msg} (child={child})" if child is not None else msg, "warn")
+    if st == "finished": return ("Finished", "success")
+    # running/starting/None
+    if RE_ERR_GENERIC.search(last_cut):
+        if RE_OOM_ALLOCTYPE.search(last_full): return ("OOM Error", "error")
+        if RE_GRPC.search(last_full): return ("GRPC Error", "error")
+        if RE_FILE_NOT_FOUND.search(last_full): return ("File Error", "error")
+        if RE_DEADLINE.search(last_full): return ("DEADLINE EXCEEDED", "error")
+        return ("Unknown Error", "error")
+    if RE_COMPILING.search(last_cut): return ("Compiling", "info")
+    if RE_SAMPLING.search(last_cut):
+        m1 = RE_EPOCH1.search(last_cut) or RE_EPOCH2.search(last_cut)
+        if m1:
+            try:
+                epf = float(m1.group(1))
+                return (f"Sampling (ep={epf:.2f})", "info")
+            except Exception:
+                return (f"Sampling (ep={m1.group(1)})", "info")
+        return ("Sampling", "info")
+    m1 = RE_EPOCH1.search(last_cut)
+    m2 = RE_EPOCH2.search(last_cut)
+    if m1: return (f"Running (ep={m1.group(1)})", "success")
+    if m2:
+        try: return (f"Running (ep={float(m2.group(1)):.2f})", "success")
+        except Exception: return (f"Running (ep={m2.group(1)})", "success")
+    if RE_INITIALIZING.search(last_cut): return ("Initializing", "info")
+    if RE_STAGING.search(last_cut): return ("Staging", "info")
+    return ("Unknown", "warn")
+
+def summarize_job_row(user_obj: SimpleNamespace, window_id: str, job_data: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    # 只渲染 job_data 存在的窗口，并且 dir/tpu 不可 unknown
+    if not job_data:
+        return None
+
+    settings = getattr(user_obj, "settings", {}) or {}
+    show_length = int(settings.get("show_length", DEFAULT_SETTINGS["show_length"]))
+    monitor_length = int(settings.get("monitor_length", DEFAULT_SETTINGS["monitor_length"]))
+
+    last_full = tmux_capture(user_obj.tmux_name, window_id, last_n=max(monitor_length, show_length))
+    last_cut = last_full[-monitor_length:] if last_full else ""
+
+    try:
+        dir_ = (job_data.get("job_dir") or "").split("/")[-1] or "(unknown)"
+    except Exception:
+        dir_ = "(unknown)"
+    tpu_full = job_data.get("tpu")
+    if tpu_full:
+        tpu_show = tpu_full[10:] if len(tpu_full) > 10 else tpu_full
+    else:
+        tpu_show = "(unknown)"
+
+    # 过滤 unknown
+    if dir_ in ("(unknown)", "", None) or tpu_show in ("(unknown)", "", None, "unknown"):
+        return None
+
+    s_text, s_cls = parse_status(job_data, last_cut, last_full)
+
+    return {
+        "window": str(window_id),
+        "dir": dir_,
+        "tpu": tpu_show,
+        "tags": str(job_data.get("job_tags") or ""),
+        "status": s_text,
+        "status_class": s_cls,
+        "in_data": True,
+    }
+
+def build_job_rows(username: str) -> Dict[str, Any]:
+    user_obj = get_user_obj(username)
+    if not user_obj:
+        return {"jobs": [], "session_exists": False, "error": f"user '{username}' not found"}
+    windows = list_tmux_windows(user_obj.tmux_name)
+    job_map = {}
+    for job in getattr(user_obj, "job_data", []):
+        try: job_map[str(job.get("windows_id"))] = job
+        except Exception: continue
+    rows: List[Dict[str, Any]] = []
+    for wid, _ in windows:
+        row = summarize_job_row(user_obj, wid, job_map.get(str(wid)))
+        if row is not None:
+            rows.append(row)
+    return {"jobs": rows, "session_exists": True}
+
+# ---------- CLI 封装 ----------
+def _ensure_tpu_py() -> str:
+    if os.path.exists(TPU_PY_PATH): return TPU_PY_PATH
+    for c in [TPU_PY_PATH, os.path.join(HERE, "tpu.py"), os.path.join(os.path.dirname(HERE), "tpu.py")]:
+        if os.path.exists(c): return c
+    exe = shutil.which("tpu")
+    return exe or TPU_PY_PATH
+
+def call_cli(*args: str) -> Tuple[int, str]:
+    tpu_py = _ensure_tpu_py()
+    if os.path.basename(tpu_py) == "tpu":
+        cmd = [tpu_py] + list(args)
+    else:
+        cmd = [sys.executable, tpu_py] + list(args)
+    try:
+        p = subprocess.run(cmd, text=True, capture_output=True)
+        out = (p.stdout or "") + ("\n" + (p.stderr or "") if p.stderr else "")
+        return p.returncode, out.strip()
+    except Exception as e:
+        return 1, f"Failed to run: {' '.join(shlex.quote(a) for a in cmd)}\nError: {e}"
+
+def action_clean(username: str, re_flag: bool = False) -> Tuple[bool, str]:
+    args = ["clean", username]
+    if re_flag: args.append("-re")
+    code, out = call_cli(*args)
+    return code == 0, out
+
+# ---------- 异步任务 ----------
+OP_TASKS: Dict[str, Dict[str, Any]] = {}
+OP_LOCK = threading.Lock()
+
+def _register_task(kind: str, meta: Dict[str, Any]) -> str:
+    tid = str(uuid.uuid4())
+    with OP_LOCK:
+        OP_TASKS[tid] = {"kind": kind, "status": "pending", "msg": "", "meta": meta, "ts": time.time()}
+    return tid
+
+def _finish_task(tid: str, ok: bool, msg: str, log: str = ""):
+    with OP_LOCK:
+        if tid in OP_TASKS:
+            OP_TASKS[tid]["status"] = "ok" if ok else "err"
+            OP_TASKS[tid]["msg"] = msg
+            OP_TASKS[tid]["log"] = log
+            OP_TASKS[tid]["te"] = time.time()
+
+def _run_resume(username: str, window_id: str, new_tpu: Optional[str], tid: str):
+    args = ["resume", f"window={window_id}", username]
+    if new_tpu: args.insert(2, f"tpu={new_tpu}")
+    code, out = call_cli(*args)
+    _finish_task(tid, code == 0, out, out)
+
+def _run_rerun(username: str, window_id: str, new_tpu: Optional[str], tid: str):
+    args = ["rerun", f"window={window_id}", username]
+    if new_tpu: args.insert(2, f"tpu={new_tpu}")
+    code, out = call_cli(*args)
+    _finish_task(tid, code == 0, out, out)
+
+def _run_kill(username: str, window_id: str, tid: str):
+    args = ["kill", f"window={window_id}", username]
+    code, out = call_cli(*args)
+    if code != 0:
+        code2, out2 = call_cli("-kj", f"window={window_id}", username)
+        if code2 == 0: code, out = code2, out2
+    _finish_task(tid, code == 0, out, out)
+
+# Apply 循环（面板用）
+def _run_apply(alias: str, times: int = 12, sleep_sec: int = 8, tid: Optional[str] = None):
+    ok = False; last = ""
+    log_output = ""
+    
+    for i in range(max(1, times)):
+        code, out = call_cli("apply", alias)
+        last = out
+        log_output += f"Attempt {i+1}/{times}:\n{out}\n\n"
+        
+        # Store log during process if tid is provided
+        if tid:
+            with OP_LOCK:
+                if tid in OP_TASKS:
+                    OP_TASKS[tid]["log"] = log_output
+        
+        # Check both exit code and output for success indicators
+        if code == 0 and "[FAIL]" not in out and "not found" not in out.lower():
+            ok = True; break
+        time.sleep(max(1, sleep_sec))
+    if tid: _finish_task(tid, ok, last, log_output)
+
+def _run_reapply(alias: str, times: int = 12, sleep_sec: int = 8, tid: Optional[str] = None):
+    """Reapply: delete then apply"""
+    log_output = ""
+    
+    # First delete the TPU
+    code, out = call_cli("delete", alias)
+    log_output += f"Delete attempt:\n{out}\n\n"
+    if code != 0:
+        if tid: _finish_task(tid, False, f"delete failed: {out}", log_output)
+        return
+    
+    # Then apply for the TPU
+    ok = False; last = ""
+    for i in range(max(1, times)):
+        code, out = call_cli("apply", alias)
+        last = out
+        log_output += f"Apply attempt {i+1}/{times}:\n{out}\n\n"
+        
+        # Store log during process if tid is provided
+        if tid:
+            with OP_LOCK:
+                if tid in OP_TASKS:
+                    OP_TASKS[tid]["log"] = log_output
+        
+        # Check both exit code and output for success indicators
+        if code == 0 and "[FAIL]" not in out and "not found" not in out.lower():
+            ok = True; break
+        time.sleep(max(1, sleep_sec))
+    if tid: _finish_task(tid, ok, last, log_output)
+
+# 申请并 Resume/Rerun（选择器用）
+def _run_apply_then_resume(username: str, window_id: str, alias: str, pre_str: Optional[str], tid: str):
+    # Update status to "Applying for TPU"
+    with OP_LOCK:
+        if tid in OP_TASKS:
+            OP_TASKS[tid]["status"] = "applying"
+            OP_TASKS[tid]["msg"] = f"Applying for TPU {alias}..."
+    
+    # Apply for the TPU with retry logic
+    times = 12
+    sleep_sec = 8
+    ok = False
+    last = ""
+    log_output = ""
+    
+    for i in range(max(1, times)):
+        # Update progress
+        with OP_LOCK:
+            if tid in OP_TASKS:
+                OP_TASKS[tid]["msg"] = f"Applying for TPU {alias}... (attempt {i+1}/{times})"
+        
+        args = ["apply"]
+        if pre_str is not None and str(pre_str).lower() in ("false", "0", "no"):
+            args += ["-norm", alias]
+        else:
+            args += [alias]
+        
+        code, out = call_cli(*args)
+        last = out
+        log_output += f"Attempt {i+1}/{times}:\n{out}\n\n"
+        
+        # Store log after each attempt so it's available during progress
+        with OP_LOCK:
+            if tid in OP_TASKS:
+                OP_TASKS[tid]["log"] = log_output
+        
+        # Check both exit code and output for success indicators
+        if code == 0 and "[FAIL]" not in out and "not found" not in out.lower():
+            ok = True
+            break
+        time.sleep(max(1, sleep_sec))
+    
+    if not ok:
+        _finish_task(tid, False, f"apply failed after {times} attempts: {last}", log_output)
+        return
+    
+    # Update status to "TPU applied, resuming job"
+    with OP_LOCK:
+        if tid in OP_TASKS:
+            OP_TASKS[tid]["status"] = "mounting"
+            OP_TASKS[tid]["msg"] = f"TPU {alias} applied, resuming job..."
+    
+    _run_resume(username, window_id, alias, tid)
+
+def _run_apply_then_rerun(username: str, window_id: str, alias: str, pre_str: Optional[str], tid: str):
+    # Update status to "Applying for TPU"
+    with OP_LOCK:
+        if tid in OP_TASKS:
+            OP_TASKS[tid]["status"] = "applying"
+            OP_TASKS[tid]["msg"] = f"Applying for TPU {alias}..."
+    
+    # Apply for the TPU with retry logic
+    times = 12
+    sleep_sec = 8
+    ok = False
+    last = ""
+    log_output = ""
+    
+    for i in range(max(1, times)):
+        # Update progress
+        with OP_LOCK:
+            if tid in OP_TASKS:
+                OP_TASKS[tid]["msg"] = f"Applying for TPU {alias}... (attempt {i+1}/{times})"
+        
+        args = ["apply"]
+        if pre_str is not None and str(pre_str).lower() in ("false", "0", "no"):
+            args += ["-norm", alias]
+        else:
+            args += [alias]
+        
+        code, out = call_cli(*args)
+        last = out
+        log_output += f"Attempt {i+1}/{times}:\n{out}\n\n"
+        
+        # Store log after each attempt so it's available during progress
+        with OP_LOCK:
+            if tid in OP_TASKS:
+                OP_TASKS[tid]["log"] = log_output
+        
+        # Check both exit code and output for success indicators
+        if code == 0 and "[FAIL]" not in out and "not found" not in out.lower():
+            ok = True
+            break
+        time.sleep(max(1, sleep_sec))
+    
+    if not ok:
+        _finish_task(tid, False, f"apply failed after {times} attempts: {last}", log_output)
+        return
+    
+    # Update status to "TPU applied, rerunning job"
+    with OP_LOCK:
+        if tid in OP_TASKS:
+            OP_TASKS[tid]["status"] = "mounting"
+            OP_TASKS[tid]["msg"] = f"TPU {alias} applied, rerunning job..."
+    
+    _run_rerun(username, window_id, alias, tid)
+
+# 重新申请并 Resume/Rerun（选择器用）
+def _run_reapply_then_resume(username: str, window_id: str, alias: str, pre_str: Optional[str], tid: str):
+    # Update status to "Deleting TPU"
+    with OP_LOCK:
+        if tid in OP_TASKS:
+            OP_TASKS[tid]["status"] = "applying"
+            OP_TASKS[tid]["msg"] = f"Deleting TPU {alias}..."
+    
+    log_output = ""
+    
+    # First delete the TPU
+    code, out = call_cli("delete", alias)
+    log_output += f"Delete attempt:\n{out}\n\n"
+    if code != 0:
+        _finish_task(tid, False, f"delete failed: {out}", log_output)
+        return
+    
+    # Update status to "Applying for TPU"
+    with OP_LOCK:
+        if tid in OP_TASKS:
+            OP_TASKS[tid]["msg"] = f"Applying for TPU {alias}..."
+    
+    # Apply for the TPU with retry logic
+    times = 12
+    sleep_sec = 8
+    ok = False
+    last = ""
+    
+    for i in range(max(1, times)):
+        # Update progress
+        with OP_LOCK:
+            if tid in OP_TASKS:
+                OP_TASKS[tid]["msg"] = f"Applying for TPU {alias}... (attempt {i+1}/{times})"
+        
+        args = ["apply"]
+        if pre_str is not None and str(pre_str).lower() in ("false", "0", "no"):
+            args += ["-norm", alias]
+        else:
+            args += [alias]
+        
+        code, out = call_cli(*args)
+        last = out
+        log_output += f"Attempt {i+1}/{times}:\n{out}\n\n"
+        
+        # Store log after each attempt so it's available during progress
+        with OP_LOCK:
+            if tid in OP_TASKS:
+                OP_TASKS[tid]["log"] = log_output
+        
+        # Check both exit code and output for success indicators
+        if code == 0 and "[FAIL]" not in out and "not found" not in out.lower():
+            ok = True
+            break
+        time.sleep(max(1, sleep_sec))
+    
+    if not ok:
+        _finish_task(tid, False, f"apply failed after {times} attempts: {last}", log_output)
+        return
+    
+    # Update status to "TPU applied, resuming job"
+    with OP_LOCK:
+        if tid in OP_TASKS:
+            OP_TASKS[tid]["status"] = "mounting"
+            OP_TASKS[tid]["msg"] = f"TPU {alias} applied, resuming job..."
+    
+    _run_resume(username, window_id, alias, tid)
+
+def _run_reapply_then_rerun(username: str, window_id: str, alias: str, pre_str: Optional[str], tid: str):
+    # Update status to "Deleting TPU"
+    with OP_LOCK:
+        if tid in OP_TASKS:
+            OP_TASKS[tid]["status"] = "applying"
+            OP_TASKS[tid]["msg"] = f"Deleting TPU {alias}..."
+    
+    log_output = ""
+    
+    # First delete the TPU
+    code, out = call_cli("delete", alias)
+    log_output += f"Delete attempt:\n{out}\n\n"
+    if code != 0:
+        _finish_task(tid, False, f"delete failed: {out}", log_output)
+        return
+    
+    # Update status to "Applying for TPU"
+    with OP_LOCK:
+        if tid in OP_TASKS:
+            OP_TASKS[tid]["msg"] = f"Applying for TPU {alias}..."
+    
+    # Apply for the TPU with retry logic
+    times = 12
+    sleep_sec = 8
+    ok = False
+    last = ""
+    
+    for i in range(max(1, times)):
+        # Update progress
+        with OP_LOCK:
+            if tid in OP_TASKS:
+                OP_TASKS[tid]["msg"] = f"Applying for TPU {alias}... (attempt {i+1}/{times})"
+        
+        args = ["apply"]
+        if pre_str is not None and str(pre_str).lower() in ("false", "0", "no"):
+            args += ["-norm", alias]
+        else:
+            args += [alias]
+        
+        code, out = call_cli(*args)
+        last = out
+        log_output += f"Attempt {i+1}/{times}:\n{out}\n\n"
+        
+        # Store log after each attempt so it's available during progress
+        with OP_LOCK:
+            if tid in OP_TASKS:
+                OP_TASKS[tid]["log"] = log_output
+        
+        # Check both exit code and output for success indicators
+        if code == 0 and "[FAIL]" not in out and "not found" not in out.lower():
+            ok = True
+            break
+        time.sleep(max(1, sleep_sec))
+    
+    if not ok:
+        _finish_task(tid, False, f"apply failed after {times} attempts: {last}", log_output)
+        return
+    
+    # Update status to "TPU applied, rerunning job"
+    with OP_LOCK:
+        if tid in OP_TASKS:
+            OP_TASKS[tid]["status"] = "mounting"
+            OP_TASKS[tid]["msg"] = f"TPU {alias} applied, rerunning job..."
+    
+    _run_rerun(username, window_id, alias, tid)
+
+def start_thread(target, *a, **kw):
+    th = threading.Thread(target=target, args=a, kwargs=kw, daemon=True)
+    th.start()
+    return th
+
+# ---------- Spreadsheet（严格使用 read_sheet_info） ----------
+def _get_tpu_information_all() -> Dict[str, Dict[str, Any]]:
+    """read_sheet_info() -> {full_name: info_dict}"""
+    if not SHEET_MODULE_OK:
+        return {}
+    if hasattr(sheet_mod, 'read_sheet_info'):
+        try:
+            info = sheet_mod.read_sheet_info()  # type: ignore
+            if isinstance(info, dict):
+                return {str(k): (v or {}) for k, v in info.items()}
+        except Exception:
+            pass
+    return {}
+
+def fetch_tpu_sheet_rows() -> List[Dict[str, Any]]:
+    """扁平化 read_sheet_info() 结果供 UI 使用"""
+    info_all = _get_tpu_information_all()
+    rows: List[Dict[str, Any]] = []
+    for full_name, info in sorted(info_all.items(), key=lambda x: str(x[0])):
+        alias = str(info.get('alias') or full_name)
+        status = str(info.get('running_status') or '')
+        zone   = str(info.get('zone') or '')
+        pre    = info.get('pre')
+        if isinstance(pre, bool): pre_str = 'true' if pre else 'false'
+        else: pre_str = str(pre or '')
+        user   = str(info.get('user') or '')
+        note   = str(info.get('user_note') or '')
+        script_note = str(info.get('script_note') or '')
+        rows.append({
+            "alias": alias,
+            "full_name": full_name,
+            "running_status": status,
+            "zone": zone,
+            "preemptible": pre_str,
+            "user": user,
+            "user_note": note,
+            "script_note": script_note,
+            "found": True
+        })
+    return rows
+
+# ---------- Flask ----------
+app = Flask(__name__)
+
+BASE_HTML = r"""
+<!doctype html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8">
+  <title>TPU Web Monitor</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    :root{
+      --bg:#0b1220; --panel:#0f1a33; --card:#101b36; --accent:#6da7ff;
+      --txt:#d9e1ff; --muted:#9fb0d1; --ok:#20c997; --warn:#ffc107; --err:#ff6b6b; --info:#66d9ef;
+      --border:#203055; --topbar:60px;
+    }
+    *{box-sizing:border-box}
+    body{margin:0;background:var(--bg);color:var(--txt);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Ubuntu,"Helvetica Neue",Arial;}
+    a{color:var(--accent);text-decoration:none}
+    .topbar{position:sticky;top:0;z-index:50;background:linear-gradient(180deg,var(--panel),rgba(15,26,51,0.7));backdrop-filter:blur(6px);border-bottom:1px solid var(--border);}
+    .container{max-width:1200px;margin:0 auto;padding:16px}
+    .users{display:flex;flex-wrap:wrap;gap:8px;padding:12px 16px}
+    .user-pill{padding:8px 12px;border:1px solid var(--border);border-radius:999px;background:#0c1834;color:var(--txt);opacity:.9}
+    .user-pill.active{background:var(--accent);color:#05132b;border-color:transparent;font-weight:700}
+    .toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:0 16px 16px 16px}
+    .btn{border:1px solid var(--border);background:#0e1a37;color:var(--txt);padding:8px 12px;border-radius:8px;cursor:pointer}
+    .btn:hover{filter:brightness(1.2)}
+    .btn.ghost{background:transparent}
+    .hint{color:var(--muted);font-size:12px;margin-left:6px}
+    table{width:100%;border-collapse:separate;border-spacing:0;overflow:hidden;border-radius:12px;border:1px solid var(--border);}
+    thead th{position:sticky;top:var(--topbar);background:#0c1630;color:#bcd0ff;text-align:left;padding:10px;border-bottom:1px solid var(--border);font-weight:600;z-index:30}
+    tbody td{padding:10px;border-bottom:1px solid var(--border);vertical-align:top}
+    tbody tr:hover{background:#0c1630}
+    .mono{font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;}
+    .status{display:inline-flex;align-items:center;gap:8px}
+    .dot{width:10px;height:10px;border-radius:50%}
+    .s-success .dot{background:var(--ok)}
+    .s-warn .dot{background:var(--warn)}
+    .s-error .dot{background:var(--err)}
+    .s-info .dot{background:var(--info)}
+    .s-unknown .dot{background:#6c757d}
+    .s-success{color:var(--ok)} .s-warn{color:var(--warn)} .s-error{color:var(--err)} .s-info{color:var(--info)}
+    /* TPU Status Colors */
+    td.status-free{color:#20c997 !important} 
+    td.status-reserved{color:#ffc107 !important} 
+    td.status-running{color:#66d9ef !important} 
+    td.status-notfound{color:#ff6b6b !important} 
+    td.status-creating{color:#9fb0d1 !important}
+    /* TPU Script Note Colors (like job panel) */
+    td.script-ready{color:#20c997 !important} 
+    td.script-notfound{color:#ff6b6b !important} 
+    td.script-preempted{color:#ffc107 !important} 
+    td.script-terminated{color:#9fb0d1 !important} 
+    td.script-creating{color:#66d9ef !important}
+    td.script-unknown{color:#6c757d !important}
+    .actions{display:flex;gap:6px;flex-wrap:wrap}
+    .input{background:#0d1a36;border:1px solid var(--border);color:var(--txt);padding:6px 8px;border-radius:6px;min-width:120px}
+    .nowrap{white-space:nowrap}
+    .tags-cell{max-width:280px;overflow-x:auto;white-space:nowrap;border:1px dashed var(--border);padding:6px;border-radius:6px;background:#0c1733}
+    .footer{color:var(--muted);font-size:12px;margin-top:16px}
+    kbd{padding:2px 6px;border:1px solid var(--border);border-bottom-width:2px;border-radius:4px;background:#0f1a33}
+    /* Modal */
+    .modal{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;align-items:center;justify-content:center;z-index:101}
+    .modal.show{display:flex}
+    .modal-card{position:relative;width:min(1000px,92vw);max-height:85vh;overflow:auto;background:#0f1a33;border:1px solid var(--border);border-radius:12px;padding:16px}
+    .run-step table{max-height:300px;overflow-y:auto;display:block}
+    .run-step thead{position:sticky;top:0;z-index:10}
+    .run-step tbody{display:block}
+    .run-step tr{display:table;width:100%;table-layout:fixed}
+    .run-step td{display:table-cell}
+    .run-step tr.selected{background:#1a2a4a !important;border:2px solid #6da7ff !important}
+    .run-step tr:hover{background:#1a2a4a}
+    .run-step tr.running{opacity:0.6 !important;background:#2a3a66 !important;color:#9fb0d1 !important}
+    .run-step tr.running:hover{background:#3a4a76 !important}
+    .run-controls{position:sticky;bottom:0;background:#0f1a33;border-top:1px solid var(--border);padding:12px 0;margin-top:16px;z-index:20}
+    /* TPU Status Colors */
+    .script-ready{color:#20c997 !important}
+    .script-notfound{color:#ff6b6b !important}
+    .script-preempted{color:#ffc107 !important}
+    .script-terminated{color:#6c757d !important}
+    .script-creating{color:#66d9ef !important}
+    .script-unknown{color:#9fb0d1 !important}
+    .status-free{color:#20c997 !important}
+    .modal-close{position:absolute;right:10px;top:8px;width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;border:1px solid var(--border);background:#0e1a37;cursor:pointer}
+    .modal-close:hover{filter:brightness(1.2)}
+    .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+    .spinner{width:14px;height:14px;border:2px solid #2a3a66;border-top-color:var(--accent);border-radius:50%;display:inline-block;animation:spin 1s linear infinite}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    .pill{display:inline-flex;gap:6px;align-items:center;padding:2px 8px;border-radius:999px;border:1px solid var(--border);background:#0d1a36}
+    .muted{color:var(--muted)}
+  </style>
+</head>
+<body>
+  <div class="topbar" id="topbar">
+    <div class="container">
+      <div class="users">
+        {% for u in users %}
+          <a class="user-pill {% if u==cur_user %}active{% endif %}" href="{{ url_for('user_page', username=u) }}">{{ u }}</a>
+        {% endfor %}
+        <a class="user-pill" href="{{ url_for('tpu_panel') }}">TPU 面板</a>
+      </div>
+    </div>
+  </div>
+
+  <div class="container">
+    <div class="toolbar" id="toolbar">
+      <button class="btn" onclick="doClean(false)">🧹 Clean</button>
+      <button class="btn" onclick="doClean(true)">🧹 Clean -re</button>
+      <button class="btn" onclick="openRunModal()">▶️ Run</button>
+      <button class="btn ghost" onclick="refreshJobs()">🔄 刷新</button>
+      <span class="hint">或按 <kbd>R</kbd> 刷新当前用户</span>
+    </div>
+
+    <table id="job-table">
+      <tbody id="job-tbody">
+        {% for j in rows %}
+          <tr>
+            <td class="mono nowrap">{{ j.window }}</td>
+            <td class="mono">{{ j.dir }}</td>
+            <td class="mono nowrap">{{ j.tpu }}</td>
+            <td class="tags-cell">{{ j.tags }}</td>
+            <td><span class="status s-{{ j.status_class }}"><span class="dot"></span>{{ j.status }}</span></td>
+            <td class="actions">
+              {% if j.in_data %}
+                <button class="btn" onclick="doResume('{{ j.window }}')">Resume</button>
+                <button class="btn" onclick="doRerun('{{ j.window }}')">Rerun</button>
+                <button class="btn" onclick="openTpuPicker('{{ j.window }}','resume')">选择TPU Resume</button>
+                <button class="btn" onclick="openTpuPicker('{{ j.window }}','rerun')">选择TPU Rerun</button>
+                <button class="btn" onclick="doKill('{{ j.window }}')">Kill</button>
+              {% else %}
+                <span class="muted">（未在数据中）</span>
+              {% endif %}
+              <button class="btn" onclick="viewLog('{{ j.window }}')">查看 Log</button>
+              <span id="opstate-{{ j.window }}" class="muted"></span>
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    <!-- Pending Apply+Run Operations -->
+    <div id="pending-operations" style="margin-top: 20px; display: none;">
+      <h3 style="color: var(--txt); margin-bottom: 10px;">🔄 进行中的操作</h3>
+      <table>
+        <tbody id="pending-tbody"></tbody>
+      </table>
+    </div>
+
+    <div class="footer">
+      <p>状态解析与 CLI 的 <code>check_jobs_simp/_render_rows_for_job</code> 使用一致的表达式匹配；Msg 已隐藏。日志页支持去色/跟随/自动刷新。</p>
+    </div>
+  </div>
+
+  <!-- TPU 选择弹窗 -->
+  <div class="modal" id="tpu-modal">
+    <div class="modal-card" id="tpu-modal-card">
+      <button class="modal-close" onclick="closePicker()" aria-label="关闭">✕</button>
+      <div class="row" style="justify-content:space-between;margin-bottom:8px">
+        <div class="row">
+          <strong id="picker-title">Choose a TPU</strong>
+        </div>
+        <div class="row">
+          <span id="picker-step" class="pill muted">步骤 1/2</span>
+          <span id="picker-target" class="pill muted">无目标</span>
+        </div>
+      </div>
+      
+      <!-- Step 1: Select TPU Type -->
+      <div id="picker-step1" class="run-step">
+        <div class="row" style="margin-bottom:8px">
+          <span class="muted">Choose a TPU type:</span>
+        </div>
+        <table>
+          <tbody id="tpu-types-tbody"></tbody>
+        </table>
+      </div>
+      
+      <!-- Step 2: Select Specific TPU -->
+      <div id="picker-step2" class="run-step" style="display:none">
+        <div class="row" style="margin-bottom:8px">
+          <span class="muted">Choose a TPU:</span>
+        </div>
+        <table>
+          <tbody id="tpus-tbody"></tbody>
+        </table>
+      </div>
+      
+      <div class="run-controls" style="margin-top:10px;justify-content:flex-end">
+        <button class="btn" id="picker-prev" onclick="pickerPrevStep()" style="display:none">← 上一步</button>
+        <span id="picked-thing" class="pill muted">未选择</span>
+        <button class="btn" id="picker-resume" onclick="submitPicker('resume')" style="display:none">Resume</button>
+        <button class="btn" id="picker-rerun" onclick="submitPicker('rerun')" style="display:none">Rerun</button>
+        <button class="btn" id="picker-apply-resume" onclick="submitPickerApply('resume')" style="display:none">Apply and Resume</button>
+        <button class="btn" id="picker-apply-rerun" onclick="submitPickerApply('rerun')" style="display:none">Apply and Rerun</button>
+        <button class="btn" id="picker-reapply-resume" onclick="submitPickerReapply('resume')" style="display:none">Reapply and Resume</button>
+        <button class="btn" id="picker-reapply-rerun" onclick="submitPickerReapply('rerun')" style="display:none">Reapply and Rerun</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Run 弹窗 -->
+  <div class="modal" id="run-modal">
+    <div class="modal-card" id="run-modal-card">
+      <button class="modal-close" onclick="closeRunModal()" aria-label="关闭">✕</button>
+      <div class="row" style="justify-content:space-between;margin-bottom:8px">
+        <div class="row">
+          <strong>运行新任务</strong>
+        </div>
+        <div class="row">
+          <span id="run-step" class="pill muted">步骤 1/3</span>
+        </div>
+      </div>
+      
+      <!-- Step 1: Select Directory -->
+      <div id="run-step1" class="run-step">
+        <div class="row" style="margin-bottom:8px">
+          <span class="muted">选择目录：</span>
+        </div>
+        <table>
+          <tbody id="dirs-tbody"></tbody>
+        </table>
+      </div>
+      
+      <!-- Step 2: Select TPU Type -->
+      <div id="run-step2" class="run-step" style="display:none">
+        <div class="row" style="margin-bottom:8px">
+          <span class="muted">选择 TPU 类型：</span>
+        </div>
+        <table>
+          <tbody id="types-tbody"></tbody>
+        </table>
+      </div>
+      
+      <!-- Step 3: Select TPU -->
+      <div id="run-step3" class="run-step" style="display:none">
+        <div class="row" style="margin-bottom:8px">
+          <span class="muted">选择 TPU：</span>
+        </div>
+        <table>
+          <tbody id="run-tpus-tbody"></tbody>
+        </table>
+      </div>
+      
+      <div class="run-controls">
+        <div class="row" style="justify-content:space-between">
+          <button class="btn" id="run-prev" onclick="runPrevStep()" style="display:none">← 上一步</button>
+          <div class="row">
+            <span id="run-selected" class="pill muted">未选择</span>
+            <button class="btn" id="run-execute" onclick="executeRun()" style="display:none">▶️ RUN</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script>
+const CUR_USER = {{ cur_user|tojson }};
+
+function setTopbarVar(){
+  const tb = document.getElementById('topbar');
+  const h = (tb?.offsetHeight||60);
+  document.documentElement.style.setProperty('--topbar', (h)+'px');
+}
+window.addEventListener('load', setTopbarVar);
+window.addEventListener('resize', setTopbarVar);
+
+// Modal functions for See Log functionality
+function showOperationLogById(tid){
+  // Open log modal with just the task ID
+  openLogModal(tid, 'Operation');
+}
+
+function openLogModal(tid, alias){
+  // Create modal if it doesn't exist
+  let modal = document.getElementById('log-modal');
+  if(!modal){
+    modal = document.createElement('div');
+    modal.id = 'log-modal';
+    modal.className = 'modal';
+    modal.innerHTML = `
+      <div class="modal-content" style="max-width: 800px; max-height: 600px;">
+        <div class="modal-header">
+          <h3>Operation Log - ${alias}</h3>
+          <button class="btn modal-close-btn" onclick="closeLogModal()" style="float: right;">✕ Close</button>
+        </div>
+        <div class="modal-body">
+          <div id="log-content" style="background: #1a1a1a; color: #fff; padding: 10px; border-radius: 4px; font-family: monospace; white-space: pre-wrap; max-height: 400px; overflow-y: auto;"></div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn" onclick="refreshLog()">🔄 Refresh</button>
+          <button class="btn" onclick="closeLogModal()" style="background: #6c757d; color: white; border: 1px solid #6c757d;">Close</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+    
+    // Add click outside to close functionality
+    modal.addEventListener('click', function(e) {
+      if (e.target === modal) {
+        closeLogModal();
+      }
+    });
+    
+    // Add ESC key to close functionality
+    const escHandler = function(e) {
+      if (e.key === 'Escape' && modal.style.display === 'block') {
+        closeLogModal();
+      }
+    };
+    document.addEventListener('keydown', escHandler);
+    
+    // Store the handler for cleanup
+    modal.escHandler = escHandler;
+  }
+  
+  // Update modal content
+  modal.querySelector('h3').textContent = `Operation Log - ${alias}`;
+  modal.style.setProperty('display', 'flex', 'important');
+  modal.classList.add('show');
+  
+  // Store current tid and alias for refresh
+  modal.setAttribute('data-tid', tid);
+  modal.setAttribute('data-alias', alias);
+  
+  // Load initial log content
+  refreshLog();
+}
+
+function closeLogModal(){
+  const modal = document.getElementById('log-modal');
+  if(modal) {
+    modal.style.display = 'none';
+    modal.classList.remove('show');
+    
+    // Clean up event listeners
+    if(modal.escHandler) {
+      document.removeEventListener('keydown', modal.escHandler);
+      modal.escHandler = null;
+    }
+  }
+}
+
+async function refreshLog(){
+  const modal = document.getElementById('log-modal');
+  if(!modal) return;
+  
+  const tid = modal.getAttribute('data-tid');
+  const alias = modal.getAttribute('data-alias');
+  if(!tid) return;
+  
+  try{
+    const res = await fetch(`{{ url_for('op_status', tid='__ID__') }}`.replace('__ID__', tid));
+    const data = await res.json();
+    
+    const logContent = document.getElementById('log-content');
+    if(logContent){
+      const timestamp = new Date().toLocaleTimeString();
+      const logText = `[${timestamp}] Status: ${data.status}\nMessage: ${data.msg || 'No message'}\n\n--- Log Output ---\n${data.log || 'No log available yet...'}`;
+      logContent.textContent = logText;
+    }
+  } catch(e){
+    console.error('Failed to refresh log:', e);
+  }
+}
+
+async function refreshJobs(){
+  const res = await fetch(`{{ url_for('api_jobs', username=cur_user) }}`);
+  const data = await res.json();
+  const tbody = document.querySelector('#job-tbody');
+  tbody.innerHTML = "";
+  for (const j of data.jobs){
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td class="mono nowrap">${j.window}</td>
+      <td class="mono">${j.dir||""}</td>
+      <td class="mono nowrap">${j.tpu||""}</td>
+      <td class="tags-cell">${j.tags||""}</td>
+      <td><span class="status s-${j.status_class}"><span class="dot"></span>${j.status}</span></td>
+      <td class="actions">
+        ${ j.in_data ? `
+          <button class="btn" onclick="doResume('${j.window}')">Resume</button>
+          <button class="btn" onclick="doRerun('${j.window}')">Rerun</button>
+          <button class="btn" onclick="openTpuPicker('${j.window}','resume')">Resume</button>
+          <button class="btn" onclick="openTpuPicker('${j.window}','rerun')">Rerun</button>
+          <button class="btn" onclick="doKill('${j.window}')">Kill</button>
+        ` : `<span class="muted">（未在数据中）</span>` }
+        <button class="btn" onclick="viewLog('${j.window}')">See Log</button>
+        <span id="opstate-${j.window}" class="muted"></span>
+      </td>
+    `;
+    tbody.appendChild(tr);
+  }
+  setTopbarVar();
+  loadPendingOperations();
+}
+
+async function loadPendingOperations(){
+  const res = await fetch(`{{ url_for('api_pending_operations', username=cur_user) }}`);
+  const data = await res.json();
+  const pendingDiv = document.getElementById('pending-operations');
+  const tbody = document.getElementById('pending-tbody');
+  
+  if(data.operations && data.operations.length > 0){
+    pendingDiv.style.display = 'block';
+    tbody.innerHTML = '';
+    
+    for(const op of data.operations){
+      const tr = document.createElement('tr');
+      const statusClass = getOperationStatusClass(op.status);
+      tr.innerHTML = `
+        <td class="mono">${op.kind}</td>
+        <td class="mono">${op.meta.dir || ''}</td>
+        <td class="mono">${op.meta.tpu || ''}</td>
+        <td class="${statusClass}">${op.msg || ''}</td>
+        <td class="muted">${new Date(op.ts * 1000).toLocaleTimeString()}</td>
+        <td>
+          <span class="spinner"></span>
+          <button class="btn" onclick="showOperationLogById('${op.tid}')" data-tid="${op.tid}" style="margin-left:8px; font-size:11px;">📋 See Log</button>
+        </td>
+      `;
+      tbody.appendChild(tr);
+    }
+  } else {
+    pendingDiv.style.display = 'none';
+  }
+}
+
+function getOperationStatusClass(status){
+  switch(status){
+    case 'applying': return 's-info';
+    case 'mounting': return 's-warn';
+    case 'pending': return 's-info';
+    case 'ok': return 's-success';
+    case 'err': return 's-error';
+    default: return 's-unknown';
+  }
+}
+
+document.addEventListener('keydown', (e)=>{
+  if(e.key==='r' || e.key==='R'){ e.preventDefault(); refreshJobs(); }
+  if(e.key==='Escape'){ closePicker(); }
+});
+
+// --------- 异步操作：提交后立即提示 + 轮询状态 ---------
+function toast(msg){ alert(msg); }
+
+async function pollOp(tid, where){
+  const el = document.querySelector(where);
+  if(el){ el.innerHTML = ` <span class="spinner"></span> 运行中...`; }
+  while(true){
+    const res = await fetch(`{{ url_for('op_status', tid='__ID__') }}`.replace('__ID__',tid));
+    if(!res.ok){ toast('查询状态失败'); return; }
+    const data = await res.json();
+    if(data.status==='pending'){
+      await new Promise(r=>setTimeout(r, 1500));
+      continue;
+    }
+    if(el){ el.textContent = (data.status==='ok'?'✅ 成功':'❌ 失败'); }
+    toast((data.status==='ok'?'✅ 成功':'❌ 失败') + '\\n' + (data.msg||'')); 
+    refreshJobs();
+    break;
+  }
+}
+
+async function doResume(win, tpu=null){
+  toast('已提交 Resume 操作');
+  const res = await fetch(`{{ url_for('api_resume_async', username=cur_user) }}`,{
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({window_id: win, tpu})
+  });
+  const data = await res.json();
+  if(!data.ok){ toast('❌ 提交失败\\n'+(data.msg||'')); return; }
+  pollOp(data.tid, '#opstate-'+win);
+}
+async function doRerun(win, tpu=null){
+  toast('已提交 Rerun 操作');
+  const res = await fetch(`{{ url_for('api_rerun_async', username=cur_user) }}`,{
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({window_id: win, tpu})
+  });
+  const data = await res.json();
+  if(!data.ok){ toast('❌ 提交失败\\n'+(data.msg||'')); return; }
+  pollOp(data.tid, '#opstate-'+win);
+}
+async function doKill(win){
+  toast('已提交 Kill 操作');
+  const res = await fetch(`{{ url_for('api_kill_async', username=cur_user) }}`,{
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({window_id: win})
+  });
+  const data = await res.json();
+  if(!data.ok){ toast('❌ 提交失败\\n'+(data.msg||'')); return; }
+  pollOp(data.tid, '#opstate-'+win);
+}
+
+async function doClean(reFlag){
+  toast('已提交 Clean 操作');
+  const res = await fetch(`{{ url_for('api_clean', username=cur_user) }}?re=${reFlag?1:0}`,{method:'POST'});
+  const data = await res.json();
+  toast((data.ok?'✅ 成功':'❌ 失败') + '\\n' + (data.msg||''));
+  refreshJobs();
+}
+
+function viewLog(win){ window.open(`{{ url_for('view_log', username=cur_user, window_id='__W__') }}`.replace('__W__',win),'_blank'); }
+
+// ---------- TPU 选择器（多步骤选择） ----------
+let pickerFor = null; // {win, action}
+let pickedTpu = null;
+let pickerState = {
+  step: 1,
+  selectedType: null,
+  selectedTpu: null
+};
+
+function openTpuPicker(win, action){
+  pickerFor = {win, action};
+  pickedTpu = null;
+  pickerState = { step: 1, selectedType: null, selectedTpu: null };
+  document.getElementById('picker-target').textContent = `目标: #${win} / ${action}`;
+  document.getElementById('picked-thing').textContent = '未选择';
+  document.getElementById('tpu-modal').classList.add('show');
+  loadPickerStep1();
+}
+function closePicker(){ document.getElementById('tpu-modal').classList.remove('show'); }
+document.getElementById('tpu-modal').addEventListener('click', (e)=>{ if(e.target && e.target.id==='tpu-modal') closePicker(); });
+
+// Multi-step picker functions
+function loadPickerStep1(){
+  // Load TPU types
+  fetch(`{{ url_for('api_tpu_types') }}`)
+    .then(r => r.json())
+    .then(data => {
+      const tbody = document.getElementById('tpu-types-tbody');
+      tbody.innerHTML = '';
+      if(data.types && data.types.length > 0){
+        data.types.forEach(type => {
+          const tr = document.createElement('tr');
+          tr.style.cursor = 'pointer';
+          tr.onclick = () => selectPickerType(type);
+          tr.innerHTML = `
+            <td class="mono">${type}</td>
+          `;
+          tbody.appendChild(tr);
+        });
+      }
+      updatePickerStep();
+    });
+}
+
+function loadPickerStep2(){
+  // Load specific TPUs based on selected type
+  fetch(`{{ url_for('api_tpus_by_type', tpu_type='__TYPE__') }}`.replace('__TYPE__', pickerState.selectedType))
+    .then(r => r.json())
+    .then(data => {
+      const tbody = document.getElementById('tpus-tbody');
+      tbody.innerHTML = '';
+      
+      if(data.tpus && data.tpus.length > 0){
+        data.tpus.forEach(tpu => {
+          const tr = document.createElement('tr');
+          tr.style.cursor = 'pointer';
+          tr.onclick = () => selectPickerTpu(tpu);
+          
+          // Check if TPU should be marked as grey (running/reserved by other users)
+          const isGrey = tpu.user && 
+                        tpu.user.trim() !== '' && 
+                        tpu.user.toLowerCase() !== 'free' && 
+                        tpu.user !== '{{ cur_user }}';
+          if(isGrey) {
+            tr.classList.add('running');
+          }
+          
+          const statusClass = getTpuStatusClass(tpu.script_note);
+          tr.innerHTML = `
+            <td class="mono">${tpu.alias}</td>
+            <td class="${statusClass}">${tpu.script_note || ''}</td>
+            <td class="mono">${tpu.user || ''}</td>
+            <td class="mono">${tpu.zone || ''}</td>
+          `;
+          tbody.appendChild(tr);
+        });
+      }
+      updatePickerStep();
+    });
+}
+
+function selectPickerType(type){
+  pickerState.selectedType = type;
+  pickerState.step = 2;
+  loadPickerStep2();
+}
+
+function selectPickerTpu(tpu){
+  pickerState.selectedTpu = tpu;
+  pickedTpu = tpu;
+  document.getElementById('picked-thing').textContent = `已选: ${tpu.alias}`;
+  updatePickerStep();
+  updatePickerButtons(tpu);
+}
+
+function pickerPrevStep(){
+  if(pickerState.step > 1) {
+    pickerState.step--;
+    if(pickerState.step === 1) {
+      pickerState.selectedType = null;
+      loadPickerStep1();
+    }
+  }
+}
+
+function updatePickerStep(){
+  // Hide all steps
+  document.getElementById('picker-step1').style.display = 'none';
+  document.getElementById('picker-step2').style.display = 'none';
+  
+  // Show current step
+  document.getElementById(`picker-step${pickerState.step}`).style.display = 'block';
+  
+  // Update step indicator
+  document.getElementById('picker-step').textContent = `步骤 ${pickerState.step}/2`;
+  
+  // Update buttons
+  const prevBtn = document.getElementById('picker-prev');
+  prevBtn.style.display = pickerState.step > 1 ? 'block' : 'none';
+  
+  // Hide all action buttons initially
+  const allButtons = ['picker-resume', 'picker-rerun', 'picker-apply-resume', 'picker-apply-rerun', 'picker-reapply-resume', 'picker-reapply-rerun'];
+  allButtons.forEach(id => {
+    document.getElementById(id).style.display = 'none';
+  });
+}
+
+function updatePickerButtons(tpu){
+  if(!tpu) return;
+  
+  const status = (tpu.script_note || '').toUpperCase();
+  const resumeBtn = document.getElementById('picker-resume');
+  const rerunBtn = document.getElementById('picker-rerun');
+  const applyResumeBtn = document.getElementById('picker-apply-resume');
+  const applyRerunBtn = document.getElementById('picker-apply-rerun');
+  const reapplyResumeBtn = document.getElementById('picker-reapply-resume');
+  const reapplyRerunBtn = document.getElementById('picker-reapply-rerun');
+  
+  // Hide all buttons first
+  [resumeBtn, rerunBtn, applyResumeBtn, applyRerunBtn, reapplyResumeBtn, reapplyRerunBtn].forEach(btn => {
+    btn.style.display = 'none';
+  });
+  
+  // Show buttons based on status
+  if(status === 'NOT FOUND') {
+    // Only apply buttons for NOT FOUND
+    applyResumeBtn.style.display = 'block';
+    applyRerunBtn.style.display = 'block';
+  } else if(status === 'READY') {
+    // Only direct buttons for READY
+    resumeBtn.style.display = 'block';
+    rerunBtn.style.display = 'block';
+  } else if(status === 'PREEMPTED') {
+    // Only reapply buttons for PREEMPTED
+    reapplyResumeBtn.style.display = 'block';
+    reapplyRerunBtn.style.display = 'block';
+  } else {
+    // Default: show both direct and apply buttons
+    resumeBtn.style.display = 'block';
+    rerunBtn.style.display = 'block';
+    applyResumeBtn.style.display = 'block';
+    applyRerunBtn.style.display = 'block';
+  }
+}
+
+function getTpuStatusClass(scriptNote) {
+  if (!scriptNote) return 'status-free';
+  const status = scriptNote.toUpperCase();
+  if (status === 'READY') return 'script-ready';
+  if (status === 'NOT FOUND') return 'script-notfound';
+  if (status === 'PREEMPTED') return 'script-preempted';
+  if (status === 'TERMINATED') return 'script-terminated';
+  if (status === 'CREATING') return 'script-creating';
+  return 'script-unknown';
+}
+
+async function loadTpus(){
+  const res = await fetch(`{{ url_for('api_list_tpus') }}`);
+  const data = await res.json();
+  const tbody = document.getElementById('tpus-tbody');
+  tbody.innerHTML = "";
+  for(const r of data.rows){
+    const tr = document.createElement('tr');
+    tr.style.cursor='pointer';
+    tr.onclick = ()=>{ pickedTpu = r; document.getElementById('picked-thing').textContent = '已选：'+r.alias; };
+    tr.innerHTML = `
+      <td class="mono">${r.alias}</td>
+      <td>${r.running_status || ''}</td>
+      <td class="mono">${r.zone || ''}</td>
+      <td class="mono">${(String(r.preemptible).toLowerCase()==='true' || r.preemptible==='1') ? 'preemptible' : 'normal'}</td>
+      <td class="mono">${r.user||''}</td>
+      <td style="max-width:320px;white-space:nowrap;overflow-x:auto">${r.user_note||''}</td>
+    `;
+    tbody.appendChild(tr);
+  }
+  const input = document.getElementById('tpu-search');
+  input.oninput = ()=>{
+    const q = input.value.toLowerCase();
+    for(const tr of tbody.querySelectorAll('tr')){
+      const s = tr.textContent.toLowerCase();
+      tr.style.display = s.includes(q) ? '' : 'none';
+    }
+  };
+}
+
+function submitPicker(what){
+  if(!pickerFor || !pickedTpu){ toast('请先从表格中选择一个 TPU'); return; }
+  const alias = pickedTpu.alias || pickedTpu;
+  if(what==='resume') doResume(pickerFor.win, alias);
+  else doRerun(pickerFor.win, alias);
+  closePicker();
+}
+function submitPickerApply(what){
+  if(!pickerFor || !pickedTpu){ toast('请先从表格中选择一个 TPU'); return; }
+  const alias = pickedTpu.alias || pickedTpu;
+  const pre = pickedTpu.preemptible;
+  toast('已提交 申请并'+(what==='resume'?'Resume':'Rerun')+' 操作');
+  const url = what==='resume' ? `{{ url_for('api_apply_resume_async', username=cur_user) }}` : `{{ url_for('api_apply_rerun_async', username=cur_user) }}`;
+  fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({window_id: pickerFor.win, alias, pre})})
+    .then(r=>r.json()).then(data=>{
+      if(!data.ok){ toast('❌ 提交失败\\n'+(data.msg||'')); return; }
+      // Close the picker modal
+      closePicker();
+      // Show progress bar
+      pollOp(data.tid, '#opstate-'+pickerFor.win);
+    });
+}
+
+function submitPickerReapply(what){
+  if(!pickerFor || !pickedTpu){ toast('请先从表格中选择一个 TPU'); return; }
+  const alias = pickedTpu.alias || pickedTpu;
+  const pre = pickedTpu.preemptible;
+  toast('已提交 重新申请并'+(what==='resume'?'Resume':'Rerun')+' 操作');
+  const url = what==='resume' ? `{{ url_for('api_reapply_resume_async', username=cur_user) }}` : `{{ url_for('api_reapply_rerun_async', username=cur_user) }}`;
+  fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({window_id: pickerFor.win, alias, pre})})
+    .then(r=>r.json()).then(data=>{
+      if(!data.ok){ toast('❌ 提交失败\\n'+(data.msg||'')); return; }
+      // Close the picker modal
+      closePicker();
+      // Show progress bar
+      pollOp(data.tid, '#opstate-'+pickerFor.win);
+    });
+}
+
+// ---------- Run Modal Functions ----------
+let runState = {
+  step: 1,
+  selectedDir: null,
+  selectedType: null,
+  selectedTpu: null
+};
+
+function openRunModal(){
+  runState = { step: 1, selectedDir: null, selectedType: null, selectedTpu: null };
+  document.getElementById('run-modal').classList.add('show');
+  loadRunStep1();
+}
+
+function closeRunModal(){
+  document.getElementById('run-modal').classList.remove('show');
+}
+
+function loadRunStep1(){
+  // Load directories for current user
+  fetch(`{{ url_for('api_user_dirs', username=cur_user) }}`)
+    .then(r => r.json())
+    .then(data => {
+      const tbody = document.getElementById('dirs-tbody');
+      tbody.innerHTML = '';
+      if(data.dirs && data.dirs.length > 0){
+        data.dirs.forEach((dir, index) => {
+          const tr = document.createElement('tr');
+          tr.style.cursor = 'pointer';
+          tr.onclick = () => selectDir(dir, index);
+          tr.innerHTML = `
+            <td class="mono">${index}</td>
+            <td class="mono">${dir}</td>
+          `;
+          tbody.appendChild(tr);
+        });
+      } else {
+        tbody.innerHTML = '<tr><td colspan="2" class="muted">没有找到目录</td></tr>';
+      }
+    })
+    .catch(e => {
+      console.error('Failed to load directories:', e);
+      document.getElementById('dirs-tbody').innerHTML = '<tr><td colspan="2" class="muted">加载失败</td></tr>';
+    });
+  
+  updateRunStep();
+}
+
+function selectDir(dir, index){
+  runState.selectedDir = { dir, index };
+  
+  // Remove previous selection highlighting
+  const tbody = document.getElementById('dirs-tbody');
+  tbody.querySelectorAll('tr').forEach(row => {
+    row.classList.remove('selected');
+  });
+  
+  // Add highlighting to selected row
+  event.target.closest('tr').classList.add('selected');
+  
+  runState.step = 2;
+  loadRunStep2();
+}
+
+function loadRunStep2(){
+  // Load TPU types
+  fetch(`{{ url_for('api_tpu_types') }}`)
+    .then(r => r.json())
+    .then(data => {
+      const tbody = document.getElementById('types-tbody');
+      tbody.innerHTML = '';
+      if(data.types && data.types.length > 0){
+        data.types.forEach(type => {
+          const tr = document.createElement('tr');
+          tr.style.cursor = 'pointer';
+          tr.onclick = () => selectType(type);
+          tr.innerHTML = `
+            <td class="mono">${type}</td>
+          `;
+          tbody.appendChild(tr);
+        });
+      } else {
+        tbody.innerHTML = '<tr><td class="muted">没有找到 TPU 类型</td></tr>';
+      }
+    })
+    .catch(e => {
+      console.error('Failed to load TPU types:', e);
+      document.getElementById('types-tbody').innerHTML = '<tr><td class="muted">加载失败</td></tr>';
+    });
+  
+  updateRunStep();
+}
+
+function selectType(type){
+  runState.selectedType = type;
+  
+  // Remove previous selection highlighting
+  const tbody = document.getElementById('types-tbody');
+  tbody.querySelectorAll('tr').forEach(row => {
+    row.classList.remove('selected');
+  });
+  
+  // Add highlighting to selected row
+  event.target.closest('tr').classList.add('selected');
+  
+  runState.step = 3;
+  loadRunStep3();
+}
+
+function loadRunStep3(){
+  // Load TPUs of selected type, including running TPUs but marking them differently
+  fetch(`{{ url_for('api_tpus_by_type', tpu_type='__TYPE__') }}`.replace('__TYPE__', runState.selectedType))
+    .then(r => r.json())
+    .then(data => {
+      const tbody = document.getElementById('run-tpus-tbody');
+      tbody.innerHTML = '';
+      if(data.tpus && data.tpus.length > 0){
+        data.tpus.forEach(tpu => {
+          const tr = document.createElement('tr');
+          tr.style.cursor = 'pointer';
+          tr.onclick = () => selectTpu(tpu);
+          
+          // Check if TPU should be marked as grey (running/reserved by other users)
+          // Grey if: has a user that is not 'free' and not the current user
+          const isGrey = tpu.user && 
+                        tpu.user.trim() !== '' && 
+                        tpu.user.toLowerCase() !== 'free' && 
+                        tpu.user !== '{{ cur_user }}';
+          if(isGrey) {
+            tr.classList.add('running');
+          }
+          
+          const statusClass = getTpuStatusClass(tpu.script_note);
+          tr.innerHTML = `
+            <td class="mono">${tpu.alias}</td>
+            <td class="${statusClass}">${tpu.script_note || ''}</td>
+            <td class="mono">${tpu.zone || ''}</td>
+            <td class="mono">${tpu.user || ''}</td>
+            <td>
+              ${tpu.script_note === 'NOT FOUND' ? 
+                `<button class="btn" onclick="event.stopPropagation(); applyAndRun('${tpu.alias}')">申请并运行</button>` : 
+                '<span class="muted">—</span>'
+              }
+            </td>
+          `;
+          tbody.appendChild(tr);
+        });
+      } else {
+        tbody.innerHTML = '<tr><td colspan="5" class="muted">没有找到可用的 TPU</td></tr>';
+      }
+    })
+    .catch(e => {
+      console.error('Failed to load TPUs:', e);
+      document.getElementById('run-tpus-tbody').innerHTML = '<tr><td colspan="5" class="muted">加载失败</td></tr>';
+    });
+  
+  updateRunStep();
+}
+
+function selectTpu(tpu){
+  // Check if TPU should show confirmation (running/reserved by other users)
+  const needsConfirmation = tpu.user && 
+                           tpu.user.trim() !== '' && 
+                           tpu.user.toLowerCase() !== 'free' && 
+                           tpu.user !== '{{ cur_user }}';
+  
+  if(needsConfirmation) {
+    const confirmed = confirm(`警告: TPU ${tpu.alias} 正在被用户 ${tpu.user} 使用。\n\n确定要继续使用这个 TPU 吗？\n\n点击"确定"继续，点击"取消"选择其他 TPU。`);
+    if(!confirmed) {
+      return; // User cancelled, don't select this TPU
+    }
+  }
+  
+  runState.selectedTpu = tpu;
+  
+  // Remove previous selection highlighting
+  const tbody = document.getElementById('run-tpus-tbody');
+  tbody.querySelectorAll('tr').forEach(row => {
+    row.classList.remove('selected');
+  });
+  
+  // Add highlighting to selected row
+  event.target.closest('tr').classList.add('selected');
+  
+  updateRunStep();
+}
+
+function getTpuStatusClass(scriptNote){
+  if(!scriptNote) return '';
+  const note = scriptNote.toUpperCase();
+  if(note === 'READY') return 'script-ready';
+  if(note === 'NOT FOUND') return 'script-notfound';
+  if(note === 'PREEMPTED') return 'script-preempted';
+  if(note === 'TERMINATED') return 'script-terminated';
+  if(note === 'CREATING') return 'script-creating';
+  return 'script-unknown';
+}
+
+function applyAndRun(alias){
+  if(!runState.selectedDir) return;
+  toast('已提交 申请并运行 操作');
+  fetch(`{{ url_for('api_apply_run_async', username=cur_user) }}`, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      dir: runState.selectedDir.dir,
+      tpu: alias
+    })
+  })
+  .then(r => r.json())
+  .then(data => {
+    if(!data.ok){ toast('❌ 提交失败\\n'+(data.msg||'')); return; }
+    toast('✅ 申请并运行操作已提交');
+    closeRunModal();
+    refreshJobs();
+  });
+}
+
+function runPrevStep(){
+  if(runState.step > 1){
+    runState.step--;
+    updateRunStep();
+  }
+}
+
+function updateRunStep(){
+  // Update step indicator
+  document.getElementById('run-step').textContent = `步骤 ${runState.step}/3`;
+  
+  // Show/hide steps
+  for(let i = 1; i <= 3; i++){
+    const stepEl = document.getElementById(`run-step${i}`);
+    stepEl.style.display = i === runState.step ? 'block' : 'none';
+  }
+  
+  // Show/hide prev button
+  document.getElementById('run-prev').style.display = runState.step > 1 ? 'block' : 'none';
+  
+  // Update selected info and execute button
+  const selectedEl = document.getElementById('run-selected');
+  const executeEl = document.getElementById('run-execute');
+  
+  if(runState.step === 3 && runState.selectedTpu){
+    selectedEl.textContent = `已选择: ${runState.selectedDir.dir} → ${runState.selectedType} → ${runState.selectedTpu.alias}`;
+    executeEl.style.display = 'block';
+  } else {
+    selectedEl.textContent = '未选择';
+    executeEl.style.display = 'none';
+  }
+}
+
+function executeRun(){
+  if(!runState.selectedDir || !runState.selectedTpu) return;
+  
+  toast('已提交运行操作');
+  fetch(`{{ url_for('api_run_async', username=cur_user) }}`, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      dir: runState.selectedDir.dir,
+      tpu: runState.selectedTpu.alias
+    })
+  })
+  .then(r => r.json())
+  .then(data => {
+    if(!data.ok){ toast('❌ 提交失败\\n'+(data.msg||'')); return; }
+    toast('✅ 运行操作已提交');
+    closeRunModal();
+    refreshJobs();
+  });
+}
+
+// Close modal when clicking outside
+document.getElementById('run-modal').addEventListener('click', (e) => {
+  if(e.target && e.target.id === 'run-modal') closeRunModal();
+});
+</script>
+
+</body>
+</html>
+"""
+
+TPU_PANEL_HTML = r"""
+<!doctype html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8">
+  <title>TPU 面板</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    :root{ --bg:#0b1220; --panel:#0f1a33; --txt:#d9e1ff; --border:#203055; --accent:#6da7ff; --topbar:60px; }
+    body{margin:0;background:var(--bg);color:var(--txt);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Ubuntu,"Helvetica Neue",Arial;}
+    .container{max-width:1200px;margin:0 auto;padding:16px}
+    .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px}
+    table{width:100%;border-collapse:separate;border-spacing:0;border:1px solid var(--border);border-radius:12px;overflow:hidden}
+    thead th{position:sticky;top:var(--topbar);background:#0c1630;border-bottom:1px solid var(--border);padding:8px;text-align:left;z-index:30}
+    tbody td{border-bottom:1px solid var(--border);padding:8px;vertical-align:top}
+    .btn{border:1px solid var(--border);background:#0e1a37;color:var(--txt);padding:6px 10px;border-radius:8px;cursor:pointer}
+    .btn:hover{filter:brightness(1.2)}
+    .input{background:#0d1a36;border:1px solid var(--border);color:#d9e1ff;padding:6px 8px;border-radius:6px;min-width:120px}
+    .mono{font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;}
+    .muted{color:#9fb0d1}
+    .spinner{width:14px;height:14px;border:2px solid #2a3a66;border-top-color:var(--accent);border-radius:50%;display:inline-block;animation:spin 1s linear infinite}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    /* TPU Script Note Colors */
+    td.script-ready{color:#20c997 !important} 
+    td.script-notfound{color:#ff6b6b !important} 
+    td.script-preempted{color:#ffc107 !important} 
+    td.script-terminated{color:#9fb0d1 !important} 
+    td.script-creating{color:#66d9ef !important}
+    td.script-unknown{color:#6c757d !important}
+    .progress-bar{width:100%;height:8px;background:#2a3a66;border-radius:4px;overflow:hidden;margin:4px 0}
+    .progress-fill{height:100%;background:linear-gradient(90deg,#20c997,#66d9ef);transition:width 0.3s ease}
+    .progress-text{font-size:11px;color:var(--muted);margin-top:2px}
+    /* Log Modal */
+    .modal{position:fixed;inset:0;background:rgba(0,0,0,.7);display:none;align-items:center;justify-content:center;z-index:101}
+    .modal.show{display:flex}
+    .modal-content{position:relative;width:min(800px,92vw);max-height:85vh;overflow:auto;background:#0f1a33;border:2px solid #6da7ff;border-radius:12px;padding:16px;box-shadow:0 10px 30px rgba(0,0,0,0.5)}
+    .modal-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;border-bottom:1px solid var(--border);padding-bottom:8px}
+    .modal-body{margin-bottom:16px}
+    .modal-footer{display:flex;gap:8px;justify-content:flex-end;border-top:1px solid var(--border);padding-top:8px}
+    .modal-close-btn{background:#dc3545 !important;color:white !important;border:1px solid #dc3545 !important;padding:4px 8px !important;font-size:14px !important;cursor:pointer !important}
+    .modal-close-btn:hover{background:#c82333 !important;border-color:#bd2130 !important}
+    .topbar{position:sticky;top:0;z-index:50;background:linear-gradient(180deg,var(--panel),rgba(15,26,51,0.7));border-bottom:1px solid var(--border);}
+    .users{display:flex;gap:8px;padding:12px 16px}
+    .user-pill{padding:8px 12px;border:1px solid var(--border);border-radius:999px;background:#0c1834;color:#d9e1ff;opacity:.9}
+  </style>
+</head>
+<body>
+  <div class="topbar" id="topbar2">
+    <div class="container">
+      <div class="users">
+        <a class="user-pill" href="{{ url_for('index') }}">← 返回用户页</a>
+        <strong style="margin-left:8px">TPU 面板（以 spreadsheet 为准）</strong>
+      </div>
+    </div>
+  </div>
+
+  <div class="container">
+    <div class="row" style="justify-content:space-between">
+      <div class="row">
+        <input class="input" id="tpu-filter" placeholder="筛选 alias/zone/user/status">
+        <button class="btn" onclick="loadPanel()">刷新</button>
+      </div>
+    </div>
+
+    <div class="row muted">表格数据来自 <code>sheet.read_sheet_info()</code>；状态为空或 <em>NOT FOUND</em> 的行可尝试 Apply（默认 12 次 / 8 秒）。</div>
+
+    <table>
+      <tbody id="panel-body"></tbody>
+    </table>
+  </div>
+
+<script>
+function setTopbarVar(){
+  const tb = document.getElementById('topbar2');
+  document.documentElement.style.setProperty('--topbar', (tb?.offsetHeight||60)+'px');
+}
+window.addEventListener('load', setTopbarVar);
+window.addEventListener('resize', setTopbarVar);
+
+async function loadPanel(){
+  const res = await fetch(`{{ url_for('api_list_tpus') }}`);
+  const data = await res.json();
+  const tbody = document.getElementById('panel-body');
+  tbody.innerHTML = "";
+  const q = (document.getElementById('tpu-filter').value||'').toLowerCase();
+  for(const r of data.rows){
+    const s = (r.alias+' '+(r.running_status||'')+' '+(r.zone||'')+' '+(r.user||'')+' '+(r.user_note||'')+' '+(r.script_note||'')).toLowerCase();
+    if(q && !s.includes(q)) continue;
+    const tr = document.createElement('tr');
+    
+    // Normalize status
+    let status = r.running_status || '';
+    if(status === '没了!') status = 'NOT FOUND';
+    
+    // Get script note and determine if apply/reapply is allowed
+    let scriptNote = r.script_note || '';
+    const canApply = scriptNote.toUpperCase() === 'NOT FOUND';
+    const canReapply = scriptNote.toUpperCase() === 'PREEMPTED';
+    
+    // Determine status color class
+    let statusClass = '';
+    if(status.toLowerCase() === 'free') statusClass = 'status-free';
+    else if(status.toLowerCase() === 'reserved') statusClass = 'status-reserved';
+    else if(status.toLowerCase() === 'running') statusClass = 'status-running';
+    else if(status.toUpperCase() === 'NOT FOUND') statusClass = 'status-notfound';
+    else if(status.toLowerCase() === 'creating') statusClass = 'status-creating';
+    
+    // Determine script note color class
+    let scriptClass = '';
+    if(scriptNote.toUpperCase() === 'READY') scriptClass = 'script-ready';
+    else if(scriptNote.toUpperCase() === 'NOT FOUND') scriptClass = 'script-notfound';
+    else if(scriptNote.toUpperCase() === 'PREEMPTED') scriptClass = 'script-preempted';
+    else if(scriptNote.toUpperCase() === 'TERMINATED') scriptClass = 'script-terminated';
+    else if(scriptNote.toUpperCase() === 'CREATING') scriptClass = 'script-creating';
+    else if(scriptNote) scriptClass = 'script-unknown';
+    
+    tr.innerHTML = `
+      <td class="mono">${r.alias}</td>
+      <td class="${statusClass}">${status}</td>
+      <td class="mono">${r.zone||''}</td>
+      <td class="mono">${r.user||''}</td>
+      <td class="${scriptClass}">${scriptNote}</td>
+      <td style="max-width:200px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${r.user_note||''}">${r.user_note||''}</td>
+      <td>
+        ${ (canApply || canReapply) ? `
+          <div>
+            <button class="btn" onclick="${canApply ? 'applyTpu' : 'reapplyTpu'}('${r.alias}')" id="btn-${r.alias}">${canApply ? 'Apply' : 'Reapply'}</button>
+            <div id="progress-${r.alias}" style="display:none">
+              <div class="progress-bar">
+                <div class="progress-fill" id="fill-${r.alias}" style="width:0%"></div>
+              </div>
+              <div class="progress-text" id="text-${r.alias}">准备中...</div>
+              <button class="btn" id="log-btn-${r.alias}" onclick="showOperationLog('${r.alias}')" style="display:none; margin-top:4px; font-size:11px;">📋 See Log</button>
+            </div>
+            <span id="ap-${r.alias}" class="muted"></span>
+          </div>` : '<span class="muted">—</span>' }
+      </td>
+    `;
+    tbody.appendChild(tr);
+    
+    // Check for ongoing operations for this TPU
+    if(canApply || canReapply){
+      checkOngoingOperations(r.alias);
+    }
+  }
+}
+
+async function checkOngoingOperations(alias){
+  try{
+    const res = await fetch(`{{ url_for('api_tpu_ongoing_operations', alias='__ALIAS__') }}`.replace('__ALIAS__', alias));
+    const data = await res.json();
+    
+    if(data.operations && data.operations.length > 0){
+      const op = data.operations[0]; // Get the first ongoing operation
+      
+      // Hide button and show progress
+      document.getElementById('btn-'+alias).style.display = 'none';
+      document.getElementById('progress-'+alias).style.display = 'block';
+      
+      // Set task ID on log button
+      const logBtn = document.getElementById('log-btn-'+alias);
+      if(logBtn) {
+        logBtn.setAttribute('data-tid', op.tid);
+        logBtn.style.display = 'block';
+      }
+      
+      // Start polling for this operation
+      pollApplyWithProgress(op.tid, alias, 12);
+    }
+  } catch(e){
+    console.log('Error checking ongoing operations for', alias, e);
+  }
+}
+
+async function applyTpu(alias){
+  // Hide button and show progress
+  document.getElementById('btn-'+alias).style.display = 'none';
+  document.getElementById('progress-'+alias).style.display = 'block';
+  
+  // Default values
+  const times = 12;
+  const wait = 8;
+  const pre = 'true';
+  
+  const res = await fetch(`{{ url_for('api_apply_async') }}`,{
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({alias, times, wait, pre})
+  });
+  const data = await res.json();
+  if(!data.ok){ 
+    alert('❌ 提交失败\\n'+(data.msg||'')); 
+    // Reset UI on error
+    document.getElementById('btn-'+alias).style.display = 'block';
+    document.getElementById('progress-'+alias).style.display = 'none';
+    return; 
+  }
+  
+  // Set task ID on log button
+  const logBtn = document.getElementById('log-btn-'+alias);
+  if(logBtn) {
+    logBtn.setAttribute('data-tid', data.tid);
+    logBtn.style.display = 'block';
+  }
+  
+  pollApplyWithProgress(data.tid, alias, times);
+}
+
+async function reapplyTpu(alias){
+  // Hide button and show progress
+  document.getElementById('btn-'+alias).style.display = 'none';
+  document.getElementById('progress-'+alias).style.display = 'block';
+  
+  // Default values
+  const times = 12;
+  const wait = 8;
+  const pre = 'true';
+  
+  const res = await fetch(`{{ url_for('api_reapply_async') }}`,{
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({alias, times, wait, pre})
+  });
+  const data = await res.json();
+  if(!data.ok){ 
+    alert('❌ 提交失败\\n'+(data.msg||'')); 
+    // Reset UI on error
+    document.getElementById('btn-'+alias).style.display = 'block';
+    document.getElementById('progress-'+alias).style.display = 'none';
+    return; 
+  }
+  
+  // Set task ID on log button
+  const logBtn = document.getElementById('log-btn-'+alias);
+  if(logBtn) {
+    logBtn.setAttribute('data-tid', data.tid);
+    logBtn.style.display = 'block';
+  }
+  
+  pollApplyWithProgress(data.tid, alias, times);
+}
+
+async function pollApplyWithProgress(tid, alias, totalTimes){
+  const progressFill = document.getElementById('fill-'+alias);
+  const progressText = document.getElementById('text-'+alias);
+  
+  while(true){
+    const res = await fetch(`{{ url_for('op_status', tid='__ID__') }}`.replace('__ID__',tid));
+    if(!res.ok){ 
+      progressText.textContent = '查询状态失败';
+      return; 
+    }
+    const data = await res.json();
+    
+    if(data.status==='pending' || data.status==='applying' || data.status==='mounting'){
+      // Show See Log button during operations
+      const logBtn = document.getElementById('log-btn-'+alias);
+      if(logBtn) {
+        logBtn.setAttribute('data-tid', tid);
+        logBtn.style.display = 'block';
+      }
+      
+      // Extract attempt number from message if available
+      let attempt = 1;
+      if(data.msg && data.msg.includes('attempt')){
+        const match = data.msg.match(/attempt (\d+)\/(\d+)/);
+        if(match){
+          attempt = parseInt(match[1]);
+          totalTimes = parseInt(match[2]);
+        }
+      }
+      
+      const progress = Math.min((attempt / totalTimes) * 100, 95);
+      progressFill.style.width = progress + '%';
+      progressText.textContent = `尝试 ${attempt}/${totalTimes} (${Math.round(progress)}%)`;
+      await new Promise(r=>setTimeout(r, 2000)); // Check every 2 seconds
+      continue;
+    }
+    
+    // Final result
+    if(data.status==='ok'){
+      progressFill.style.width = '100%';
+      progressFill.style.background = '#20c997';
+      progressText.textContent = '✅ 成功';
+    } else {
+      progressFill.style.background = '#ff6b6b';
+      progressText.textContent = '❌ 失败';
+    }
+    
+    // Reset UI after 3 seconds
+    setTimeout(() => {
+      document.getElementById('btn-'+alias).style.display = 'block';
+      document.getElementById('progress-'+alias).style.display = 'none';
+      progressFill.style.width = '0%';
+      progressFill.style.background = 'linear-gradient(90deg,#20c997,#66d9ef)';
+    }, 3000);
+    
+    loadPanel(); // Refresh the panel
+    break;
+  }
+}
+
+function showOperationLog(alias){
+  // Find the ongoing operation for this TPU
+  const logBtn = document.getElementById('log-btn-'+alias);
+  if(!logBtn) return;
+  
+  // Get the task ID from the button's data attribute or find it from ongoing operations
+  const tid = logBtn.getAttribute('data-tid');
+  if(!tid) {
+    alert('No ongoing operation found for this TPU');
+    return;
+  }
+  
+  // Open log modal
+  openLogModal(tid, alias);
+}
+
+function showOperationLogById(tid){
+  // Open log modal with just the task ID
+  openLogModal(tid, 'Operation');
+}
+
+function openLogModal(tid, alias){
+  // Create modal if it doesn't exist
+  let modal = document.getElementById('log-modal');
+  if(!modal){
+    modal = document.createElement('div');
+    modal.id = 'log-modal';
+    modal.className = 'modal';
+    modal.innerHTML = `
+      <div class="modal-content" style="max-width: 800px; max-height: 600px;">
+        <div class="modal-header">
+          <h3>Operation Log - ${alias}</h3>
+          <button class="btn modal-close-btn" onclick="closeLogModal()" style="float: right;">✕ Close</button>
+        </div>
+        <div class="modal-body">
+          <div id="log-content" style="background: #1a1a1a; color: #fff; padding: 10px; border-radius: 4px; font-family: monospace; white-space: pre-wrap; max-height: 400px; overflow-y: auto;"></div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn" onclick="refreshLog()">🔄 Refresh</button>
+          <button class="btn" onclick="closeLogModal()" style="background: #6c757d; color: white; border: 1px solid #6c757d;">Close</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+    
+    // Add click outside to close functionality
+    modal.addEventListener('click', function(e) {
+      if (e.target === modal) {
+        closeLogModal();
+      }
+    });
+    
+    // Add ESC key to close functionality
+    const escHandler = function(e) {
+      if (e.key === 'Escape' && modal.style.display === 'block') {
+        closeLogModal();
+      }
+    };
+    document.addEventListener('keydown', escHandler);
+    
+    // Store the handler for cleanup
+    modal.escHandler = escHandler;
+  }
+  
+  // Update modal content
+  modal.querySelector('h3').textContent = `Operation Log - ${alias}`;
+  modal.style.setProperty('display', 'flex', 'important');
+  modal.classList.add('show');
+  
+  // Store current tid and alias for refresh
+  modal.setAttribute('data-tid', tid);
+  modal.setAttribute('data-alias', alias);
+  
+  // Load initial log content
+  refreshLog();
+}
+
+function closeLogModal(){
+  const modal = document.getElementById('log-modal');
+  if(modal) {
+    modal.style.display = 'none';
+    modal.classList.remove('show');
+    
+    // Clean up event listeners
+    if(modal.escHandler) {
+      document.removeEventListener('keydown', modal.escHandler);
+      modal.escHandler = null;
+    }
+  }
+}
+
+async function refreshLog(){
+  const modal = document.getElementById('log-modal');
+  if(!modal) return;
+  
+  const tid = modal.getAttribute('data-tid');
+  const alias = modal.getAttribute('data-alias');
+  if(!tid) return;
+  
+  try{
+    const res = await fetch(`{{ url_for('op_status', tid='__ID__') }}`.replace('__ID__', tid));
+    const data = await res.json();
+    
+    const logContent = document.getElementById('log-content');
+    if(logContent){
+      const timestamp = new Date().toLocaleTimeString();
+      const logText = `[${timestamp}] Status: ${data.status}\nMessage: ${data.msg || 'No message'}\n\n--- Log Output ---\n${data.log || 'No log available yet...'}`;
+      logContent.textContent = logText;
+    }
+  } catch(e){
+    console.error('Failed to refresh log:', e);
+  }
+}
+
+async function pollApply(tid, alias){
+  const el = document.getElementById('ap-'+alias);
+  if(el){ el.innerHTML = ` <span class="spinner"></span> 正在尝试…`; }
+  while(true){
+    const res = await fetch(`{{ url_for('op_status', tid='__ID__') }}`.replace('__ID__',tid));
+    if(!res.ok){ alert('查询状态失败'); return; }
+    const data = await res.json();
+    if(data.status==='pending'){
+      await new Promise(r=>setTimeout(r,1500));
+      continue;
+    }
+    if(el){ el.textContent = (data.status==='ok'?'✅ 成功':'❌ 失败'); }
+    alert((data.status==='ok'?'✅ Apply 成功':'❌ Apply 失败') + '\\n' + (data.msg||''));
+    loadPanel();
+    break;
+  }
+}
+
+window.addEventListener('load', loadPanel);
+
+</script>
+</body>
+</html>
+"""
+
+@app.route("/")
+def index():
+    users = list_all_users()
+    if not users:
+        return render_template_string("<p style='padding:24px'>没在 data.json 里找到任何用户。</p>")
+    return redirect(url_for("user_page", username=users[0]))
+
+@app.route("/user/<username>")
+def user_page(username: str):
+    users = list_all_users()
+    data = build_job_rows(username)
+    rows = data.get("jobs", [])
+    return render_template_string(BASE_HTML, users=users, cur_user=username, rows=rows)
+
+# TPU 面板
+@app.route("/tpus")
+def tpu_panel():
+    return render_template_string(TPU_PANEL_HTML)
+
+# -------- APIs --------
+@app.route("/api/user/<username>/jobs")
+def api_jobs(username: str):
+    return jsonify(build_job_rows(username))
+
+@app.route("/api/user/<username>/pending-operations")
+def api_pending_operations(username: str):
+    """Get pending operations for a user"""
+    with OP_LOCK:
+        pending_ops = []
+        for tid, task in OP_TASKS.items():
+            # Show user-specific operations and global apply+run operations
+            if (task["status"] in ["pending", "applying", "mounting"] and 
+                (task.get("meta", {}).get("user") == username or 
+                 task["kind"] in ["apply+run", "run", "apply+resume", "apply+rerun", "reapply+resume", "reapply+rerun"])):
+                pending_ops.append({
+                    "tid": tid,
+                    "kind": task["kind"],
+                    "status": task["status"],
+                    "msg": task["msg"],
+                    "meta": task["meta"],
+                    "ts": task["ts"]
+                })
+        return jsonify({"ok": True, "operations": pending_ops})
+
+@app.route("/api/user/<username>/clean", methods=["POST"])
+def api_clean(username: str):
+    re_flag = request.args.get("re", "0") in ("1", "true", "True", "yes")
+    ok, msg = action_clean(username, re_flag=re_flag)
+    return jsonify({"ok": ok, "msg": msg})
+
+@app.route("/api/user/<username>/resume-async", methods=["POST"])
+def api_resume_async(username: str):
+    payload = request.get_json(silent=True) or {}
+    win = str(payload.get("window_id","")).strip()
+    tpu = payload.get("tpu", None)
+    if not win: return jsonify({"ok": False, "msg": "缺少 window_id"})
+    tid = _register_task("resume", {"user": username, "win": win, "tpu": tpu})
+    start_thread(_run_resume, username, win, tpu, tid)
+    return jsonify({"ok": True, "tid": tid})
+
+@app.route("/api/user/<username>/rerun-async", methods=["POST"])
+def api_rerun_async(username: str):
+    payload = request.get_json(silent=True) or {}
+    win = str(payload.get("window_id","")).strip()
+    tpu = payload.get("tpu", None)
+    if not win: return jsonify({"ok": False, "msg": "缺少 window_id"})
+    tid = _register_task("rerun", {"user": username, "win": win, "tpu": tpu})
+    start_thread(_run_rerun, username, win, tpu, tid)
+    return jsonify({"ok": True, "tid": tid})
+
+@app.route("/api/user/<username>/kill-async", methods=["POST"])
+def api_kill_async(username: str):
+    payload = request.get_json(silent=True) or {}
+    win = str(payload.get("window_id","")).strip()
+    if not win: return jsonify({"ok": False, "msg": "缺少 window_id"})
+    tid = _register_task("kill", {"user": username, "win": win})
+    start_thread(_run_kill, username, win, tid)
+    return jsonify({"ok": True, "tid": tid})
+
+@app.route("/api/op/<tid>")
+def op_status(tid: str):
+    with OP_LOCK:
+        item = OP_TASKS.get(tid)
+        if not item: return jsonify({"status":"err","msg":"no such task"})
+        return jsonify({
+            "status": item["status"], 
+            "msg": item.get("msg",""), 
+            "kind": item["kind"],
+            "log": item.get("log", "")
+        })
+
+@app.route("/api/tpus")
+def api_list_tpus():
+    try:
+        rows = fetch_tpu_sheet_rows()
+    except Exception as e:
+        return jsonify({"ok": False, "msg": str(e), "rows": []})
+    return jsonify({"ok": True, "rows": rows})
+
+@app.route("/api/tpu/<alias>/ongoing-operations")
+def api_tpu_ongoing_operations(alias: str):
+    """Get ongoing apply/reapply operations for a specific TPU"""
+    with OP_LOCK:
+        ongoing_ops = []
+        for tid, task in OP_TASKS.items():
+            if (task["status"] in ["pending", "applying"] and 
+                task["kind"] in ["apply", "reapply"] and 
+                task.get("meta", {}).get("alias") == alias):
+                ongoing_ops.append({
+                    "tid": tid,
+                    "status": task["status"],
+                    "msg": task["msg"],
+                    "ts": task["ts"]
+                })
+        return jsonify({"ok": True, "operations": ongoing_ops})
+
+@app.route("/api/ongoing-apply-run-operations")
+def api_ongoing_apply_run_operations():
+    """Get all ongoing apply+run operations"""
+    with OP_LOCK:
+        ongoing_ops = []
+        for tid, task in OP_TASKS.items():
+            if (task["status"] in ["pending", "applying", "mounting"] and 
+                task["kind"] in ["apply+run", "run"]):
+                ongoing_ops.append({
+                    "tid": tid,
+                    "kind": task["kind"],
+                    "status": task["status"],
+                    "msg": task["msg"],
+                    "meta": task["meta"],
+                    "ts": task["ts"]
+                })
+        return jsonify({"ok": True, "operations": ongoing_ops})
+
+@app.route("/api/tpu/apply-async", methods=["POST"])
+def api_apply_async():
+    p = request.get_json(silent=True) or {}
+    alias = str(p.get("alias","")).strip()
+    times = int(p.get("times", 12))
+    wait = int(p.get("wait", 8))
+    pre = p.get("pre", None)  # 目前仅记录；真正 norm/pre 的判定在"申请并 …"里使用
+    if not alias: return jsonify({"ok": False, "msg": "缺少 alias"})
+    tid = _register_task("apply", {"alias": alias, "times": times, "wait": wait, "pre": pre})
+    start_thread(_run_apply, alias, times, wait, tid)
+    return jsonify({"ok": True, "tid": tid})
+
+@app.route("/api/tpu/reapply-async", methods=["POST"])
+def api_reapply_async():
+    p = request.get_json(silent=True) or {}
+    alias = str(p.get("alias","")).strip()
+    times = int(p.get("times", 12))
+    wait = int(p.get("wait", 8))
+    pre = p.get("pre", None)
+    if not alias: return jsonify({"ok": False, "msg": "缺少 alias"})
+    tid = _register_task("reapply", {"alias": alias, "times": times, "wait": wait, "pre": pre})
+    start_thread(_run_reapply, alias, times, wait, tid)
+    return jsonify({"ok": True, "tid": tid})
+
+# 申请并 Resume/Rerun
+@app.route("/api/user/<username>/apply-resume-async", methods=["POST"])
+def api_apply_resume_async(username: str):
+    p = request.get_json(silent=True) or {}
+    alias = str(p.get("alias","")).strip()
+    win = str(p.get("window_id","")).strip()
+    pre_str = p.get("pre")
+    if not alias or not win: return jsonify({"ok": False, "msg": "缺少 alias/window_id"})
+    tid = _register_task("apply+resume", {"alias": alias, "user": username, "win": win})
+    start_thread(_run_apply_then_resume, username, win, alias, pre_str, tid)
+    return jsonify({"ok": True, "tid": tid})
+
+@app.route("/api/user/<username>/apply-rerun-async", methods=["POST"])
+def api_apply_rerun_async(username: str):
+    p = request.get_json(silent=True) or {}
+    alias = str(p.get("alias","")).strip()
+    win = str(p.get("window_id","")).strip()
+    pre_str = p.get("pre")
+    if not alias or not win: return jsonify({"ok": False, "msg": "缺少 alias/window_id"})
+    tid = _register_task("apply+rerun", {"alias": alias, "user": username, "win": win})
+    start_thread(_run_apply_then_rerun, username, win, alias, pre_str, tid)
+    return jsonify({"ok": True, "tid": tid})
+
+# 重新申请并 Resume/Rerun
+@app.route("/api/user/<username>/reapply-resume-async", methods=["POST"])
+def api_reapply_resume_async(username: str):
+    p = request.get_json(silent=True) or {}
+    alias = str(p.get("alias","")).strip()
+    win = str(p.get("window_id","")).strip()
+    pre_str = p.get("pre")
+    if not alias or not win: return jsonify({"ok": False, "msg": "缺少 alias/window_id"})
+    tid = _register_task("reapply+resume", {"alias": alias, "user": username, "win": win})
+    start_thread(_run_reapply_then_resume, username, win, alias, pre_str, tid)
+    return jsonify({"ok": True, "tid": tid})
+
+@app.route("/api/user/<username>/reapply-rerun-async", methods=["POST"])
+def api_reapply_rerun_async(username: str):
+    p = request.get_json(silent=True) or {}
+    alias = str(p.get("alias","")).strip()
+    win = str(p.get("window_id","")).strip()
+    pre_str = p.get("pre")
+    if not alias or not win: return jsonify({"ok": False, "msg": "缺少 alias/window_id"})
+    tid = _register_task("reapply+rerun", {"alias": alias, "user": username, "win": win})
+    start_thread(_run_reapply_then_rerun, username, win, alias, pre_str, tid)
+    return jsonify({"ok": True, "tid": tid})
+
+# -------- Run Modal APIs --------
+@app.route("/api/user/<username>/dirs")
+def api_user_dirs(username: str):
+    """Get directories for a user (like tpu ls <user>)"""
+    try:
+        code, out = call_cli("ls", username)
+        if code != 0:
+            return jsonify({"ok": False, "msg": out, "dirs": []})
+        
+        # Parse output to extract directories
+        lines = out.split('\n')
+        dirs = []
+        for line in lines:
+            line = line.strip()
+            if line and not line.startswith('#'):
+                # Extract directory name (assuming format like "0: /path/to/dir")
+                if ':' in line:
+                    dir_path = line.split(':', 1)[1].strip()
+                    if dir_path:
+                        dirs.append(dir_path)
+        
+        return jsonify({"ok": True, "dirs": dirs})
+    except Exception as e:
+        return jsonify({"ok": False, "msg": str(e), "dirs": []})
+
+@app.route("/api/tpu-types")
+def api_tpu_types():
+    """Get available TPU types"""
+    try:
+        # Get unique TPU types from the sheet data
+        rows = fetch_tpu_sheet_rows()
+        types = set()
+        for row in rows:
+            # Extract type from full_name (e.g., "kmh-tpuvm-v4-32-spot-yiyang" -> "v4-32")
+            full_name = row.get('full_name', '')
+            if 'v' in full_name:
+                parts = full_name.split('-')
+                for i, part in enumerate(parts):
+                    if part.startswith('v') and i + 1 < len(parts):
+                        tpu_type = f"{part}-{parts[i+1]}"
+                        types.add(tpu_type)
+                        break
+        
+        return jsonify({"ok": True, "types": sorted(list(types))})
+    except Exception as e:
+        return jsonify({"ok": False, "msg": str(e), "types": []})
+
+@app.route("/api/tpus/<tpu_type>")
+def api_tpus_by_type(tpu_type: str):
+    """Get TPUs of a specific type, including all TPUs (running/reserved/free)"""
+    try:
+        rows = fetch_tpu_sheet_rows()
+        current_user = request.args.get('user', '')
+        
+        # Filter TPUs by type only, include all TPUs
+        filtered_tpus = []
+        for row in rows:
+            full_name = row.get('full_name', '')
+            if tpu_type in full_name:
+                filtered_tpus.append(row)
+        
+        return jsonify({"ok": True, "tpus": filtered_tpus})
+    except Exception as e:
+        return jsonify({"ok": False, "msg": str(e), "tpus": []})
+
+@app.route("/api/user/<username>/run-async", methods=["POST"])
+def api_run_async(username: str):
+    """Run a job on a TPU"""
+    p = request.get_json(silent=True) or {}
+    dir_path = str(p.get("dir", "")).strip()
+    tpu = str(p.get("tpu", "")).strip()
+    
+    if not dir_path or not tpu:
+        return jsonify({"ok": False, "msg": "缺少 dir/tpu"})
+    
+    tid = _register_task("run", {"user": username, "dir": dir_path, "tpu": tpu})
+    start_thread(_run_job, username, dir_path, tpu, tid)
+    return jsonify({"ok": True, "tid": tid})
+
+@app.route("/api/user/<username>/apply-run-async", methods=["POST"])
+def api_apply_run_async(username: str):
+    """Apply for a TPU and then run a job on it"""
+    p = request.get_json(silent=True) or {}
+    dir_path = str(p.get("dir", "")).strip()
+    tpu = str(p.get("tpu", "")).strip()
+    
+    if not dir_path or not tpu:
+        return jsonify({"ok": False, "msg": "缺少 dir/tpu"})
+    
+    tid = _register_task("apply+run", {"user": username, "dir": dir_path, "tpu": tpu})
+    start_thread(_run_apply_then_job, username, dir_path, tpu, tid)
+    return jsonify({"ok": True, "tid": tid})
+
+def _run_job(username: str, dir_path: str, tpu: str, tid: str):
+    """Run tpu run <dir> <tpu> <user> with auto mode to avoid interactive prompts"""
+    tpu_py = _ensure_tpu_py()
+    if os.path.basename(tpu_py) == "tpu":
+        cmd = [tpu_py, "run", dir_path, tpu, username, "--auto", "-f"]
+    else:
+        cmd = [sys.executable, tpu_py, "run", dir_path, tpu, username, "--auto", "-f"]
+    
+    try:
+        p = subprocess.run(cmd, text=True, capture_output=True)
+        out = (p.stdout or "") + ("\n" + (p.stderr or "") if p.stderr else "")
+        
+        # Append to existing log if any
+        with OP_LOCK:
+            if tid in OP_TASKS:
+                existing_log = OP_TASKS[tid].get("log", "")
+                new_log = existing_log + f"\n--- Running Job ---\n{out.strip()}"
+                OP_TASKS[tid]["log"] = new_log
+        
+        _finish_task(tid, p.returncode == 0, out.strip(), out.strip())
+    except Exception as e:
+        _finish_task(tid, False, f"Failed to run job: {str(e)}", str(e))
+
+def _run_apply_then_job(username: str, dir_path: str, tpu: str, tid: str):
+    """Apply for TPU and then run job"""
+    # Update status to "Applying for TPU"
+    with OP_LOCK:
+        if tid in OP_TASKS:
+            OP_TASKS[tid]["status"] = "applying"
+            OP_TASKS[tid]["msg"] = f"Applying for TPU {tpu}..."
+    
+    # Apply for the TPU with retry logic (same as _run_apply)
+    times = 12
+    sleep_sec = 8
+    ok = False
+    last = ""
+    log_output = ""
+    
+    for i in range(max(1, times)):
+        # Update progress
+        with OP_LOCK:
+            if tid in OP_TASKS:
+                OP_TASKS[tid]["msg"] = f"Applying for TPU {tpu}... (attempt {i+1}/{times})"
+        
+        code, out = call_cli("apply", tpu)
+        last = out
+        log_output += f"Attempt {i+1}/{times}:\n{out}\n\n"
+        
+        # Store log after each attempt so it's available during progress
+        with OP_LOCK:
+            if tid in OP_TASKS:
+                OP_TASKS[tid]["log"] = log_output
+        
+        # Check both exit code and output for success indicators
+        if code == 0 and "[FAIL]" not in out and "not found" not in out.lower():
+            ok = True
+            break
+        time.sleep(max(1, sleep_sec))
+    
+    if not ok:
+        _finish_task(tid, False, f"apply failed after {times} attempts: {last}", last)
+        return
+    
+    # Update status to "TPU applied, mounting disk" and store log
+    with OP_LOCK:
+        if tid in OP_TASKS:
+            OP_TASKS[tid]["status"] = "mounting"
+            OP_TASKS[tid]["msg"] = f"TPU {tpu} applied, mounting disk..."
+            OP_TASKS[tid]["log"] = log_output
+    
+    # Then run the job
+    _run_job(username, dir_path, tpu, tid)
+
+from flask import Response, request
+from string import Template
+import html as _html
+import re
+
+ANSI_RE = re.compile(r'\x1B\[[0-?]*[ -/]*[@-~]')
+# -------- Log 页面（安全转义 + 长度限制 + 去色/跟随/自动刷新） --------
+@app.route("/log/<username>/<window_id>")
+def view_log(username: str, window_id: str):
+    # --- 参数与边界 ---
+    raw_n = request.args.get("n", "500000")
+    try:
+        n_int = int(raw_n)
+    except Exception:
+        n_int = 500000
+    tail_chars = max(10_000, min(2_000_000, n_int))
+
+    # 去 ANSI：?ansi=0 关闭 ANSI（默认 1 保留原样）
+    ansi_flag = request.args.get("ansi", "1")
+    strip_ansi_flag = (ansi_flag == "0")
+
+    # 默认抓取日志
+    user_obj = get_user_obj(username)
+    if not user_obj:
+        ok, log = False, f"user '{username}' not found"
+    else:
+        log = tmux_capture(user_obj.tmux_name, window_id, last_n=tail_chars)
+        ok = True
+
+    if not ok:
+        log = f"[Error] {log}"
+
+    # 去颜色（可选）
+    if strip_ansi_flag:
+        log = ANSI_RE.sub("", log or "")
+
+    # HTML 转义（避免破坏页面或注入）
+    log_html = _html.escape(log or "")
+
+    html = f"""
+    <html>
+      <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width,initial-scale=1">
+        <title>Log {username}:{window_id}</title>
+        <style>
+          body {{
+            background:#0b1220; color:#eaf1ff;
+            font-family: ui-monospace, Menlo, Monaco, Consolas, monospace; margin:0;
+          }}
+          pre {{
+            white-space: pre-wrap; word-break: break-word;
+            font-size:12px; line-height:1.35; padding:16px; margin:0;
+            overflow:auto; height: calc(100vh - 64px);
+          }}
+          .top {{
+            position:sticky; top:0; background:#0f1a33; border-bottom:1px solid #203055;
+            padding:8px 12px; display:flex; align-items:center; gap:12px; z-index: 1;
+          }}
+          kbd {{
+            padding:2px 6px; border:1px solid #203055; border-bottom-width:2px;
+            border-radius:4px; background:#0f1a33; color:#bcd0ff;
+          }}
+          .btn {{
+            border:1px solid #203055; background:#102046; color:#d9e1ff;
+            padding:6px 10px; border-radius:6px; cursor:pointer;
+          }}
+          .input {{
+            background:#0d1a36; border:1px solid #203055; color:#d9e1ff;
+            padding:6px 8px; border-radius:6px; min-width:100px;
+          }}
+          label {{ user-select:none; }}
+          .sep {{ width:1px; height:20px; background:#203055; margin:0 6px; }}
+          .hint {{ color:#9fb0c6; }}
+        </style>
+      </head>
+      <body>
+        <div class="top">
+          <button class="btn" onclick="doRefresh()">刷新</button>
+          <span class="hint">或按 <kbd>L</kbd> 刷新</span>
+          
+          <div class="sep"></div>
+          
+          <button class="btn" onclick="window.close()" style="background:#dc3545; color:white; border-color:#dc3545;">关闭窗口</button>
+          <span class="hint">或按 <kbd>Esc</kbd> 关闭</span>
+
+          <div class="sep"></div>
+
+          <label>Tail 字符数：</label>
+          <input class="input" id="tailN" value="{tail_chars}" style="width:120px">
+          <button class="btn" onclick="setN()">重新加载</button>
+
+          <div class="sep"></div>
+
+          <label><input type="checkbox" id="ansiOff"> 去色 ANSI</label>
+          <span class="hint">（或 URL 加 <code>?ansi=0</code>）</span>
+
+          <div class="sep"></div>
+
+          <label><input type="checkbox" id="follow" checked> 跟随尾部</label>
+          <span class="hint">快捷键 <kbd>F</kbd></span>
+
+          <div class="sep"></div>
+
+          <label>自动刷新(秒)：</label>
+          <input class="input" id="interval" placeholder="例如 5" style="width:80px">
+          <button class="btn" id="btnAuto">开始</button>
+
+          <div class="sep"></div>
+
+          <span class="hint">Home/End 到顶/到底</span>
+        </div>
+        <pre id="log">{log_html}</pre>
+
+        <script>
+          // 状态
+          let follow = true;
+          let autoTimer = null;
+
+          // 初始化控件状态
+          const elAnsi   = document.getElementById('ansiOff');
+          const elFollow = document.getElementById('follow');
+          const elLog    = document.getElementById('log');
+          const elIntv   = document.getElementById('interval');
+          const elBtnAuto= document.getElementById('btnAuto');
+
+          // 从 URL 参数恢复状态
+          const urlNow = new URL(window.location.href);
+          const ansiQP = urlNow.searchParams.get('ansi');
+          if (ansiQP === '0') elAnsi.checked = true;
+
+          // 刷新 / 重新加载
+          function doRefresh() {{
+            window.location.reload();
+          }}
+          function setN() {{
+            const n = document.getElementById('tailN').value || '400000';
+            const url = new URL(window.location.href);
+            url.searchParams.set('n', n);
+            url.searchParams.set('ansi', elAnsi.checked ? '0' : '1');
+            window.location.href = url.toString();
+          }}
+
+          // 去色复选：采用 URL 方案触发重新加载
+          elAnsi.addEventListener('change', () => {{
+            const url = new URL(window.location.href);
+            url.searchParams.set('ansi', elAnsi.checked ? '0' : '1');
+            window.location.href = url.toString();
+          }});
+
+          // 跟随尾部
+          function scrollToBottom() {{
+            elLog.scrollTop = elLog.scrollHeight;
+          }}
+          function maybeFollow() {{
+            if (follow) scrollToBottom();
+          }}
+          elFollow.addEventListener('change', () => {{
+            follow = elFollow.checked;
+            if (follow) scrollToBottom();
+          }});
+          document.addEventListener('DOMContentLoaded', () => {{
+            maybeFollow();
+          }});
+
+          // 自动刷新
+          function startAuto() {{
+            const s = parseFloat(elIntv.value);
+            if (!Number.isFinite(s) || s <= 0) {{
+              alert('请输入有效的秒数，例如 5');
+              return;
+            }}
+            stopAuto();
+            autoTimer = setInterval(doRefresh, Math.max(1000, s * 1000));
+            elBtnAuto.textContent = '停止';
+          }}
+          function stopAuto() {{
+            if (autoTimer) {{
+              clearInterval(autoTimer);
+              autoTimer = null;
+            }}
+            elBtnAuto.textContent = '开始';
+          }}
+          elBtnAuto.addEventListener('click', () => {{
+            if (autoTimer) stopAuto(); else startAuto();
+          }});
+
+          // 键盘快捷键
+          document.addEventListener('keydown', function(e) {{
+            if (e.key === 'Escape') window.close();
+            if (e.key === 'l' || e.key === 'L') doRefresh();
+            if (e.key === 'f' || e.key === 'F') {{
+              follow = !follow; elFollow.checked = follow; if (follow) scrollToBottom();
+            }}
+            if (e.key === 'r' || e.key === 'R') {{
+              if (autoTimer) stopAuto(); else startAuto();
+            }}
+            if (e.key === 'End') scrollToBottom();
+            if (e.key === 'Home') elLog.scrollTop = 0;
+          }});
+        </script>
+      </body>
+    </html>
+    """
+    return Response(html, mimetype="text/html; charset=utf-8")
+
+
+
+if __name__ == "__main__":
+    port = int(os.environ.get("WEB_PORT", "7960"))
+    host = os.environ.get("WEB_HOST", "0.0.0.0")
+    print(f"[web_ui] http://{host}:{port}  (TPU_PY_PATH={TPU_PY_PATH})")
+    app.run(host=host, port=port, debug=False)
