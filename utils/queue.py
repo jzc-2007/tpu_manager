@@ -128,7 +128,7 @@ def run_queued_job(user_obj, args):
         - id: the id of the task to be run
         - user_obj: User object
     """
-    queue = read_and_lock_queue()
+    queue = read_and_loxck_queue()
     try:
         # read the tpu and id from the args, tpu contains 'v?', where ? is a number between 0 and 9
         # id is a pure integer
@@ -400,8 +400,9 @@ def parse_config_args_for_queue(user_obj, args):
     # If a type filter was provided, union in all TPUs of that type
     if not valid_tpu:
         valid_tpu = list(filter_tpu_information(read_sheet_info(), zone=accept_zones, type=accept_tpu_types).keys())
-
-    tpu_type_to_log = ','.join(accept_tpu_types) if accept_tpu_types else 'v'+valid_tpu[0].split('v')[-1]+f'(+{len(valid_tpu)-1})'
+        tpu_type_to_log = ','.join(accept_tpu_types) if accept_tpu_types else 'v'+valid_tpu[0].split('v')[-1]+f'(+{len(valid_tpu)-1})'
+    else:
+        tpu_type_to_log = ','.join(explicit_tpus) if explicit_tpus else 'v'+valid_tpu[0].split('v')[-1]+f'(+{len(explicit_tpus)-1})'
 
     
     print(f"valid_tpu: {valid_tpu}")

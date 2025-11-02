@@ -169,6 +169,12 @@ def get_wandb_notes(dir):
         config = yaml.safe_load(f)
     if 'wandb_notes' in config:
         return config['wandb_notes']
+    elif 'logging' in config:
+        if 'wandb_notes' in config['logging']:
+            return config['logging']['wandb_notes']
+        else:
+            print(f"{WARNING} wandb_notes not found in logging config file")
+            return None
     else:
         print(f"{WARNING} wandb_notes not found in config file")
         return None

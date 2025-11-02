@@ -81,7 +81,7 @@ def read_legacy():
 def write_legacy(legacy):
     if len(legacy) > MAX_LEGACY_LENGTH:
         print(f"{WARNING} write_legacy: Legacy list is too long, truncating it.")
-        legacy = legacy[:MAX_LEGACY_LENGTH]
+        legacy = legacy[:MAX_LEGACY_LENGTH // 2]
     with open(LEGACY_PATH, 'w') as file:
         json.dump(legacy, file, indent=4)
 
@@ -121,7 +121,7 @@ def release_lock_legacy():
 def write_and_unlock_legacy(legacy):
     if len(legacy) > MAX_LEGACY_LENGTH:
         print(f"{WARNING} write_and_unlock_legacy: Legacy list is too long, truncating it.")
-        legacy = legacy[:MAX_LEGACY_LENGTH]
+        legacy = legacy[:MAX_LEGACY_LENGTH // 2]
 
     try:
         with open(LEGACY_PATH, 'w') as file:

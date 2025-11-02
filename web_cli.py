@@ -57,6 +57,12 @@ except Exception:
     SHEET_MODULE_OK = False
     sheet_mod = None
 
+try:
+    from utils import queue as queue_mod  # type: ignore
+except Exception:
+    QUEUE_MODULE_OK = False
+    queue_mod = None
+
 ANSI_RE = re.compile(r"\x1B\[[0-?]*[ -/]*[@-~]")
 def strip_ansi(s: str) -> str:
     return ANSI_RE.sub("", s or "")
@@ -755,7 +761,40 @@ BASE_HTML = r"""
       <span class="hint">或按 <kbd>R</kbd> 刷新当前用户</span>
     </div>
 
+    <!-- Queue Section -->
+    <div id="queue-section" style="margin-bottom: 30px;">
+      <h3 style="color: var(--txt); margin-bottom: 12px; display: flex; align-items: center; gap: 8px;">
+        <span>📋 队列</span>
+        <button class="btn" onclick="refreshQueue()" style="padding: 4px 8px; font-size: 12px;">🔄 刷新队列</button>
+      </h3>
+      <table id="queue-table" style="margin-bottom: 20px;">
+        <thead>
+          <tr>
+            <th>时间</th>
+            <th>ID</th>
+            <th>权限</th>
+            <th>TPU类型</th>
+            <th>备注</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody id="queue-tbody">
+          <tr><td colspan="6" class="muted" style="text-align: center;">加载中...</td></tr>
+        </tbody>
+      </table>
+    </div>
+
     <table id="job-table">
+      <thead>
+        <tr>
+          <th>Window</th>
+          <th>DIR</th>
+          <th>TPU</th>
+          <th>Tags</th>
+          <th>Status</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
       <tbody id="job-tbody">
         {% for j in rows %}
           <tr>
@@ -1036,6 +1075,62 @@ async function refreshJobs(){
   }
   setTopbarVar();
   loadPendingOperations();
+  refreshQueue();
+}
+
+async function refreshQueue(){
+  try {
+    const res = await fetch(`{{ url_for('api_queue', username=cur_user) }}`);
+    const data = await res.json();
+    const tbody = document.getElementById('queue-tbody');
+    
+    if(!data.ok || !data.queue || data.queue.length === 0){
+      tbody.innerHTML = '<tr><td colspan="6" class="muted" style="text-align: center;">队列为空</td></tr>';
+      return;
+    }
+    
+    tbody.innerHTML = "";
+    for (const q of data.queue){
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td class="mono" style="font-size: 11px;">${q.time||'-'}</td>
+        <td class="mono">${q.id||'-'}</td>
+        <td class="mono" style="font-size: 11px;">${q.perm||'-'}</td>
+        <td class="mono" style="font-size: 11px;">${q.tpu_type||'-'}</td>
+        <td style="max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${q.note||''}">${q.note||'-'}</td>
+        <td class="actions">
+          <button class="btn" onclick="doDequeue('${q.id}')" style="background: #dc3545; color: white; border-color: #dc3545; padding: 4px 8px; font-size: 11px;">删除</button>
+        </td>
+      `;
+      tbody.appendChild(tr);
+    }
+  } catch(e){
+    console.error('Failed to refresh queue:', e);
+    const tbody = document.getElementById('queue-tbody');
+    tbody.innerHTML = '<tr><td colspan="6" class="muted" style="text-align: center; color: var(--err);">加载队列失败</td></tr>';
+  }
+}
+
+async function doDequeue(taskId){
+  if(!confirm(`确定要删除队列任务 ${taskId} 吗？`)) return;
+  
+  try {
+    const res = await fetch(`{{ url_for('api_dequeue', username=cur_user) }}`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({task_id: taskId})
+    });
+    const data = await res.json();
+    
+    if(data.ok){
+      toast('✅ 已删除队列任务 ' + taskId);
+      refreshQueue();
+    } else {
+      toast('❌ 删除失败\\n' + (data.msg||''));
+    }
+  } catch(e){
+    toast('❌ 删除失败\\n' + e.message);
+  }
 }
 
 async function loadPendingOperations(){
@@ -1093,6 +1188,11 @@ function getOperationStatusClass(status){
 document.addEventListener('keydown', (e)=>{
   if(e.key==='r' || e.key==='R'){ e.preventDefault(); refreshJobs(); }
   if(e.key==='Escape'){ closePicker(); }
+});
+
+// Load queue on page load
+window.addEventListener('load', () => {
+  refreshQueue();
 });
 
 // --------- 异步操作：提交后立即提示 + 轮询状态 ---------
@@ -2193,6 +2293,63 @@ def api_pending_operations(username: str):
                     "ts": task["ts"]
                 })
         return jsonify({"ok": True, "operations": pending_ops})
+
+@app.route("/api/user/<username>/queue")
+def api_queue(username: str):
+    """Get queue data for a user"""
+    try:
+        if not QUEUE_MODULE_OK or not queue_mod:
+            return jsonify({"ok": False, "msg": "Queue module not available", "queue": []})
+        
+        # Get queue rows for this user
+        rows = queue_mod.visualize_queue(return_rows=True, user=username)
+        
+        # Format rows for web display
+        queue_data = []
+        for row in rows:
+            queue_data.append({
+                "time": row.get("time", "-"),
+                "id": row.get("id", "-"),
+                "perm": row.get("perm", "-"),
+                "tpu_type": row.get("tpu_type", "-"),
+                "note": row.get("note", "-")
+            })
+        
+        return jsonify({"ok": True, "queue": queue_data})
+    except Exception as e:
+        return jsonify({"ok": False, "msg": str(e), "queue": []})
+
+@app.route("/api/user/<username>/dequeue", methods=["POST"])
+def api_dequeue(username: str):
+    """Dequeue a task by task_id"""
+    try:
+        if not QUEUE_MODULE_OK or not queue_mod:
+            return jsonify({"ok": False, "msg": "Queue module not available"})
+        
+        payload = request.get_json(silent=True) or {}
+        task_id = payload.get("task_id")
+        
+        if not task_id:
+            return jsonify({"ok": False, "msg": "task_id is required"})
+        
+        # Get user object - queue.dequeue expects a User object from users module
+        if USERS_MODULE_OK and users_mod:
+            data = read_data()
+            if username not in data.get("users", {}):
+                return jsonify({"ok": False, "msg": f"User {username} not found"})
+            user_obj = users_mod.user_from_dict(data["users"][username])
+        else:
+            # Fallback: create a simple namespace
+            import types
+            user_obj = types.SimpleNamespace()
+            user_obj.name = username
+        
+        # Call dequeue
+        queue_mod.dequeue(user_obj, [str(task_id)])
+        
+        return jsonify({"ok": True, "msg": f"Task {task_id} dequeued successfully"})
+    except Exception as e:
+        return jsonify({"ok": False, "msg": str(e)})
 
 @app.route("/api/user/<username>/clean", methods=["POST"])
 def api_clean(username: str):
