@@ -477,8 +477,8 @@ def check_env(tpu, quiet = False):
         print(f"{INFO} check_env: Checking environment in TPU {tpu}... This may take a while...")
     try:
         # get the output of the command
-        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout = 600)
-        stdout, stderr= result.stdout, result.stderr
+        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=600)
+        stdout, stderr = result.stdout, result.stderr
 
     except subprocess.CalledProcessError:
         if not quiet:
@@ -578,6 +578,14 @@ def mount_disk(tpu, quiet = False):
     # pip install lpips-j==0.0.6
     # "
     # '''
+        # get bucket name by zone
+        if 'us-east1' in zone: bucket = 'gs://kmh-gcp-us-east1'
+        elif 'us-east5' in zone: bucket = 'gs://kmh-gcp-us-east5'
+        elif 'us-central1' in zone: bucket = 'gs://kmh-gcp-us-central1'
+        elif 'us-central2' in zone: bucket = 'gs://kmh-gcp-us-central2'
+        elif 'asia-northeast1' in zone: bucket = 'gs://kmh-gcp-asia-northeast1-b'
+        else: raise ValueError(f"{FAIL} mount_disk: Unknown zone {zone}")
+
         cmd2 += f'''
     gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} \
     --worker=all --command "
@@ -585,7 +593,7 @@ def mount_disk(tpu, quiet = False):
     echo 'Current dir: '
     pwd
     cd
-    gsutil -m cp -r gs://kmh-gcp-us-east1/hanhong/v6_wheels.tar.gz ./wheels.tar.gz
+    gsutil -m cp -r {bucket}/hanhong/v6_wheels.tar.gz ./wheels.tar.gz
     tar -xvf wheels.tar.gz
     rm -rf .local || true
     pip install --no-index --find-links=wheels wheels/*.whl --no-deps --force-reinstall
