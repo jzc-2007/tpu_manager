@@ -197,10 +197,14 @@ def mainloop():
     error_jobs = {'preempted': [], 'deleted': []}
     data = data_io.read_data()
     sqa = read_sqa()
+    check_result = subprocess.run('python /home/jzc/zhichengjiang/working/xibo_tpu_manager/tpu.py check sqa', shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     print(f"{INFO} mainloop: checking jobs")
     for job in data["users"]['sqa']["job_data"]:
         if job['windows_id'] in sqa['running'] or job['windows_id'] in sqa['finished']: continue # have tried this before
         if job['status'] in ['finished', 'rerunned', 'resumed', 'killed'] or not job['monitor']:
+            continue
+        if f'Window {job["windows_id"]}' not in check_result.stdout:
+            print(f"{INFO} mainloop: Job {job['windows_id']} not found in check result, skipping...")
             continue
         if job['status'] == 'error' and job['error'] != 'unknown':
             # error_type = job['error']
