@@ -140,7 +140,7 @@ RE_DEADLINE = re.compile(r"DEADLINE_EXCEEDED")
 RE_COMPILING = re.compile(r"[cC]ompil(ing|ation|e)")
 RE_SAMPLING = re.compile(r"[sS]ampling ")
 RE_EPOCH1 = re.compile(r"[eE]poch\s([0-9]{1,6})")
-RE_EPOCH2 = re.compile(r"ep\s*=\s*([0-9]{1,4}\.[0-9]{1,6})")
+RE_EPOCH2 = re.compile(r"ep\s*=\s*([0-9]{1,4}(?:\.[0-9]{1,6})?)")
 RE_INITIALIZING = re.compile(r"[iI]nitializing")
 RE_STAGING = re.compile(r"[sS]taging")
 
@@ -177,6 +177,7 @@ def parse_status(job_data: Dict[str, Any], last_cut: str, last_full: str) -> Tup
         return ("Sampling", "info")
     m1 = RE_EPOCH1.search(last_cut)
     m2 = RE_EPOCH2.search(last_cut)
+    print(f'last_cut: {last_cut}, m1: {m1}, m2: {m2}')
     if m1: return (f"Running (ep={m1.group(1)})", "success")
     if m2:
         try: return (f"Running (ep={float(m2.group(1)):.2f})", "success")

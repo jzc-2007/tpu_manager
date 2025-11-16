@@ -227,7 +227,7 @@ def _render_rows_for_job(job_data, msg, last_line, last_line_cut, config, user_o
                 rows.append(("msg", msg))
             return rows
 
-        m_epoch2 = re.search(r'ep\s*=\s*([0-9]){1,4}\.([0-9]){1,6}', last_line_cut)
+        m_epoch2 = re.search(r"ep\s*=\s*([0-9]{1,4}(?:\.[0-9]{1,6})?)", last_line_cut)
         if m_epoch2 and ('s' in config):
             epoch = m_epoch2.group(0).split('=')[1].strip()
             rows += [("Status", f"{GREEN}Running{NC}(ep={float(epoch):.2f})")]
@@ -442,6 +442,8 @@ def resume_rerun_job(job, new_tpu = None, load_ckpt = True):
         if zone is None:
             print(f"{FAIL} {operation}_job: No zone found for tpu {new_tpu}")
             return
+    tpu = job["tpu"] if new_tpu is None else new_tpu
+    zone, _, _, _ = get_zone_pre_spot(tpu)
     data = read_and_lock_data()
     try:
         user = data['users'][job["user"]]
@@ -485,10 +487,12 @@ def resume_rerun_job(job, new_tpu = None, load_ckpt = True):
         load_ckpt_path = ""
 
         if load_ckpt:
+            print(f'finding checkpoint path from log dir {job["log_dir"]}...')
             assert job["log_dir"] is not None, f"Job {job['windows_id']} for user {user_obj.name} has no log dir"
-            if not check_gs_logdir_exists(job["log_dir"]):
+            if not check_gs_logdir_exists(job["log_dir"], zone):
                 print(f"{WARNING} {operation}_job: Log dir {job['log_dir']} does not exist, rerun instead")
             else:
+                print(f'log dir exists. Continue to resume!')
                 load_ckpt_path = job["log_dir"]
 
         data['users'][user_obj.name]['job_data'].append(new_job)
@@ -501,7 +505,6 @@ def resume_rerun_job(job, new_tpu = None, load_ckpt = True):
                 jb["extra_msgs"].update({"child": id})
         
         session_name = user_obj.tmux_name
-        tpu = job["tpu"] if new_tpu is None else new_tpu
         config_args = job["extra_configs"]
         tags = job["job_tags"]
         stage_dir = job["stage_dir"]
@@ -530,9 +533,6 @@ def resume_rerun_job(job, new_tpu = None, load_ckpt = True):
 
         # kill the old job
         kill_jobs_tpu(tpu)
-
-        # zhh: get zone for new script
-        zone, _, _, _ = get_zone_pre_spot(tpu)
 
         # create the tmux window
         os.system(f"tmux new-window -t {session_name}:{id}")

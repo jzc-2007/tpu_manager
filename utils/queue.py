@@ -328,6 +328,8 @@ def parse_config_args_for_queue(user_obj, args):
             elif key == "pm":
                 v = "".join(ch for ch in str(value).strip() if ch.isdigit()) or "0"
                 priority["permission"] = v.zfill(2)
+                # if permission is not 01, 00, 10, or 11, acquire password from user
+
             elif key == "type":  # NEW: TPU type filter
                 tpu_type = value.strip()
             elif key not in ignore_keys:
