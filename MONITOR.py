@@ -1,4 +1,4 @@
-import os, sys
+import os, sys, subprocess
 import json
 import time
 import multiprocessing
@@ -12,17 +12,46 @@ from utils.helpers import *
 
 running_processes = []
 
+def read_sqa():
+    with open(f'/kmh-nfs-ssd-us-mount/code/qiao/work/tpu_manager/sqa.json', 'r') as file:
+        x = file.read()
+        x = json.loads(x)
+    return x
+
+def write_sqa(window_id):
+    x = read_sqa()
+    x['running'].append(window_id)
+    with open(f'/kmh-nfs-ssd-us-mount/code/qiao/work/tpu_manager/sqa.json', 'w') as file:
+        # write as json
+        json.dump(x, file)
+        file.write('\n')
+    return
+
+def finish_sqa(window_id):
+    x = read_sqa()
+    x['running'].remove(window_id)
+    x['finished'].append(window_id)
+    with open(f'/kmh-nfs-ssd-us-mount/code/qiao/work/tpu_manager/sqa.json', 'w') as file:
+        # write as json
+        json.dump(x, file)
+        file.write('\n')
+    return
+
 def add_MONITOR_log(log):
-    data = data_io.read_and_lock_data()
-    try:
-        data["MONITOR_logs"].append({
-            "time": get_abs_time_str(),
-            "msg": log
-        })
-        data_io.write_and_unlock_data(data)
-    except Exception as e:
-        print(f"{FAIL} add_MONITOR_log: Failed to add log {log}: {e}")
-        data_io.release_lock_data()
+    # data = data_io.read_and_lock_data()
+    # try:
+    #     data["MONITOR_logs"].append({
+    #         "time": get_abs_time_str(),
+    #         "msg": log
+    #     })
+    #     data_io.write_and_unlock_data(data)
+    # except Exception as e:
+    #     print(f"{FAIL} add_MONITOR_log: Failed to add log {log}: {e}")
+    #     data_io.release_lock_data()
+    with open(f'/kmh-nfs-ssd-us-mount/code/qiao/work/tpu_manager/output.log', 'a') as file:
+        file.write(f"{get_abs_time_str()}: {log}\n")
+    print(f"{get_abs_time_str()}: {log}")
+    return
 
 def show_MONITOR_log(timezone = 'us'):
     data = data_io.read_data()
@@ -48,18 +77,20 @@ def check_job_status(job):
     tpu_status = operate.check_tpu_status(tpu)
     if tpu_status == 'preempted':
         return 'preempted'
+    if tpu_status == 'deleted':
+        return 'deleted'
     
-    log_dir = job["log_dir"]+"/output.log"
-    if not os.path.exists(log_dir):
-        print(f"{FAIL} check_tpu_status: log file {log_dir} not found")
-        return None
-    with open(log_dir, 'r') as file:
-        lines = file.readlines()
-    for line in lines:
-        if "GRPC error" in line:
-            return 'grpc'
-        if "Could not open any log file" in line:
-            return 'locked'
+    # log_dir = job["log_dir"]+"/output.log"
+    # if not os.path.exists(log_dir):
+    #     print(f"{FAIL} check_tpu_status: log file {log_dir} not found")
+    #     return None
+    # with open(log_dir, 'r') as file:
+    #     lines = file.readlines()
+    # for line in lines:
+    #     if "GRPC error" in line:
+    #         return 'grpc'
+    #     if "Could not open any log file" in line:
+    #         return 'locked'
     return None
 
 def reapply_worker(ka, result_queue):
@@ -163,36 +194,37 @@ def reapply_resume(job, timeout=900):
             add_MONITOR_log(f"{FAIL} reapply_resume: Reapply TPU {ka} failed, no result returned")
 
 def mainloop():
-    error_jobs = {'preempted': [], 'grpc': [], 'locked': []}
+    error_jobs = {'preempted': [], 'deleted': []}
     data = data_io.read_data()
+    sqa = read_sqa()
     print(f"{INFO} mainloop: checking jobs")
-    for user in data["user_list"]:
-        for job in data["users"][user]["job_data"]:
-            if job['status'] in ['finished', 'rerunned', 'resumed', 'killed'] or not job['monitor']:
-                continue
-            if job['status'] == 'error' and job['error'] != 'unknown':
-                error_type = job['error']
-            else:
-                error_type = check_job_status(job)
-            if error_type in error_jobs:
-                error_jobs[error_type].append(job)
+    for job in data["users"]['sqa']["job_data"]:
+        if job['windows_id'] in sqa['running'] or job['windows_id'] in sqa['finished']: continue # have tried this before
+        if job['status'] in ['finished', 'rerunned', 'resumed', 'killed'] or not job['monitor']:
+            continue
+        if job['status'] == 'error' and job['error'] != 'unknown':
+            # error_type = job['error']
+            continue # do not handle these jobs.
+        error_type = check_job_status(job)
+        if error_type in error_jobs:
+            error_jobs[error_type].append(job)
 
-    if len(error_jobs['locked']) != 0:
-        error_windows_list = [(job['user'], job['windows_id']) for job in error_jobs['locked']]
-        print(f"{INFO} mainloop: Found {len(error_jobs['locked'])} locked jobs, windows list: {error_windows_list}")
-        add_MONITOR_log(f"{INFO} mainloop: Found {len(error_jobs['locked'])} locked jobs, windows list: {error_windows_list}")
+    if len(error_jobs['deleted']) != 0:
+        error_windows_list = [(job['user'], job['windows_id']) for job in error_jobs['deleted']]
+        print(f"{INFO} mainloop: Found {len(error_jobs['deleted'])} deleted jobs, windows list: {error_windows_list}")
+        add_MONITOR_log(f"{INFO} mainloop: Found {len(error_jobs['deleted'])} deleted jobs, windows list: {error_windows_list}")
     
     if len(error_jobs['preempted']) != 0:
         error_windows_list = [(job['user'], job['windows_id']) for job in error_jobs['preempted']]
         print(f"{INFO} mainloop: Found {len(error_jobs['preempted'])} preempted jobs, windows list: {error_windows_list}")
         add_MONITOR_log(f"{INFO} mainloop: Found {len(error_jobs['preempted'])} preempted jobs, windows list: {error_windows_list}")
     
-    if len(error_jobs['grpc']) != 0:
-        error_windows_list = [(job['user'], job['windows_id']) for job in error_jobs['grpc']]
-        print(f"{INFO} mainloop: Found {len(error_jobs['grpc'])} grpc jobs, windows list: {error_windows_list}")
-        add_MONITOR_log(
-            f"{INFO} mainloop: Found {len(error_jobs['grpc'])} grpc jobs, windows list: {error_windows_list}"
-        )
+    # if len(error_jobs['grpc']) != 0:
+    #     error_windows_list = [(job['user'], job['windows_id']) for job in error_jobs['grpc']]
+    #     print(f"{INFO} mainloop: Found {len(error_jobs['grpc'])} grpc jobs, windows list: {error_windows_list}")
+    #     add_MONITOR_log(
+    #         f"{INFO} mainloop: Found {len(error_jobs['grpc'])} grpc jobs, windows list: {error_windows_list}"
+    #     )
     
     all_good = all(len(error_jobs[error_type]) == 0 for error_type in error_jobs)
 
@@ -202,32 +234,49 @@ def mainloop():
     if not all_good:
         for error_type in error_jobs:
             for job in error_jobs[error_type]:
-                user = job["user"]
-                data = data_io.read_and_lock_data()
-                try:
-                    for jb in data["users"][user]["job_data"]:
-                        if jb["windows_id"] == job["windows_id"]:
-                            jb["status"] = 'error'
-                            jb['error'] = error_type
-                    data_io.write_and_unlock_data(data)
-                except:
-                    print(f"{FAIL} mainloop: Failed to update job {job['windows_id']} for user {user}")
-                    add_MONITOR_log(f"{FAIL} mainloop: Failed to update job {job['windows_id']} for user {user}")
-                    data_io.release_lock_data()
+                _tpu = 'python /home/jzc/zhichengjiang/working/xibo_tpu_manager/tpu.py'
+                __tpu = 'python /kmh-nfs-ssd-us-mount/code/qiao/work/tpu_manager/tpu.py' # for apply, try 900s
+                _apply = 'applyy' if error_type == 'deleted' else 'reapplyy'
+                _ka = job['tpu']
+                _window = job['windows_id']
+                write_sqa(_window)
+                logs = ''
+                logs += f'resuming job {_window} for sqa\n'
+                logs += f'command: tpu {_apply} {_ka} && tpu resume sqa window={_window}\n'
+                results = subprocess.run(f'{__tpu} {_apply} {_ka} && {_tpu} resume sqa window={_window}', shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                finish_sqa(_window)
+                logs += results.stdout
+                logs += results.stderr
+                print(logs)
+                add_MONITOR_log(logs)
+                subprocess.run('sleep 2', shell=True)
 
-    if not all_good:
-        for error_type in error_jobs:
-            for job in error_jobs[error_type]:
-                rule = job["rules"][error_type]
-                try:
-                    if rule == 'pass':      continue
-                    elif rule == 'reapply': reapply_resume(job, timeout=1800)
-                    elif rule == 'resume':  kill_resume(job)
-                    elif rule == 'rerun':   kill_rerun(job)
-                    elif rule == 'restart': restart_rerun(job)
-                except:
-                    print(f"{FAIL} mainloop: Failed to handle job {job['windows_id']} for user {user}, (error type {error_type}, rule {rule})")
-                    add_MONITOR_log(f"{FAIL} mainloop: Failed to handle job {job['windows_id']} for user {user}, (error type {error_type}, rule {rule})")
+                # user = job["user"]
+                # data = data_io.read_and_lock_data()
+                # try:
+                #     for jb in data["users"][user]["job_data"]:
+                #         if jb["windows_id"] == job["windows_id"]:
+                #             jb["status"] = 'error'
+                #             jb['error'] = error_type
+                #     data_io.write_and_unlock_data(data)
+                # except:
+                #     print(f"{FAIL} mainloop: Failed to update job {job['windows_id']} for user {user}")
+                #     add_MONITOR_log(f"{FAIL} mainloop: Failed to update job {job['windows_id']} for user {user}")
+                #     data_io.release_lock_data()
+
+    # if not all_good:
+    #     for error_type in error_jobs:
+    #         for job in error_jobs[error_type]:
+    #             rule = job["rules"][error_type]
+    #             try:
+    #                 if rule == 'pass':      continue
+    #                 elif rule == 'reapply': reapply_resume(job, timeout=1800)
+    #                 elif rule == 'resume':  kill_resume(job)
+    #                 elif rule == 'rerun':   kill_rerun(job)
+    #                 elif rule == 'restart': restart_rerun(job)
+    #             except:
+    #                 print(f"{FAIL} mainloop: Failed to handle job {job['windows_id']} for user {user}, (error type {error_type}, rule {rule})")
+    #                 add_MONITOR_log(f"{FAIL} mainloop: Failed to handle job {job['windows_id']} for user {user}, (error type {error_type}, rule {rule})")
     
 
 if __name__ == "__main__":
@@ -242,27 +291,29 @@ if __name__ == "__main__":
         sys.exit(1)
     try:
         while True:
-            data = data_io.read_data()
-            checking_freq, test_freq, clean_freq = data["MONITOR_config"]["checking_freq"], data["MONITOR_config"]["test_freq"], data["MONITOR_config"]["clean_freq"]
+            # data = data_io.read_data()
+            # checking_freq, test_freq, clean_freq = data["MONITOR_config"]["checking_freq"], data["MONITOR_config"]["test_freq"], data["MONITOR_config"]["clean_freq"]
 
             num_loops += 1
             last_time = time.time()
             mainloop()
-            time_used = time.time()- last_time # in seconds
+            time_used = time.time() - last_time # in seconds
             print(f"{INFO} Time: {convert_utcstr_to_edtstr(get_abs_time_str())}")
             print(f"Loop {num_loops} finished, time used: {time_used:.2f} seconds")
             add_MONITOR_log(f"{INFO} Loop {num_loops} finished, time used: {time_used:.2f} seconds")
-            while time.time() - last_time < checking_freq:
-                data = data_io.read_data()
-                time.sleep(10)
-                if data['ack_MONITOR']:
-                    print(f"{INFO} Acknowledged by user, start checking...")
-                    data = data_io.read_and_lock_data()
-                    data['ack_MONITOR'] = False
-                    data_io.write_and_unlock_data(data)
-                    break
+            subprocess.run('sleep 1800', shell=True)
+
+            # while time.time() - last_time < checking_freq:
+            #     data = data_io.read_data()
+            #     time.sleep(10)
+            #     if data['ack_MONITOR']:
+            #         print(f"{INFO} Acknowledged by user, start checking...")
+            #         data = data_io.read_and_lock_data()
+            #         data['ack_MONITOR'] = False
+            #         data_io.write_and_unlock_data(data)
+            #         break
             
-            if num_loops > 24:
+            if num_loops > 100:
                 print(f"{GOOD} successfully run {num_loops} loops, exiting...")
                 add_MONITOR_log(f"{GOOD} successfully run {num_loops} loops, exiting...")
                 sys.exit(0)

@@ -6,3 +6,5 @@ test*
 **/__pycache__/**
 __pycache__
 **/*.pyc
+output.log
+sqa.sqa

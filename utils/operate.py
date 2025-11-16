@@ -188,9 +188,9 @@ def apply(args):
 def apply_until_success(args):
     if '-norm' in args:
         tpu = args[1] if args[0] == '-norm' else args[0]
-        return apply_and_set_env(tpu, preemptible=False, delete=False, repeat_time = 36000)
+        return apply_and_set_env(tpu, preemptible=False, delete=False, repeat_time = 900)
     else:
-        return apply_and_set_env(args[0], preemptible=True, delete=False, repeat_time = 36000)
+        return apply_and_set_env(args[0], preemptible=True, delete=False, repeat_time = 900)
     
 def reapply(args):
     if '-norm' in args:
@@ -202,9 +202,9 @@ def reapply(args):
 def reapply_until_success(args):
     if '-norm' in args:
         tpu = args[1] if args[0] == '-norm' else args[0]
-        return apply_and_set_env(tpu, preemptible=False, delete=True, repeat_time = 36000)
+        return apply_and_set_env(tpu, preemptible=False, delete=True, repeat_time = 900)
     else:
-        return apply_and_set_env(args[0], preemptible=True, delete=True, repeat_time = 36000)
+        return apply_and_set_env(args[0], preemptible=True, delete=True, repeat_time = 900)
 
 def apply_and_set_env(tpu, preemptible = False, spot = False, delete=True, repeat_time=None, retry_interval=20):
     info_str = 'pre' if preemptible else 'norm'
@@ -336,8 +336,8 @@ def check_tpu_status(tpu, quiet = False):
         state = subprocess.check_output(cmd, shell=True, stderr=subprocess.DEVNULL).decode().strip()
     except subprocess.CalledProcessError:
         if not quiet:
-            print(f"{FAIL} check_tpu_status: Failed to query TPU {tpu} state")
-        return 'failed'
+            # print(f"{FAIL} check_tpu_status: Failed to query TPU {tpu} state")
+            return 'deleted'
     
     return state.lower()
 
