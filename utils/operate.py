@@ -24,6 +24,7 @@ def update_tpu_status_for_spreadsheet():
         else:
             info['script_note'] = 'UNKNOWN'
 
+        print(f"{INFO} TPU {full_name} status: {previous_note} -> {info['script_note']}")
         if previous_note != info['script_note']:
             write_sheet_info(info)
  
@@ -206,7 +207,7 @@ def reapply_until_success(args):
     else:
         return apply_and_set_env(args[0], preemptible=True, delete=True, repeat_time = 36000)
 
-def apply_and_set_env(tpu, preemptible = False, spot = False, delete=True, repeat_time=None, retry_interval=20):
+def apply_and_set_env(tpu, preemptible = False, spot = False, delete=True, repeat_time=None, retry_interval=10):
     info_str = 'pre' if preemptible else 'norm'
     zone, pre, spot, tpu = get_zone_pre_spot(tpu)
     print(zone, pre, spot, tpu, preemptible)
@@ -454,7 +455,7 @@ def describe_tpu(tpu, quiet = False):
             print(f"{FAIL} describe_tpu: Timeout expired. This may probably because the TPU is deleted.")
         return 'timeout'
 
-def check_env(tpu, quiet = False):
+def check_env(tpu, quiet = False, recurse=0):
     """
     Check if the environment in the TPU is good.
     Return value: ['no tpu found', 'success', 'failed', 'file error', 'unknown', 'timeout', 'occupied']
@@ -462,22 +463,21 @@ def check_env(tpu, quiet = False):
     zone, pre, spot, tpu = get_zone_pre_spot(tpu)
     if zone is None: return 'no tpu found'
 
-    if 'v5' in tpu:
-        if not quiet:
-            print(f"{INFO} check_env: TPU {tpu} is v5, skipping environment check.")
-        return 'success'
+    # if 'v5' in tpu:
+    #     if not quiet:
+    #         print(f"{INFO} check_env: TPU {tpu} is v5, skipping environment check.")
+    #     return 'success'
     
     data = read_data()
     conda_env = data["conda_env_name"]
     data_root = "kmh-nfs-ssd-eu-mount" if 'eu' in zone else "kmh-nfs-ssd-us-mount"
     conda_path = 'python' if 'v6' in tpu else '/kmh-nfs-ssd-us-mount/code/eva/miniforge3/bin/python'
     cmd = f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --worker=all --command \"{conda_path} -c 'import jax; print(jax.devices())'\""
-    # cmd = f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --worker=all --command \"python -c 'import jax; print(jax.devices())'\""
     if not quiet:
         print(f"{INFO} check_env: Checking environment in TPU {tpu}... This may take a while...")
     try:
         # get the output of the command
-        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=600)
+        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=300)
         stdout, stderr = result.stdout, result.stderr
 
     except subprocess.CalledProcessError:
@@ -502,13 +502,41 @@ def check_env(tpu, quiet = False):
     
     if "TpuDevice" in stdout:
         print(f"{GOOD} check_remote_env: TPU {tpu} is good!")
-        return 'success'
+        # return 'success'
     
-    else:
-        print(f"{FAIL} check_remote_env: TPU {tpu} is getting unkown error, please contact the admin.")
-        print(f"stdout: {stdout}")
-        print(f"stderr: {stderr}")
-        return 'unknown'
+    # check again whether the NFS is mounted properly
+    cmd = f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --worker=all --command \"ls /kmh-nfs-ssd-us-mount/code/qiao/work; echo 'success'\""
+    if not quiet:
+        print(f"{INFO} check_env: Checking environment in TPU {tpu}... This may take a while...")
+    try:
+        # get the output of the command
+        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=300)
+        stdout, stderr = result.stdout, result.stderr
+
+        # print(f'debug: stdout: {stdout}, stderr: {stderr}')
+
+    except subprocess.CalledProcessError:
+        if not quiet:
+            print(f"{FAIL} check_env: Failed to query TPU {tpu} state")
+        return 'failed'
+    except subprocess.TimeoutExpired:
+        if not quiet:
+            print(f"{FAIL} check_env: Checking {tpu}: Timeout expired")
+        return 'timeout'
+    
+    if 'No such file or directory' in stderr:
+        if not quiet:
+            print(f"{FAIL} check_remote_env: Can't find directory.")
+        if recurse == 0:
+            print(f"{INFO} check_env: Trying to mount disk and check again...")
+            mount_disk(tpu, quiet=quiet)
+            return check_env(tpu, quiet=quiet, recurse=recurse+1)
+        else:
+            return 'file error'
+    
+    print(f"{GOOD} check_remote_env: TPU {tpu} is good!")
+    return 'success'
+
 
 def mount_disk(tpu, quiet = False):
     """
@@ -557,7 +585,7 @@ def mount_disk(tpu, quiet = False):
 
     """
 
-    if 'v6' in tpu:
+    if 'v6' in tpu or 'v5p' in tpu:
     #     cmd2 += f'''
     # gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} \
     # --worker=all --command "
