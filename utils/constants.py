@@ -9,6 +9,7 @@ SECRET_PATH = os.path.join(BASE_DIR, "secret.json")
 APPLY_PATH = os.path.join(BASE_DIR, "apply.json")
 
 MAX_LEGACY_LENGTH = 500
+PROJECT = 'he-vision-group'
 
 RED, GREEN, YELLOW, PURPLE, NC = "\033[1;31m", "\033[1;32m", "\033[1;33m", "\033[1;34m", "\033[0m"
 GOOD, INFO, WARNING, FAIL = f"{GREEN}[GOOD]{NC}", f"{PURPLE}[INFO]{NC}", f"{YELLOW}[WARNING]{NC}", f"{RED}[FAIL]{NC}"

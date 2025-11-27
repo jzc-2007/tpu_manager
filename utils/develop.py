@@ -97,7 +97,7 @@ def debug_stats(tpu):
         print(f"{FAIL} debug_stats: TPU {tpu} not found")
         return
     print(f"{INFO} debug_stats: Checking TPU {tpu} in zone {zone}...")
-    cmd = f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --worker=all --command \"ps -eo pid,stat,cmd | grep 'main.py' | grep -v grep\""
+    cmd = f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --project {PROJECT} --worker=all --command \"ps -eo pid,stat,cmd | grep 'main.py' | grep -v grep\""
     try:
         result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=120)
         stdout, stderr = result.stdout, result.stderr
@@ -131,7 +131,7 @@ def kill_jobs_tpu_new(tpu):
         time.sleep(3)
 
         list_cmd = (
-            f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --worker=all "
+            f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --project {PROJECT} --worker=all "
             "--command \"ps -eo pid,ppid,stat,cmd | grep 'main.py' | grep -v 'grep' || true\""
         )
         result = subprocess.run(list_cmd, shell=True, timeout=30, check=False,
@@ -159,14 +159,14 @@ def kill_jobs_tpu_new(tpu):
         print(f"{INFO} Killing PIDs: {pid_list}")
         
         kill_cmd = (
-            f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --worker=all "
+            f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --project {PROJECT} --worker=all "
             f"--command \"sudo kill -9 {pid_list} || true\""
         )
         subprocess.run(kill_cmd, shell=True, timeout=30, check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
         print(f"{INFO} Cleaning /dev/accel0 occupation...")
         kill_accel_cmd = (
-            f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --worker=all "
+            f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --project {PROJECT} --worker=all "
             "--command \"pids=$(sudo lsof -w /dev/accel0 | grep 'python' | grep -v 'grep' | awk '{print $2}'); "
             "if [ ! -z \\\"$pids\\\" ]; then sudo kill -9 $pids; fi\""
         )

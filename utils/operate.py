@@ -55,7 +55,7 @@ def kill_jobs_tpu(tpu, username = None, ignore_window = None):
         time.sleep(3)
 
         list_cmd = (
-            f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --worker=all "
+            f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --project {PROJECT} --worker=all "
             "--command \"ps -eo pid,ppid,stat,cmd | grep 'main.py' | grep -v 'grep' || true\""
         )
         result = subprocess.run(list_cmd, shell=True, timeout=30, check=False,
@@ -83,14 +83,14 @@ def kill_jobs_tpu(tpu, username = None, ignore_window = None):
         print(f"{INFO} Killing PIDs: {pid_list}")
         
         kill_cmd = (
-            f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --worker=all "
+            f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --project {PROJECT} --worker=all "
             f"--command \"sudo kill -9 {pid_list} || true\""
         )
         subprocess.run(kill_cmd, shell=True, timeout=30, check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
         print(f"{INFO} Cleaning /dev/accel0 occupation...")
         kill_accel_cmd = (
-            f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --worker=all "
+            f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --project {PROJECT} --worker=all "
             "--command \"pids=$(sudo lsof -w /dev/accel0 | grep 'python' | grep -v 'grep' | awk '{print $2}'); "
             "if [ ! -z \\\"$pids\\\" ]; then sudo kill -9 $pids; fi\""
         )
@@ -115,14 +115,14 @@ def kill_jobs_tpu_old(tpu):
     print(f"{INFO} kill_jobs_tpu: Killing jobs in TPU {tpu} in zone {zone}...")
 
     cmd1 = (
-        f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --worker=all "
+        f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --project {PROJECT} --worker=all "
         "--command \"pids=$(pgrep -af python | grep 'main.py' | grep -v 'grep' | awk '{print $1}'); "
         "if [ ! -z \\\"$pids\\\" ]; then "
         "for pid in $pids; do echo Killing $pid; sudo kill -9 $pid; done; "
         "else echo 'No main.py processes found.'; fi\""
     )    
     cmd2 = (
-        f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --worker=all "
+        f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --project {PROJECT} --worker=all "
         "--command \"pids=$(sudo lsof -w /dev/accel0 | grep 'python' | grep -v 'grep' | awk '{print $2}'); "
         "if [ ! -z \\\"$pids\\\" ]; then "
         "for pid in $pids; do echo Killing $pid; sudo kill -9 $pid; done; "
@@ -162,7 +162,7 @@ def set_wandb(tpu):
     # remote_cmd = f'python -m wandb login {wandb_key}'
 
 
-    cmd = f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --worker=all --command \"{remote_cmd}\" "
+    cmd = f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --project {PROJECT} --worker=all --command \"{remote_cmd}\" "
 
     try:
         setup_process = subprocess.run(cmd, shell=True, timeout=300, check=True,
@@ -235,11 +235,11 @@ def apply_and_set_env(tpu, preemptible = False, spot = False, delete=True, repea
             print(f"{WARNING} apply_{info_str}: TPU deletion failed: {e}")
 
     if 'v6' in acc_type:
-        base_cmd = f"gcloud compute tpus tpu-vm create {tpu} --zone={zone} --accelerator-type={acc_type} --version=v2-alpha-tpuv6e"
+        base_cmd = f"gcloud compute tpus tpu-vm create {tpu} --zone={zone} --project {PROJECT} --accelerator-type={acc_type} --version=v2-alpha-tpuv6e"
     elif 'v5p' in acc_type:
-        base_cmd = f"gcloud compute tpus tpu-vm create {tpu} --zone={zone} --accelerator-type={acc_type} --version=v2-alpha-tpuv5"
+        base_cmd = f"gcloud compute tpus tpu-vm create {tpu} --zone={zone} --project {PROJECT} --accelerator-type={acc_type} --version=v2-alpha-tpuv5"
     else:
-        base_cmd = f"gcloud compute tpus tpu-vm create {tpu} --zone={zone} --accelerator-type={acc_type} --version=tpu-ubuntu2204-base"
+        base_cmd = f"gcloud compute tpus tpu-vm create {tpu} --zone={zone} --project {PROJECT} --accelerator-type={acc_type} --version=tpu-ubuntu2204-base"
 
     if preemptible and (not spot):
         base_cmd += " --preemptible"
@@ -281,7 +281,7 @@ def apply_and_set_env(tpu, preemptible = False, spot = False, delete=True, repea
     # short pause before querying state
     time.sleep(5)
 
-    cmd = f"gcloud compute tpus tpu-vm describe {tpu} --zone={zone} --format='value(state)'"
+    cmd = f"gcloud compute tpus tpu-vm describe {tpu} --zone={zone} --project {PROJECT} --format='value(state)'"
     try:
         state = subprocess.check_output(cmd, shell=True).decode().strip()
     except subprocess.CalledProcessError:
@@ -317,7 +317,7 @@ def delete_tpu(tpu):
         print(f"{WARNING} delete_tpu: TPU {tpu} not found")
         return 'delete failed'
     print(f"{INFO} Deleting TPU {tpu} in zone {zone}...")
-    cmd = f"gcloud compute tpus tpu-vm delete {tpu} --zone={zone} --quiet"
+    cmd = f"gcloud compute tpus tpu-vm delete {tpu} --zone={zone} --project {PROJECT} --quiet"
     try:
         subprocess.run(cmd.split(), timeout=300, check=True, stdout=subprocess.DEVNULL)
     except subprocess.CalledProcessError as e:
@@ -332,7 +332,7 @@ def check_tpu_status(tpu, quiet = False):
     """
     zone, pre, spot, tpu = get_zone_pre_spot(tpu)
     if zone is None: return 'no tpu found'
-    cmd = f"gcloud compute tpus tpu-vm describe {tpu} --zone={zone} --format='value(state)'"
+    cmd = f"gcloud compute tpus tpu-vm describe {tpu} --zone={zone} --project {PROJECT} --format='value(state)'"
     try:
         state = subprocess.check_output(cmd, shell=True, stderr=subprocess.DEVNULL).decode().strip()
     except subprocess.CalledProcessError:
@@ -349,7 +349,7 @@ def check_tpu_running(tpu, quiet = True):
     """
     zone, pre, spot, tpu = get_zone_pre_spot(tpu)
     if zone is None: return
-    cmd = f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --worker=all --command \"sudo lsof -w /dev/accel0\" "
+    cmd = f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --project {PROJECT} --worker=all --command \"sudo lsof -w /dev/accel0\" "
     try:
         if quiet:
             result = subprocess.run(cmd, shell=True, timeout=30, check=False,
@@ -472,7 +472,7 @@ def check_env(tpu, quiet = False, recurse=0):
     conda_env = data["conda_env_name"]
     data_root = "kmh-nfs-ssd-eu-mount" if 'eu' in zone else "kmh-nfs-ssd-us-mount"
     conda_path = 'python' if 'v6' in tpu else '/kmh-nfs-ssd-us-mount/code/eva/miniforge3/bin/python'
-    cmd = f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --worker=all --command \"{conda_path} -c 'import jax; print(jax.devices())'\""
+    cmd = f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --project {PROJECT} --worker=all --command \"{conda_path} -c 'import jax; print(jax.devices())'\""
     if not quiet:
         print(f"{INFO} check_env: Checking environment in TPU {tpu}... This may take a while...")
     try:
@@ -505,7 +505,7 @@ def check_env(tpu, quiet = False, recurse=0):
         # return 'success'
     
     # check again whether the NFS is mounted properly
-    cmd = f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --worker=all --command \"ls /kmh-nfs-ssd-us-mount/code/qiao/work; echo 'success'\""
+    cmd = f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --project {PROJECT} --worker=all --command \"ls /kmh-nfs-ssd-us-mount/code/qiao/work; echo 'success'\""
     if not quiet:
         print(f"{INFO} check_env: Checking environment in TPU {tpu}... This may take a while...")
     try:
@@ -547,7 +547,7 @@ def mount_disk(tpu, quiet = False):
     print(f"{INFO} Mounting disk in TPU {tpu}...")
 
     cmd1 = f'''
-    gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --worker=all \
+    gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --project {PROJECT} --worker=all \
       --command "
         systemctl status unattended-upgrades.service || true
         ps -ef | grep unattended-upgrade | grep -v grep || true
@@ -571,7 +571,7 @@ def mount_disk(tpu, quiet = False):
     # ls /kmh-nfs-ssd-eu-mount
 
     cmd2 = f"""
-    gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --worker=all --command "
+    gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --project {PROJECT} --worker=all --command "
     sudo mkdir -p /kmh-nfs-us-mount
     sudo mount -t nfs -o vers=3 10.26.72.146:/kmh_nfs_us /kmh-nfs-us-mount
     sudo chmod go+rw /kmh-nfs-us-mount
@@ -615,7 +615,7 @@ def mount_disk(tpu, quiet = False):
         else: raise ValueError(f"{FAIL} mount_disk: Unknown zone {zone}")
 
         cmd2 += f'''
-    gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} \
+    gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --project {PROJECT} \
     --worker=all --command "
     sudo rm -rf /home/\$(whoami)/.local
     echo 'Current dir: '
@@ -685,7 +685,7 @@ def test_remote(tpu):
         conda_env = data["conda_env_name"]
         data_root = "kmh-nfs-ssd-eu-mount" if 'eu' in zone else "kmh-nfs-ssd-us-mount"
         conda_path = 'python' if 'v6' in tpu else '/kmh-nfs-ssd-us-mount/code/eva/miniforge3/bin/python'
-        cmd = f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --worker=all --command \"{conda_path} -c '{cmd}'\""
+        cmd = f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --project {PROJECT} --worker=all --command \"{conda_path} -c '{cmd}'\""
         # cmd = f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --worker=all --command \"python -c '{cmd}'\""
         try:
             result = subprocess.run(cmd, shell=True, timeout=300, check=True,
@@ -703,7 +703,7 @@ def test_remote(tpu):
     elif ans == 'n':
         print(f"{INFO} please enter the bash command:")
         cmd = input()
-        cmd = f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --worker=all --command \"{cmd}\""
+        cmd = f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --project {PROJECT} --worker=all --command \"{cmd}\""
         try:
             result = subprocess.run(cmd, shell=True, timeout=300, check=True,
                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
@@ -729,7 +729,7 @@ def restart(tpu):
     print(f"{INFO} Rebooting {tpu}... This may take a while...")
 
     reboot_cmd = (
-        f'timeout 20s gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} '
+        f'timeout 20s gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --project {PROJECT} '
         '--worker=all --command "sudo reboot" '
         '--ssh-flag="-o ConnectionAttempts=1" --ssh-flag="-o ConnectTimeout=5"'
     )
@@ -750,7 +750,7 @@ def restart(tpu):
     print(f"{INFO} Checking if VM is ready...")
     while True:
         check_cmd = (
-            f'gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} '
+            f'gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --project {PROJECT} '
             '--worker=all --command "ls"'
         )
         try:

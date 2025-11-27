@@ -152,6 +152,7 @@ def display_tpu_information(tpu_information, style = None, **kwargs):
     - category: ['free', 'reserved', 'running']
     - category_note (default): ['free', 'reserved', 'running'] with user note
     """
+    print(tpu_information)
     if style is None:
         style = 'category_note'
     if style == 'full':
