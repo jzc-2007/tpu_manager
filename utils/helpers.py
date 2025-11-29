@@ -152,7 +152,6 @@ def display_tpu_information(tpu_information, style = None, **kwargs):
     - category: ['free', 'reserved', 'running']
     - category_note (default): ['free', 'reserved', 'running'] with user note
     """
-    print(tpu_information)
     if style is None:
         style = 'category_note'
     if style == 'full':
@@ -171,12 +170,12 @@ def display_tpu_information(tpu_information, style = None, **kwargs):
         print(f"\n\n{YELLOW}Reserved TPUs{NC} (Total: {len(reserved_tpus)})")
         for tpu in reserved_tpus:
             print(f"{tpu_information[tpu]['alias']}({tpu_information[tpu]['user']})", end='; ')
-        print(f"\n\n{RED}Running TPUs{NC} (Total: {len(running_tpus)})")
+        print(f"\n\n{PURPLE}Running TPUs{NC} (Total: {len(running_tpus)})")
         for tpu in running_tpus:
             print(f"{tpu_information[tpu]['alias']}({tpu_information[tpu]['user']})", end='; ')
         print()
     elif style == 'category_note':
-        deleted_tpus = [tpu for tpu, info in tpu_information.items() if info['script_note'].lower() == 'not found']
+        deleted_tpus = [tpu for tpu, info in tpu_information.items() if info['script_note'].lower() == 'not found' or info['script_note'].lower() == 'preempted']
         free_tpus = [tpu for tpu, info in tpu_information.items() if info['running_status'] == 'free' and tpu not in deleted_tpus]
         reserved_tpus = [tpu for tpu, info in tpu_information.items() if info['running_status'] == 'reserved' and tpu not in deleted_tpus]
         running_tpus = [tpu for tpu, info in tpu_information.items() if info['running_status'] == 'running' and tpu not in deleted_tpus]
@@ -184,7 +183,7 @@ def display_tpu_information(tpu_information, style = None, **kwargs):
         reserved_tpus = sorted(reserved_tpus, key=lambda x: tpu_information[x]['alias'])
         running_tpus = sorted(running_tpus, key=lambda x: tpu_information[x]['alias'])
         deleted_tpus = sorted(deleted_tpus, key=lambda x: tpu_information[x]['alias'])
-        print(f"{RED}Deleted TPUs{NC} (Total: {len(deleted_tpus)})")
+        print(f"{RED}Deleted/Preempted TPUs{NC} (Total: {len(deleted_tpus)})")
         for tpu in deleted_tpus:
             info = tpu_information[tpu]
             print(f"{info['alias']} ({info['user']}: {info['user_note']})")
@@ -196,7 +195,7 @@ def display_tpu_information(tpu_information, style = None, **kwargs):
         for tpu in reserved_tpus:
             info = tpu_information[tpu]
             print(f"{info['alias']} ({info['user']}: {info['user_note']})")
-        print(f"\n{RED}Running TPUs{NC} (Total: {len(running_tpus)})")
+        print(f"\n{PURPLE}Running TPUs{NC} (Total: {len(running_tpus)})")
         for tpu in running_tpus:
             info = tpu_information[tpu]
             print(f"{info['alias']} ({info['user']}: {info['user_note']})")

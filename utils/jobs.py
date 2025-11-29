@@ -1000,6 +1000,7 @@ def run(user_obj, args, monitor_job = True):
             print(f"{FAIL} run: This may indicate that this window is already created, please check the tmux session")
             release_lock_data()
             return
+        time.sleep(2)
         os.system(f"tmux send-keys -t {session_name}:{window_id} 'cd {dir_path}' Enter")
         if tpu is None:
             raise RuntimeError('zhh does not how to handle this case')

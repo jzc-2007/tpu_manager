@@ -24,8 +24,8 @@ def update_tpu_status_for_spreadsheet():
         else:
             info['script_note'] = 'UNKNOWN'
 
-        print(f"{INFO} TPU {full_name} status: {previous_note} -> {info['script_note']}")
         if previous_note != info['script_note']:
+            print(f"{INFO} TPU {full_name} status: {previous_note} -> {info['script_note']}")
             write_sheet_info(info)
  
 def kill_jobs_tpu(tpu, username = None, ignore_window = None):
