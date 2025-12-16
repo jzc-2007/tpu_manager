@@ -536,8 +536,9 @@ def resume_rerun_job(job, new_tpu = None, load_ckpt = True):
 
         # create the tmux window
         os.system(f"tmux new-window -t {session_name}:{id}")
-        time.sleep(0.5)
+        time.sleep(4.5)
         os.system(f"tmux send-keys -t {session_name}:{id} 'cd {stage_dir}' Enter")
+        time.sleep(4.5)
         if load_ckpt_path:
             if job.get("customized_settings", {}).get("log_stage", False):
                 os.system(f"tmux send-keys -t {session_name}:{id} 'source staging.sh ka={tpu} zone={zone} {config_args} --config.load_from={load_ckpt_path} --config.stage={new_stage}' Enter")
@@ -663,9 +664,9 @@ def select_tpu(args, auto = False):
         free_tpu_list = []
         reserved_tpu_list = []
         for tpu, info in tpu_info.items():
-            if info['running_status'] == 'free':
+            if info['running_status'] == 'free' and info['script_note'].lower() == 'ready':
                 free_tpu_list.append(tpu)
-            elif info['running_status'] == 'reserved':
+            elif info['running_status'] == 'reserved' and info['script_note'].lower() == 'ready':
                 reserved_tpu_list.append(tpu)
         if len(free_tpu_list) > 0:
             print(f"{INFO} select_tpu: Found free tpus: {free_tpu_list}")
@@ -1419,8 +1420,9 @@ def run_job_on_tpu(job: Job, tpu, quiet = True, ignore_window = None):
 
         # run the job
         os.system(f"tmux new-window -t {session_name}:{window_id}")
-        time.sleep(0.5)
+        time.sleep(4.5)
         os.system(f"tmux send-keys -t {session_name}:{window_id} 'cd {job.stage_dir}' Enter")
+        time.sleep(1.5)
         os.system(f"tmux send-keys -t {session_name}:{window_id} 'source staging.sh ka={tpu} zone={zone} {job.extra_configs}' Enter")
 
         if not quiet:

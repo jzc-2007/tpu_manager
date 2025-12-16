@@ -58,7 +58,7 @@ def kill_jobs_tpu(tpu, username = None, ignore_window = None):
             f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --project {PROJECT} --worker=all "
             "--command \"ps -eo pid,ppid,stat,cmd | grep 'main.py' | grep -v 'grep' || true\""
         )
-        result = subprocess.run(list_cmd, shell=True, timeout=30, check=False,
+        result = subprocess.run(list_cmd, shell=True, timeout=60, check=False,
                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         lines = result.stdout.strip().splitlines()
 
@@ -86,7 +86,7 @@ def kill_jobs_tpu(tpu, username = None, ignore_window = None):
             f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --project {PROJECT} --worker=all "
             f"--command \"sudo kill -9 {pid_list} || true\""
         )
-        subprocess.run(kill_cmd, shell=True, timeout=30, check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(kill_cmd, shell=True, timeout=60, check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
         print(f"{INFO} Cleaning /dev/accel0 occupation...")
         kill_accel_cmd = (
@@ -94,7 +94,7 @@ def kill_jobs_tpu(tpu, username = None, ignore_window = None):
             "--command \"pids=$(sudo lsof -w /dev/accel0 | grep 'python' | grep -v 'grep' | awk '{print $2}'); "
             "if [ ! -z \\\"$pids\\\" ]; then sudo kill -9 $pids; fi\""
         )
-        subprocess.run(kill_accel_cmd, shell=True, timeout=30, check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(kill_accel_cmd, shell=True, timeout=60, check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     except subprocess.TimeoutExpired:
         print(f"{FAIL} kill_jobs_tpu: Timeout.")
@@ -233,13 +233,11 @@ def apply_and_set_env(tpu, preemptible = False, spot = False, delete=True, repea
             delete_tpu(tpu)
         except subprocess.CalledProcessError as e:
             print(f"{WARNING} apply_{info_str}: TPU deletion failed: {e}")
+    
+    sa = REGION_SA_MAP[zone[:-2]]
+    version = 'v2-alpha-tpuv6e' if 'v6' in acc_type else ('v2-alpha-tpuv5' if 'v5p' in acc_type else 'tpu-ubuntu2204-base')
 
-    if 'v6' in acc_type:
-        base_cmd = f"gcloud compute tpus tpu-vm create {tpu} --zone={zone} --project {PROJECT} --accelerator-type={acc_type} --version=v2-alpha-tpuv6e"
-    elif 'v5p' in acc_type:
-        base_cmd = f"gcloud compute tpus tpu-vm create {tpu} --zone={zone} --project {PROJECT} --accelerator-type={acc_type} --version=v2-alpha-tpuv5"
-    else:
-        base_cmd = f"gcloud compute tpus tpu-vm create {tpu} --zone={zone} --project {PROJECT} --accelerator-type={acc_type} --version=tpu-ubuntu2204-base"
+    base_cmd = f"gcloud compute tpus tpu-vm create {tpu} --zone={zone} --project {PROJECT} --accelerator-type={acc_type} --version={version} --service-account={sa}"
 
     if preemptible and (not spot):
         base_cmd += " --preemptible"
@@ -614,6 +612,8 @@ def mount_disk(tpu, quiet = False):
         elif 'asia-northeast1' in zone: bucket = 'gs://kmh-gcp-asia-northeast1-b'
         else: raise ValueError(f"{FAIL} mount_disk: Unknown zone {zone}")
 
+        v = 'v6' if 'v6' in tpu else 'v5'
+
         cmd2 += f'''
     gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --project {PROJECT} \
     --worker=all --command "
@@ -621,7 +621,7 @@ def mount_disk(tpu, quiet = False):
     echo 'Current dir: '
     pwd
     cd
-    gsutil -m cp -r {bucket}/hanhong/v6_wheels.tar.gz ./wheels.tar.gz
+    gsutil -m cp -r {bucket}/hanhong/{v}_wheels.tar.gz ./wheels.tar.gz
     tar -xvf wheels.tar.gz
     rm -rf .local || true
     pip install --no-index --find-links=wheels wheels/*.whl --no-deps --force-reinstall

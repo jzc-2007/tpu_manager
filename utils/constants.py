@@ -15,10 +15,21 @@ RED, GREEN, YELLOW, PURPLE, NC = "\033[1;31m", "\033[1;32m", "\033[1;33m", "\033
 GOOD, INFO, WARNING, FAIL = f"{GREEN}[GOOD]{NC}", f"{PURPLE}[INFO]{NC}", f"{YELLOW}[WARNING]{NC}", f"{RED}[FAIL]{NC}"
 LOG = f"{PURPLE}[LOG]{NC}"
 
-NAME_TO_TYPE = {'v2-8':'v2-8','v2-32':'v2-32','v2-64':'v2-64','v2-128':'v2-128','v3-8':'v3-8','v3-32':'v3-32','v3-64':'v3-64','v3-128':'v3-128','v4-8':'v4-8','v4-16':'v4-16','v4-32':'v4-32','v4-64':'v4-64','v4-128':'v4-128','v4-256':'v4-256','v4-512':'v4-512','v5e-8':'v5litepod-8','v5e-16':'v5litepod-16','v5e-32':'v5litepod-32','v5e-64':'v5litepod-64','v5p-8':'v5p-8','v5p-16':'v5p-16','v5p-32':'v5p-32','v5p-64':'v5p-64','v5p-128':'v5p-128','v5p-256':'v5p-256','v5p-512':'v5p-512','v6e-8':'v6e-8','v6e-16':'v6e-16','v6e-32':'v6e-32','v6e-64':'v6e-64', 'v6e-128': 'v6e-128', 'v6e-256': 'v6e-256', 'v6e-512': 'v6e-512'} # acc_type for apply
 NAME_TO_VER = {'v2':'v2','v3':'v3','v4':'v4','v5e':'v5e','v5p':'v5p','v6e':'v6e'}
 
-TPU_NUM_LIST = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024]
+TPU_NUM_LIST = [2**i for i in range(10)]
+NAME_TO_TYPE = {}
+
+for i in TPU_NUM_LIST:
+    NAME_TO_TYPE['v2-' + str(i)] = 'v2-' + str(i)
+    NAME_TO_TYPE['v3-' + str(i)] = 'v3-' + str(i)
+    NAME_TO_TYPE['v4-' + str(i)] = 'v4-' + str(i)
+    NAME_TO_TYPE['v5e-' + str(i)] = 'v5litepod-' + str(i)
+    NAME_TO_TYPE['v5-' + str(i)] = 'v5p-' + str(i)
+    NAME_TO_TYPE['v5p-' + str(i)] = 'v5p-' + str(i)
+    NAME_TO_TYPE['v6-' + str(i)] = 'v6e-' + str(i)
+    NAME_TO_TYPE['v6e-' + str(i)] = 'v6e-' + str(i)
+
 v2_list = ['v2-' + str(i) for i in TPU_NUM_LIST]
 v3_list = ['v3-' + str(i) for i in TPU_NUM_LIST]
 v4_list = ['v4-' + str(i) for i in TPU_NUM_LIST]
@@ -32,18 +43,21 @@ v6_list = v6_list + v6e_list
 all_type_list = v2_list + v3_list + v4_list + v5_list + v6_list
 ARG_TO_LIST = NAME_TO_TYPE | {'v2':v2_list, 'v3':v3_list, 'v4': v4_list, 'v5':v5_list, 'v6': v6_list, 'v5e': v5e_list, 'v5p': v5p_list, 'v6e': v6e_list, 'v2+': v2_list + v3_list + v4_list + v5_list + v6_list, 'v3+': v3_list + v4_list + v5_list + v6_list, 'v4+': v4_list + v5_list + v6_list, 'v5+': v5_list + v6_list, 'v6+': v6_list, 'v*': all_type_list, '-a': all_type_list, '--all': all_type_list}
 
-TYPE_DICT = {
-    'all': ['v4-32', 'v6e-32', 'v6e-64'],
-    'v4-32': ['v4-32'],
-    'v5-32': ['v5p-32', 'v5litepod-32'],
-    'v5-64': ['v5p-64', 'v5litepod-64'],
-    'v6-32': ['v6e-32'],
-    'v6-64': ['v6e-64'],
-    'v6e-32': ['v6e-32'],
-    'v6e-64': ['v6e-64'],
-    'v6':['v6e-32', 'v6e-64'],
-    'v6e':['v6e-32', 'v6e-64'],
-}
+TYPE_DICT = {}
+for i in TPU_NUM_LIST:
+    TYPE_DICT['v2-' + str(i)] = ['v2-' + str(i)]
+    TYPE_DICT['v3-' + str(i)] = ['v3-' + str(i)]
+    TYPE_DICT['v4-' + str(i)] = ['v4-' + str(i)]
+    TYPE_DICT['v5-' + str(i)] = ['v5p-' + str(i), 'v5litepod-' + str(i)]
+    TYPE_DICT['v6-' + str(i)] = ['v6e-' + str(i)]
+    TYPE_DICT['v5e-' + str(i)] = ['v5litepod-' + str(i)]
+    TYPE_DICT['v5p-' + str(i)] = ['v5p-' + str(i)]
+    TYPE_DICT['v6e-' + str(i)] = ['v6e-' + str(i)]
+
+TYPE_DICT['v4'] = ['v4-' + str(i) for i in TPU_NUM_LIST]
+TYPE_DICT['v5'] = ['v5p-' + str(i) for i in TPU_NUM_LIST] + ['v5litepod-' + str(i) for i in TPU_NUM_LIST]
+TYPE_DICT['v6'] = ['v6e-' + str(i) for i in TPU_NUM_LIST]
+TYPE_DICT['all'] = TYPE_DICT['v4'] + TYPE_DICT['v5'] + TYPE_DICT['v6']
 
 ZONE_DICT = {
     'all': ['us-central1-a', 'us-central1-b', 'us-central2-b', 'us-east1-d', 'us-east5-b', 'asia-northeast1-b'],
@@ -105,3 +119,13 @@ RULE_DICT ={
         'locked': 'pass',
     }
 }
+
+REGION_SA_MAP = {
+    "us-central1": "bucket-us-central1@he-vision-group.iam.gserviceaccount.com",
+    "us-central2": "bucket-us-central2@he-vision-group.iam.gserviceaccount.com",
+    "us-east1": "373438850578-compute@developer.gserviceaccount.com",
+    "us-east5": "bucket-us-east5@he-vision-group.iam.gserviceaccount.com",
+    "asia-northeast1": "bucket-asia@he-vision-group.iam.gserviceaccount.com",
+    "europe-west4": "373438850578-compute@developer.gserviceaccount.com"
+}
+DEFAULT_SA = "373438850578-compute@developer.gserviceaccount.com"

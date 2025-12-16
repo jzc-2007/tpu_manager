@@ -504,8 +504,8 @@ def Queue(user_obj, args):
     # create window with index unique_id
     subprocess.run(["tmux", "new-window", "-t", f"queue:{unique_id}"], check=True)
 
-    print(f"{INFO} Queue: Staging job in tmux window queue:{unique_id}")
-    time.sleep(0.5)
+    print(f"{INFO} Queue: Staging job in tmux window queue:{unique_id}, please wait for seconds...")
+    time.sleep(2.5)
 
     # verify window exists
     try:
@@ -540,10 +540,12 @@ def Queue(user_obj, args):
         return
 
     # start staging
+    time.sleep(2.5)
     subprocess.run(
         ["tmux", "send-keys", "-t", f"queue:{unique_id}", f"cd {shlex.quote(dir_path)}", "Enter"],
         check=True,
     )
+    time.sleep(2.5)
     subprocess.run(
         ["tmux", "send-keys", "-t", f"queue:{unique_id}", f"source just_staging.sh {unique_id}; sleep 600; exit", "Enter"],
         check=True,
