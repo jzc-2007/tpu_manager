@@ -1201,6 +1201,15 @@ def check_jobs(user_obj, args, config = None):
                 print('-'*40)
                 continue
             elif job_data["status"] == 'running' or job_data["status"] == 'starting':
+                exclude_ = ["AttributeError: 'MessageFactory' object has no attribute 'GetPrototype'"]
+                # if detect something in exclude_, delete it. do this recursively
+                while True:
+                    found = False
+                    for ex in exclude_:
+                        if re.search(ex, last_line_cut):
+                            found = True
+                            last_line_cut = last_line_cut.replace(ex, '')
+                    if not found: break
                 if (re.search(r'Job failed', last_line_cut) or re.search(r'[eE]rror', last_line_cut) or re.search(r'FAIL', last_line_cut)) and 's' in config:
                     if re.search(r'Allocation type', last_line):
                         print(f"Status: {RED}OOM Error{NC}\nmsg: {msg}")
