@@ -173,22 +173,19 @@ def explain(cmd):
 def tldr():
     Usage = f"""
 {YELLOW}== Core Commands =={NC}
-- `tpu run <tpu> <username> [dir=1] [tag=<tag>] [key=value ...] [rule=<rule>]`: Run a job in the specified directory on a TPU.
+- `tpu run <tpu>/<tpu_type> <username> [dir=1] [tag=<tag>] [key=value ...] [rule=<rule>] [--auto]`: Run a job in the specified directory on a TPU.
 e.g. `tpu run v2-32-6 dir=2 tag=baseline lr=3e-4 rule=resume xibo`
-- `tpu monitor/check <username>`: Continuously(one-time) monitor jobs for a user.
+e.g. `tpu run v2-32 --auto xibo`
+- `tpu monitor/check-simp <username>`: Continuously(one-time) monitor jobs for a user.
+- `tpu clean <username>`: Clear finished + error jobs.
+- `tpu find <tpu_type>`: Find available TPUs of a given type.
 {YELLOW}== Directory Management =={NC}
 - `tpu ls <username>`: List all working directories.
 - `tpu set-cur <n> <username>`: Set current working directory (pwd) to slot `<n>`.
-{YELLOW}== Config Aliases =={NC}
-- `tpu -a <alias> <full_config_key> <username>`: Add a config alias. 
-e.g. `tpu -a lr config.training.learning_rate`
-- `tpu -sa <username>`: Show all config aliases.
 {YELLOW}== TPU Management =={NC}
 - `tpu describe <tpu>`: Describe TPU with environment info.
-- `tpu solve <tpu>`: Fix common environment errors automatically.
-- `tpu -lta`: List all TPU aliases.
+- `tpu apply/reapply <tpu>`: Apply/Reapply(delete and apply) a TPU.
 {YELLOW}== Others =={NC}
-- `tpu clean <username>`: Clear finished + error jobs.
 - `tpu help/-h <command>`: Show usage for a specific command.
 - `tpu tldr`: Show this summary.
     """

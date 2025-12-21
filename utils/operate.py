@@ -621,6 +621,7 @@ def mount_disk(tpu, quiet = False):
     echo 'Current dir: '
     pwd
     cd
+    gcloud auth activate-service-account --key-file=/kmh-nfs-ssd-us-mount/code/qiao/{zone[:-2]}.json
     gsutil -m cp -r {bucket}/hanhong/{v}_wheels.tar.gz ./wheels.tar.gz
     tar -xvf wheels.tar.gz
     rm -rf .local || true
@@ -628,8 +629,6 @@ def mount_disk(tpu, quiet = False):
     rm -rf wheels wheels.tar.gz
     "
     '''
-
-
 
     try:
         download_process = \

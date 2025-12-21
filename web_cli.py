@@ -7,15 +7,15 @@ web_ui.py — TPU 任务可视化网站（Flask）
   * 隐藏 DIR 或 TPU 为 unknown 的行（更干净）
   * Tags 与正文字体一致，过长可横向滑动
   * Sticky 表头不再与内容重叠
-- 按钮：Resume / Rerun / 选择TPU Resume / 选择TPU Rerun / Kill / 查看Log
+- 按钮：Resume / Rerun / chooseTPU Resume / chooseTPU Rerun / Kill / 查看Log
   * 点击立即有“已提交”提示 + 行内转圈；后台线程完成后弹出 成功/失败 并刷新
-- 选择 TPU 弹窗（“像 tpu find 一样”的表格）：仅读取 sheet.read_sheet_info()
+- choose TPU 弹窗（“像 tpu find 一样”的表格）：仅读取 sheet.read_sheet_info()
   * 只用 spreadsheet 的列表（去重且字段完整）
   * 支持 “在所选 TPU 上 Resume/Rerun”
   * 还支持 “申请并 Resume/Rerun”（若 TPU 不存在可直接申请后续上）
 - TPU 面板（类似 spreadsheet）：
   * 只显示 read_sheet_info() 的行
-  * 状态为空或 NOT FOUND 的行出现 Apply（可设次数/间隔，默认 12/8）
+  * 状态为空或 NOT FOUND 的行出现 Apply（可设次数/间隔，默认 20/5）
 - 日志页（/log/<username>/<window_id>）：
   * 采用你提供的版本：?n= 字符数、?ansi=0 去色、跟随尾部、自动刷新、快捷键
 """
@@ -306,7 +306,7 @@ def _run_kill(username: str, window_id: str, tid: str):
     _finish_task(tid, code == 0, out, out)
 
 # Apply 循环（面板用）
-def _run_apply(alias: str, times: int = 12, sleep_sec: int = 8, tid: Optional[str] = None):
+def _run_apply(alias: str, times: int = 20, sleep_sec: int = 5, tid: Optional[str] = None):
     ok = False; last = ""
     log_output = ""
     
@@ -327,7 +327,7 @@ def _run_apply(alias: str, times: int = 12, sleep_sec: int = 8, tid: Optional[st
         time.sleep(max(1, sleep_sec))
     if tid: _finish_task(tid, ok, last, log_output)
 
-def _run_reapply(alias: str, times: int = 12, sleep_sec: int = 8, tid: Optional[str] = None):
+def _run_reapply(alias: str, times: int = 20, sleep_sec: int = 5, tid: Optional[str] = None):
     """Reapply: delete then apply"""
     log_output = ""
     
@@ -357,7 +357,7 @@ def _run_reapply(alias: str, times: int = 12, sleep_sec: int = 8, tid: Optional[
         time.sleep(max(1, sleep_sec))
     if tid: _finish_task(tid, ok, last, log_output)
 
-# 申请并 Resume/Rerun（选择器用）
+# 申请并 Resume/Rerun（choose器用）
 def _run_apply_then_resume(username: str, window_id: str, alias: str, pre_str: Optional[str], tid: str):
     # Update status to "Applying for TPU"
     with OP_LOCK:
@@ -366,8 +366,8 @@ def _run_apply_then_resume(username: str, window_id: str, alias: str, pre_str: O
             OP_TASKS[tid]["msg"] = f"Applying for TPU {alias}..."
     
     # Apply for the TPU with retry logic
-    times = 12
-    sleep_sec = 8
+    times = 20
+    sleep_sec = 5
     ok = False
     last = ""
     log_output = ""
@@ -419,8 +419,8 @@ def _run_apply_then_rerun(username: str, window_id: str, alias: str, pre_str: Op
             OP_TASKS[tid]["msg"] = f"Applying for TPU {alias}..."
     
     # Apply for the TPU with retry logic
-    times = 12
-    sleep_sec = 8
+    times = 20
+    sleep_sec = 5
     ok = False
     last = ""
     log_output = ""
@@ -464,7 +464,7 @@ def _run_apply_then_rerun(username: str, window_id: str, alias: str, pre_str: Op
     
     _run_rerun(username, window_id, alias, tid)
 
-# 重新申请并 Resume/Rerun（选择器用）
+# 重新申请并 Resume/Rerun（choose器用）
 def _run_reapply_then_resume(username: str, window_id: str, alias: str, pre_str: Optional[str], tid: str):
     # Update status to "Deleting TPU"
     with OP_LOCK:
@@ -487,8 +487,8 @@ def _run_reapply_then_resume(username: str, window_id: str, alias: str, pre_str:
             OP_TASKS[tid]["msg"] = f"Applying for TPU {alias}..."
     
     # Apply for the TPU with retry logic
-    times = 12
-    sleep_sec = 8
+    times = 20
+    sleep_sec = 5
     ok = False
     last = ""
     
@@ -553,8 +553,8 @@ def _run_reapply_then_rerun(username: str, window_id: str, alias: str, pre_str: 
             OP_TASKS[tid]["msg"] = f"Applying for TPU {alias}..."
     
     # Apply for the TPU with retry logic
-    times = 12
-    sleep_sec = 8
+    times = 20 # 
+    sleep_sec = 5 # 间隔5秒
     ok = False
     last = ""
     
@@ -630,6 +630,15 @@ def fetch_tpu_sheet_rows() -> List[Dict[str, Any]]:
         user   = str(info.get('user') or '')
         note   = str(info.get('user_note') or '')
         script_note = str(info.get('script_note') or '')
+        version = str(info.get('version') or '')
+        # If version is not available, try to extract from alias or full_name
+        if not version:
+            if alias.startswith('v4') or 'v4' in full_name:
+                version = 'v4'
+            elif alias.startswith('v5') or 'v5' in full_name:
+                version = 'v5'
+            elif alias.startswith('v6') or 'v6' in full_name:
+                version = 'v6'
         rows.append({
             "alias": alias,
             "full_name": full_name,
@@ -639,6 +648,7 @@ def fetch_tpu_sheet_rows() -> List[Dict[str, Any]]:
             "user": user,
             "user_note": note,
             "script_note": script_note,
+            "version": version,
             "found": True
         })
     return rows
@@ -769,8 +779,8 @@ BASE_HTML = r"""
               {% if j.in_data %}
                 <button class="btn" onclick="doResume('{{ j.window }}')">Resume</button>
                 <button class="btn" onclick="doRerun('{{ j.window }}')">Rerun</button>
-                <button class="btn" onclick="openTpuPicker('{{ j.window }}','resume')">选择TPU Resume</button>
-                <button class="btn" onclick="openTpuPicker('{{ j.window }}','rerun')">选择TPU Rerun</button>
+                <button class="btn" onclick="openTpuPicker('{{ j.window }}','resume')">chooseTPU Resume</button>
+                <button class="btn" onclick="openTpuPicker('{{ j.window }}','rerun')">chooseTPU Rerun</button>
                 <button class="btn" onclick="doKill('{{ j.window }}')">Kill</button>
               {% else %}
                 <span class="muted">（未在数据中）</span>
@@ -796,7 +806,7 @@ BASE_HTML = r"""
     </div>
   </div>
 
-  <!-- TPU 选择弹窗 -->
+  <!-- TPU choose弹窗 -->
   <div class="modal" id="tpu-modal">
     <div class="modal-card" id="tpu-modal-card">
       <button class="modal-close" onclick="closePicker()" aria-label="关闭">✕</button>
@@ -832,7 +842,7 @@ BASE_HTML = r"""
       
       <div class="run-controls" style="margin-top:10px;justify-content:flex-end">
         <button class="btn" id="picker-prev" onclick="pickerPrevStep()" style="display:none">← 上一步</button>
-        <span id="picked-thing" class="pill muted">未选择</span>
+        <span id="picked-thing" class="pill muted">未choose</span>
         <button class="btn" id="picker-resume" onclick="submitPicker('resume')" style="display:none">Resume</button>
         <button class="btn" id="picker-rerun" onclick="submitPicker('rerun')" style="display:none">Rerun</button>
         <button class="btn" id="picker-apply-resume" onclick="submitPickerApply('resume')" style="display:none">Apply and Resume</button>
@@ -859,7 +869,7 @@ BASE_HTML = r"""
       <!-- Step 1: Select Directory -->
       <div id="run-step1" class="run-step">
         <div class="row" style="margin-bottom:8px">
-          <span class="muted">选择目录：</span>
+          <span class="muted">choose目录：</span>
         </div>
         <table>
           <tbody id="dirs-tbody"></tbody>
@@ -869,7 +879,7 @@ BASE_HTML = r"""
       <!-- Step 2: Select TPU Type -->
       <div id="run-step2" class="run-step" style="display:none">
         <div class="row" style="margin-bottom:8px">
-          <span class="muted">选择 TPU 类型：</span>
+          <span class="muted">choose TPU type：</span>
         </div>
         <table>
           <tbody id="types-tbody"></tbody>
@@ -879,7 +889,7 @@ BASE_HTML = r"""
       <!-- Step 3: Select TPU -->
       <div id="run-step3" class="run-step" style="display:none">
         <div class="row" style="margin-bottom:8px">
-          <span class="muted">选择 TPU：</span>
+          <span class="muted">choose TPU：</span>
         </div>
         <table>
           <tbody id="run-tpus-tbody"></tbody>
@@ -890,7 +900,7 @@ BASE_HTML = r"""
         <div class="row" style="justify-content:space-between">
           <button class="btn" id="run-prev" onclick="runPrevStep()" style="display:none">← 上一步</button>
           <div class="row">
-            <span id="run-selected" class="pill muted">未选择</span>
+            <span id="run-selected" class="pill muted">未choose</span>
             <button class="btn" id="run-execute" onclick="executeRun()" style="display:none">▶️ RUN</button>
           </div>
         </div>
@@ -1158,7 +1168,7 @@ async function doClean(reFlag){
 
 function viewLog(win){ window.open(`{{ url_for('view_log', username=cur_user, window_id='__W__') }}`.replace('__W__',win),'_blank'); }
 
-// ---------- TPU 选择器（多步骤选择） ----------
+// ---------- TPU choose器（多步骤choose） ----------
 let pickerFor = null; // {win, action}
 let pickedTpu = null;
 let pickerState = {
@@ -1172,7 +1182,7 @@ function openTpuPicker(win, action){
   pickedTpu = null;
   pickerState = { step: 1, selectedType: null, selectedTpu: null };
   document.getElementById('picker-target').textContent = `目标: #${win} / ${action}`;
-  document.getElementById('picked-thing').textContent = '未选择';
+  document.getElementById('picked-thing').textContent = '未choose';
   document.getElementById('tpu-modal').classList.add('show');
   loadPickerStep1();
 }
@@ -1364,14 +1374,14 @@ async function loadTpus(){
 }
 
 function submitPicker(what){
-  if(!pickerFor || !pickedTpu){ toast('请先从表格中选择一个 TPU'); return; }
+  if(!pickerFor || !pickedTpu){ toast('choose TPU'); return; }
   const alias = pickedTpu.alias || pickedTpu;
   if(what==='resume') doResume(pickerFor.win, alias);
   else doRerun(pickerFor.win, alias);
   closePicker();
 }
 function submitPickerApply(what){
-  if(!pickerFor || !pickedTpu){ toast('请先从表格中选择一个 TPU'); return; }
+  if(!pickerFor || !pickedTpu){ toast('choose TPU'); return; }
   const alias = pickedTpu.alias || pickedTpu;
   const pre = pickedTpu.preemptible;
   toast('已提交 申请并'+(what==='resume'?'Resume':'Rerun')+' 操作');
@@ -1387,7 +1397,7 @@ function submitPickerApply(what){
 }
 
 function submitPickerReapply(what){
-  if(!pickerFor || !pickedTpu){ toast('请先从表格中选择一个 TPU'); return; }
+  if(!pickerFor || !pickedTpu){ toast('choose TPU'); return; }
   const alias = pickedTpu.alias || pickedTpu;
   const pre = pickedTpu.preemptible;
   toast('已提交 重新申请并'+(what==='resume'?'Resume':'Rerun')+' 操作');
@@ -1488,7 +1498,7 @@ function loadRunStep2(){
           tbody.appendChild(tr);
         });
       } else {
-        tbody.innerHTML = '<tr><td class="muted">没有找到 TPU 类型</td></tr>';
+        tbody.innerHTML = '<tr><td class="muted">没有找到 TPU type</td></tr>';
       }
     })
     .catch(e => {
@@ -1573,7 +1583,7 @@ function selectTpu(tpu){
                            tpu.user !== '{{ cur_user }}';
   
   if(needsConfirmation) {
-    const confirmed = confirm(`警告: TPU ${tpu.alias} 正在被用户 ${tpu.user} 使用。\n\n确定要继续使用这个 TPU 吗？\n\n点击"确定"继续，点击"取消"选择其他 TPU。`);
+    const confirmed = confirm(`警告: TPU ${tpu.alias} 正在被用户 ${tpu.user} 使用。\n\n确定要继续使用这个 TPU 吗？\n\n点击"确定"继续，点击"取消"choose其他 TPU。`);
     if(!confirmed) {
       return; // User cancelled, don't select this TPU
     }
@@ -1649,10 +1659,10 @@ function updateRunStep(){
   const executeEl = document.getElementById('run-execute');
   
   if(runState.step === 3 && runState.selectedTpu){
-    selectedEl.textContent = `已选择: ${runState.selectedDir.dir} → ${runState.selectedType} → ${runState.selectedTpu.alias}`;
+    selectedEl.textContent = `已choose: ${runState.selectedDir.dir} → ${runState.selectedType} → ${runState.selectedTpu.alias}`;
     executeEl.style.display = 'block';
   } else {
-    selectedEl.textContent = '未选择';
+    selectedEl.textContent = '未choose';
     executeEl.style.display = 'none';
   }
 }
@@ -1717,6 +1727,12 @@ TPU_PANEL_HTML = r"""
     td.script-terminated{color:#9fb0d1 !important} 
     td.script-creating{color:#66d9ef !important}
     td.script-unknown{color:#6c757d !important}
+    /* TPU Running Status Colors */
+    td.status-running{color:#66d9ef !important}
+    td.status-free{color:#20c997 !important}
+    td.status-reserved{color:#ffc107 !important}
+    td.status-notfound{color:#ff6b6b !important}
+    td.status-creating{color:#66d9ef !important}
     .progress-bar{width:100%;height:8px;background:#2a3a66;border-radius:4px;overflow:hidden;margin:4px 0}
     .progress-fill{height:100%;background:linear-gradient(90deg,#20c997,#66d9ef);transition:width 0.3s ease}
     .progress-text{font-size:11px;color:var(--muted);margin-top:2px}
@@ -1732,6 +1748,18 @@ TPU_PANEL_HTML = r"""
     .topbar{position:sticky;top:0;z-index:50;background:linear-gradient(180deg,var(--panel),rgba(15,26,51,0.7));border-bottom:1px solid var(--border);}
     .users{display:flex;gap:8px;padding:12px 16px}
     .user-pill{padding:8px 12px;border:1px solid var(--border);border-radius:999px;background:#0c1834;color:#d9e1ff;opacity:.9}
+    .filter-tags{display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center}
+    .filter-tag{display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border:1px solid var(--border);border-radius:8px;background:#0e1a37;color:var(--txt)}
+    .filter-tag-close{cursor:pointer;padding:2px 4px;border-radius:4px;font-weight:bold}
+    .filter-tag-close:hover{background:rgba(255,255,255,0.1)}
+    .filter-modal{position:fixed;inset:0;background:rgba(0,0,0,.7);display:none;align-items:center;justify-content:center;z-index:101}
+    .filter-modal.show{display:flex}
+    .filter-modal-content{background:#0f1a33;border:1px solid var(--border);border-radius:12px;padding:20px;min-width:300px}
+    .filter-modal-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px}
+    .filter-modal-body{display:flex;flex-direction:column;gap:12px}
+    .filter-checkbox{display:flex;align-items:center;gap:8px;cursor:pointer}
+    .filter-checkbox input[type="checkbox"]{width:18px;height:18px;cursor:pointer}
+    .filter-modal-footer{display:flex;justify-content:flex-end;gap:8px;margin-top:16px;padding-top:16px;border-top:1px solid var(--border)}
   </style>
 </head>
 <body>
@@ -1745,14 +1773,46 @@ TPU_PANEL_HTML = r"""
   </div>
 
   <div class="container">
+    <div class="filter-tags" id="filter-tags" style="display:none"></div>
+    
+    <!-- Statistics Display -->
+    <div id="statistics-container" style="margin-bottom:16px;background:#0f1a33;border:1px solid var(--border);border-radius:8px;overflow:hidden">
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:12px;cursor:pointer;user-select:none;" onclick="toggleStatistics()">
+        <strong>统计信息</strong>
+        <span id="statistics-toggle-icon" style="font-size:18px;">▼</span>
+      </div>
+      <div id="statistics-display" style="padding:0 12px 12px 12px;display:block;"></div>
+    </div>
+    
     <div class="row" style="justify-content:space-between">
       <div class="row">
-        <input class="input" id="tpu-filter" placeholder="筛选 alias/zone/user/status">
-        <button class="btn" onclick="loadPanel()">刷新</button>
+        <button class="btn" onclick="openFilterModal('type')">type</button>
+        <button class="btn" onclick="openFilterModal('zone')">zone</button>
+        <button class="btn" onclick="openFilterModal('status')">status</button>
+        <button class="btn" onclick="openFilterModal('user')">user</button>
+        <button class="btn" onclick="openFilterModal('running_status')">running status</button>
+        <button class="btn" onclick="loadPanel()">refresh</button>
       </div>
     </div>
 
-    <div class="row muted">表格数据来自 <code>sheet.read_sheet_info()</code>；状态为空或 <em>NOT FOUND</em> 的行可尝试 Apply（默认 12 次 / 8 秒）。</div>
+    <div class="row muted">Apply Default: 20 times / 5 seconds.</div>
+
+    <!-- Filter Modal -->
+    <div class="filter-modal" id="filter-modal">
+      <div class="filter-modal-content">
+        <div class="filter-modal-header">
+          <strong id="filter-modal-title">choose TPU type</strong>
+          <button class="btn" onclick="closeFilterModal()" style="padding:4px 8px">✕</button>
+        </div>
+        <div class="filter-modal-body" id="filter-modal-body">
+          <!-- Content will be dynamically generated -->
+        </div>
+        <div class="filter-modal-footer">
+          <button class="btn" onclick="closeFilterModal()">取消</button>
+          <button class="btn" onclick="applyFilter()" style="background:var(--accent);color:#05132b">确认</button>
+        </div>
+      </div>
+    </div>
 
     <table>
       <tbody id="panel-body"></tbody>
@@ -1760,6 +1820,240 @@ TPU_PANEL_HTML = r"""
   </div>
 
 <script>
+// Filter state: store selected filters (empty = no filter)
+let selectedVersions = new Set();
+let selectedZones = new Set();
+let selectedStatuses = new Set();
+let selectedUsers = new Set();
+let selectedRunningStatuses = new Set();
+let currentFilterType = 'type'; // 'type', 'zone', 'status', 'user', or 'running_status'
+
+// Available zones (from constants.py)
+const availableZones = [
+  'us-central1-a', 'us-central1-b', 'us-central2-b', 
+  'us-east1-d', 'us-east5-b', 'asia-northeast1-b'
+];
+
+// Available statuses
+const availableStatuses = ['READY', 'PREEMPTED', 'CREATING', 'NOT FOUND', 'TERMINATED'];
+// Available running statuses
+const availableRunningStatuses = ['free', 'reserved', 'running'];
+
+function openFilterModal(type){
+  currentFilterType = type;
+  const modal = document.getElementById('filter-modal');
+  const title = document.getElementById('filter-modal-title');
+  const body = document.getElementById('filter-modal-body');
+  
+  // Set title
+  if(type === 'type'){
+    title.textContent = 'choose TPU type';
+  } else if(type === 'zone'){
+    title.textContent = 'choose TPU 地区';
+  } else if(type === 'status'){
+    title.textContent = 'choose TPU 状态';
+  } else if(type === 'user'){
+    title.textContent = 'choose TPU user';
+  } else if(type === 'running_status'){
+    title.textContent = 'choose running status';
+  }
+  
+  // Generate checkboxes based on type
+  body.innerHTML = '';
+  
+  if(type === 'user'){
+    // For user, fetch data and extract unique users
+    fetch(`{{ url_for('api_list_tpus') }}`)
+      .then(r => r.json())
+      .then(data => {
+        const userSet = new Set();
+        data.rows.forEach(r => {
+          const user = (r.user || '').trim();
+          if(user && user.toLowerCase() !== 'free'){
+            userSet.add(user);
+          }
+        });
+        const options = Array.from(userSet).sort();
+        const selectedSet = selectedUsers;
+        
+        options.forEach(opt => {
+          const label = document.createElement('label');
+          label.className = 'filter-checkbox';
+          const checkbox = document.createElement('input');
+          checkbox.type = 'checkbox';
+          checkbox.value = opt;
+          checkbox.id = `check-${type}-${opt.replace(/\s+/g, '-')}`;
+          checkbox.checked = selectedSet.has(opt);
+          label.appendChild(checkbox);
+          const span = document.createElement('span');
+          span.textContent = opt;
+          label.appendChild(span);
+          body.appendChild(label);
+        });
+      });
+  } else {
+    let options = [];
+    let selectedSet = new Set();
+    
+    if(type === 'type'){
+      options = ['v4', 'v5', 'v6'];
+      selectedSet = selectedVersions;
+    } else if(type === 'zone'){
+      options = availableZones;
+      selectedSet = selectedZones;
+    } else if(type === 'status'){
+      options = availableStatuses;
+      selectedSet = selectedStatuses;
+    } else if(type === 'running_status'){
+      options = availableRunningStatuses;
+      selectedSet = selectedRunningStatuses;
+    }
+    
+    options.forEach(opt => {
+      const label = document.createElement('label');
+      label.className = 'filter-checkbox';
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.value = opt;
+      checkbox.id = `check-${type}-${opt}`;
+      checkbox.checked = selectedSet.has(opt);
+      label.appendChild(checkbox);
+      const span = document.createElement('span');
+      span.textContent = opt;
+      label.appendChild(span);
+      body.appendChild(label);
+    });
+  }
+  
+  modal.classList.add('show');
+}
+
+function closeFilterModal(){
+  document.getElementById('filter-modal').classList.remove('show');
+}
+
+function applyFilter(){
+  // Get selected values from checkboxes
+  const body = document.getElementById('filter-modal-body');
+  const checkboxes = body.querySelectorAll('input[type="checkbox"]');
+  
+  if(currentFilterType === 'type'){
+    selectedVersions.clear();
+    checkboxes.forEach(cb => {
+      if(cb.checked) selectedVersions.add(cb.value);
+    });
+  } else if(currentFilterType === 'zone'){
+    selectedZones.clear();
+    checkboxes.forEach(cb => {
+      if(cb.checked) selectedZones.add(cb.value);
+    });
+  } else if(currentFilterType === 'status'){
+    selectedStatuses.clear();
+    checkboxes.forEach(cb => {
+      if(cb.checked) selectedStatuses.add(cb.value);
+    });
+  } else if(currentFilterType === 'user'){
+    selectedUsers.clear();
+    checkboxes.forEach(cb => {
+      if(cb.checked) selectedUsers.add(cb.value);
+    });
+  } else if(currentFilterType === 'running_status'){
+    selectedRunningStatuses.clear();
+    checkboxes.forEach(cb => {
+      if(cb.checked) selectedRunningStatuses.add(cb.value);
+    });
+  }
+  
+  closeFilterModal();
+  updateFilterTags();
+  loadPanel();
+}
+
+function updateFilterTags(){
+  const tagsContainer = document.getElementById('filter-tags');
+  tagsContainer.innerHTML = '';
+  
+  const hasFilters = selectedVersions.size > 0 || selectedZones.size > 0 || selectedStatuses.size > 0 || selectedUsers.size > 0 || selectedRunningStatuses.size > 0;
+  
+  if(!hasFilters){
+    tagsContainer.style.display = 'none';
+    return;
+  }
+  
+  tagsContainer.style.display = 'flex';
+  
+  // Add version tags
+  selectedVersions.forEach(v => {
+    const tag = document.createElement('div');
+    tag.className = 'filter-tag';
+    tag.innerHTML = `
+      <span>type: ${v}</span>
+      <span class="filter-tag-close" onclick="removeFilter('type', '${v}')">✕</span>
+    `;
+    tagsContainer.appendChild(tag);
+  });
+  
+  // Add zone tags
+  selectedZones.forEach(z => {
+    const tag = document.createElement('div');
+    tag.className = 'filter-tag';
+    tag.innerHTML = `
+      <span>zone: ${z}</span>
+      <span class="filter-tag-close" onclick="removeFilter('zone', '${z}')">✕</span>
+    `;
+    tagsContainer.appendChild(tag);
+  });
+  
+  // Add status tags
+  selectedStatuses.forEach(s => {
+    const tag = document.createElement('div');
+    tag.className = 'filter-tag';
+    tag.innerHTML = `
+      <span>status: ${s}</span>
+      <span class="filter-tag-close" onclick="removeFilter('status', '${s}')">✕</span>
+    `;
+    tagsContainer.appendChild(tag);
+  });
+  
+  // Add user tags
+  selectedUsers.forEach(u => {
+    const tag = document.createElement('div');
+    tag.className = 'filter-tag';
+    tag.innerHTML = `
+      <span>user: ${u}</span>
+      <span class="filter-tag-close" onclick="removeFilter('user', '${u}')">✕</span>
+    `;
+    tagsContainer.appendChild(tag);
+  });
+  
+  // Add running status tags
+  selectedRunningStatuses.forEach(rs => {
+    const tag = document.createElement('div');
+    tag.className = 'filter-tag';
+    tag.innerHTML = `
+      <span>running status: ${rs}</span>
+      <span class="filter-tag-close" onclick="removeFilter('running_status', '${rs}')">✕</span>
+    `;
+    tagsContainer.appendChild(tag);
+  });
+}
+
+function removeFilter(type, value){
+  if(type === 'type'){
+    selectedVersions.delete(value);
+  } else if(type === 'zone'){
+    selectedZones.delete(value);
+  } else if(type === 'status'){
+    selectedStatuses.delete(value);
+  } else if(type === 'user'){
+    selectedUsers.delete(value);
+  } else if(type === 'running_status'){
+    selectedRunningStatuses.delete(value);
+  }
+  updateFilterTags();
+  loadPanel();
+}
+
 function setTopbarVar(){
   const tb = document.getElementById('topbar2');
   document.documentElement.style.setProperty('--topbar', (tb?.offsetHeight||60)+'px');
@@ -1767,15 +2061,373 @@ function setTopbarVar(){
 window.addEventListener('load', setTopbarVar);
 window.addEventListener('resize', setTopbarVar);
 
+// Close modal when clicking outside
+document.getElementById('filter-modal').addEventListener('click', (e) => {
+  if(e.target && e.target.id === 'filter-modal') closeFilterModal();
+});
+
+// Statistics collapse/expand state
+let statisticsExpanded = true;
+
+function toggleStatistics(){
+  const statsDisplay = document.getElementById('statistics-display');
+  const toggleIcon = document.getElementById('statistics-toggle-icon');
+  
+  statisticsExpanded = !statisticsExpanded;
+  
+  if(statisticsExpanded){
+    statsDisplay.style.display = 'block';
+    toggleIcon.textContent = '▼';
+  } else {
+    statsDisplay.style.display = 'none';
+    toggleIcon.textContent = '▶';
+  }
+}
+
+// Extract specific TPU type (v4, v5e, v5p, v6e)
+function extractTpuType(alias, fullName, version){
+  // Try alias first
+  const aliasStr = (alias || '').toLowerCase();
+  if(aliasStr.match(/^v4[-_]/)) return 'v4';
+  if(aliasStr.match(/^v5e[-_]/)) return 'v5e';
+  if(aliasStr.match(/^v5p[-_]/)) return 'v5p';
+  if(aliasStr.match(/^v5[-_]/)) return 'v5p'; // v5 defaults to v5p
+  if(aliasStr.match(/^v6e[-_]/)) return 'v6e';
+  if(aliasStr.match(/^v6[-_]/)) return 'v6e'; // v6 defaults to v6e
+  
+  // Try fullName
+  const fullNameStr = (fullName || '').toLowerCase();
+  if(fullNameStr.match(/v4[-_]/)) return 'v4';
+  if(fullNameStr.match(/v5e[-_]/)) return 'v5e';
+  if(fullNameStr.match(/v5p[-_]/)) return 'v5p';
+  if(fullNameStr.match(/v5[-_]/)) return 'v5p';
+  if(fullNameStr.match(/v6e[-_]/)) return 'v6e';
+  if(fullNameStr.match(/v6[-_]/)) return 'v6e';
+  
+  // Try version field
+  if(version){
+    const vLower = version.toLowerCase();
+    if(vLower === 'v4') return 'v4';
+    if(vLower === 'v5e') return 'v5e';
+    if(vLower === 'v5p' || vLower === 'v5') return 'v5p';
+    if(vLower === 'v6e' || vLower === 'v6') return 'v6e';
+  }
+  
+  return null;
+}
+
+// Extract version from alias or fullName (e.g., v4-32 -> v4, v6e-64 -> v6, v5p-64 -> v5)
+function extractVersion(alias, fullName, version){
+  const tpuType = extractTpuType(alias, fullName, version);
+  if(tpuType === 'v4') return 'v4';
+  if(tpuType === 'v5e' || tpuType === 'v5p') return 'v5';
+  if(tpuType === 'v6e') return 'v6';
+  return null;
+}
+
+// Extract card count from TPU name (e.g., v4-32 -> 32, v6-64 -> 64)
+function extractCardCount(alias, fullName){
+  // Try to extract from alias first (e.g., v4-32)
+  const aliasMatch = (alias || '').match(/v\d+[ep]?[-_](\d+)/i);
+  if(aliasMatch) return parseInt(aliasMatch[1]);
+  
+  // Try to extract from fullName
+  const fullNameMatch = (fullName || '').match(/v\d+[ep]?[-_](\d+)/i);
+  if(fullNameMatch) return parseInt(fullNameMatch[1]);
+  
+  return 0;
+}
+
+// A100 conversion factors
+const A100_FACTORS = {
+  'v4': 275 / 312,
+  'v5e': 197 / 312,
+  'v5p': 459 / 312,
+  'v6e': 918 / 312
+};
+
+// Cost per card (USD per hour)
+const COST_PER_CARD = {
+  'v4': 0.9215,
+  'v5e': 0.244926,
+  'v5p': 1.428,
+  'v6e': 0.680749
+};
+
+// Total capacity for each version and zone
+const TOTAL_CAPACITY = {
+  'v4': 1344,
+  'v5': 1024,
+  'v6': 1536,
+  // Zone-specific capacities
+  'v5-us-central1-a': 288
+};
+
+// Calculate and display statistics
+function calculateStatistics(allRows){
+  const stats = {}; // {version: {zone: {READY: count, CREATING: count, runningReserved: {type: count, a100: count, cost: number}}}}
+  
+  allRows.forEach(r => {
+    // Extract version and specific type
+    const version = extractVersion(r.alias, r.full_name, r.version);
+    const tpuType = extractTpuType(r.alias, r.full_name, r.version);
+    const zone = (r.zone || '').trim();
+    const status = (r.script_note || '').toUpperCase();
+    const runningStatus = (r.running_status || '').toLowerCase();
+    
+    // Only process v4, v5, v6
+    if(!version || !['v4', 'v5', 'v6'].includes(version) || !zone) return;
+    
+    // Extract card count
+    const cardCount = extractCardCount(r.alias, r.full_name);
+    if(cardCount === 0) return;
+    
+    // Initialize structure
+    if(!stats[version]) stats[version] = {};
+    if(!stats[version][zone]) {
+      stats[version][zone] = {
+        READY: 0, 
+        CREATING: 0,
+        free: 0,
+        running: 0,
+        reserved: 0,
+        runningReserved: {}
+      };
+    }
+    
+    // Count READY and CREATING
+    if(status === 'READY') {
+      stats[version][zone].READY += cardCount;
+      // Count running_status for READY TPUs only
+      if(runningStatus === 'free') {
+        stats[version][zone].free += cardCount;
+      } else if(runningStatus === 'running') {
+        stats[version][zone].running += cardCount;
+      } else if(runningStatus === 'reserved') {
+        stats[version][zone].reserved += cardCount;
+      }
+    }
+    if(status === 'CREATING') stats[version][zone].CREATING += cardCount;
+    
+    // Count running/reserved in READY status for A100 calculation
+    if(status === 'READY' && (runningStatus === 'running' || runningStatus === 'reserved') && tpuType) {
+      if(!stats[version][zone].runningReserved[tpuType]) {
+        stats[version][zone].runningReserved[tpuType] = 0;
+      }
+      stats[version][zone].runningReserved[tpuType] += cardCount;
+    }
+  });
+  
+  // Display statistics
+  const statsContainer = document.getElementById('statistics-display');
+  // Keep current display state (don't force show/hide)
+  
+  if(Object.keys(stats).length === 0){
+    statsContainer.innerHTML = '<div class="muted">No statistics available</div>';
+    return;
+  }
+  
+  let html = '<div style="display:flex;flex-direction:column;gap:12px;">';
+  const versions = ['v4', 'v5', 'v6'];
+  let hasAnyData = false;
+  let grandTotalA100 = 0;
+  let grandTotalCost = 0;
+  
+  versions.forEach(v => {
+    if(!stats[v]) return;
+    const zones = Object.keys(stats[v]).sort();
+    zones.forEach(zone => {
+      const ready = stats[v][zone].READY;
+      const creating = stats[v][zone].CREATING;
+      const total = ready + creating;
+      // Check for zone-specific capacity first, then fall back to version capacity
+      const zoneKey = `${v}-${zone}`;
+      const maxCapacity = TOTAL_CAPACITY[zoneKey] || TOTAL_CAPACITY[v] || 1000;
+      
+      if(total > 0){
+        hasAnyData = true;
+        
+        // Get running_status counts for READY TPUs
+        const free = stats[v][zone].free || 0;
+        const running = stats[v][zone].running || 0;
+        const reserved = stats[v][zone].reserved || 0;
+        
+        // Calculate A100 equivalent and cost for running/reserved in READY
+        let totalA100 = 0;
+        let totalCost = 0;
+        const runningReserved = stats[v][zone].runningReserved || {};
+        
+        Object.keys(runningReserved).forEach(tpuType => {
+          const count = runningReserved[tpuType];
+          const factor = A100_FACTORS[tpuType] || 0;
+          const costPerCard = COST_PER_CARD[tpuType] || 0;
+          totalA100 += count * factor;
+          totalCost += count * costPerCard;
+        });
+        
+        // Add to grand totals
+        grandTotalA100 += totalA100;
+        grandTotalCost += totalCost;
+        
+        html += `<div style="padding:12px;background:#0e1a37;border:1px solid var(--border);border-radius:8px;">`;
+        html += `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex-wrap:wrap;gap:8px;">`;
+        html += `<strong style="font-size:16px;">${v}(${zone})</strong>`;
+        html += `<div style="display:flex;gap:16px;font-size:14px;flex-wrap:wrap;">`;
+        html += `<span style="color:#20c997">Free ${free} </span>`;
+        html += `<span style="color:#ffc107">Reserved ${reserved} </span>`;
+        html += `<span style="color:#66d9ef">Running ${running} </span>`;
+        html += `<span style="color:#20c997">Ready: ${ready}</span>`;
+        html += `<span style="color:#9b59b6">Creating: ${creating}</span>`;
+        if(totalA100 > 0){
+          html += `<span style="color:#ffc107">Compute:${totalA100.toFixed(2)} A100s</span>`;
+          html += `<span style="color:#ff6b6b">Cost: $${totalCost.toFixed(2)}/h</span>`;
+        }
+        html += `</div></div>`;
+        
+        // Progress bar - based on free/running/reserved/creating
+        const totalUsed = free + running + reserved + creating;
+        const totalPercent = Math.min((totalUsed / maxCapacity) * 100, 100);
+        
+        // Calculate percentages as portion of total used (for proper stacking)
+        const totalForBar = free + running + reserved + creating;
+        const freePercent = totalForBar > 0 ? (free / totalForBar) * totalPercent : 0;
+        const runningPercent = totalForBar > 0 ? (running / totalForBar) * totalPercent : 0;
+        const reservedPercent = totalForBar > 0 ? (reserved / totalForBar) * totalPercent : 0;
+        const creatingPercent = totalForBar > 0 ? (creating / totalForBar) * totalPercent : 0;
+        
+        html += `<div style="position:relative;width:100%;height:28px;background:#2a3a66;border-radius:4px;overflow:hidden;border:1px solid var(--border);">`;
+        let currentLeft = 0;
+        if(free > 0){
+          html += `<div style="position:absolute;left:${currentLeft}%;width:${freePercent}%;height:100%;background:#20c997;z-index:2;"></div>`;
+          currentLeft += freePercent;
+        }
+        if(reserved > 0){
+          html += `<div style="position:absolute;left:${currentLeft}%;width:${reservedPercent}%;height:100%;background:#ffc107;z-index:2;"></div>`;
+          currentLeft += reservedPercent;
+        }
+        if(running > 0){
+          html += `<div style="position:absolute;left:${currentLeft}%;width:${runningPercent}%;height:100%;background:#66d9ef;z-index:2;"></div>`;
+          currentLeft += runningPercent;
+        }
+        if(creating > 0){
+          html += `<div style="position:absolute;left:${currentLeft}%;width:${creatingPercent}%;height:100%;background:#9b59b6;z-index:2;"></div>`;
+        }
+        html += `<div style="position:absolute;left:0;top:0;width:100%;height:100%;display:flex;align-items:center;justify-content:center;color:var(--txt);font-size:12px;font-weight:600;z-index:3;text-shadow:0 0 2px rgba(0,0,0,0.8);">`;
+        html += `${total} / ${maxCapacity} (${totalPercent.toFixed(1)}%)`;
+        html += `</div></div>`;
+        html += `</div>`;
+      }
+    });
+  });
+  
+  html += '</div>';
+  
+  // Add grand total summary
+  if(hasAnyData && (grandTotalA100 > 0 || grandTotalCost > 0)){
+    html += '<div style="margin-top:12px;padding-top:12px;border-top:2px solid var(--border);">';
+    html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:12px;background:#0c1630;border:1px solid var(--border);border-radius:8px;">';
+    html += '<strong style="font-size:16px;">Total</strong>';
+    html += '<div style="display:flex;gap:24px;font-size:16px;font-weight:600;">';
+    if(grandTotalA100 > 0){
+      html += `<span style="color:#ffc107">Total Compute: ${grandTotalA100.toFixed(2)} A100s</span>`;
+    }
+    if(grandTotalCost > 0){
+      html += `<span style="color:#ff6b6b">Total Cost: $${grandTotalCost.toFixed(2)}/h</span>`;
+    }
+    html += '</div></div></div>';
+  }
+  
+  if(!hasAnyData){
+    statsContainer.innerHTML = '<div class="muted">No READY or CREATING TPUs found</div>';
+  } else {
+    statsContainer.innerHTML = html;
+  }
+}
+
 async function loadPanel(){
   const res = await fetch(`{{ url_for('api_list_tpus') }}`);
   const data = await res.json();
   const tbody = document.getElementById('panel-body');
   tbody.innerHTML = "";
-  const q = (document.getElementById('tpu-filter').value||'').toLowerCase();
-  for(const r of data.rows){
-    const s = (r.alias+' '+(r.running_status||'')+' '+(r.zone||'')+' '+(r.user||'')+' '+(r.user_note||'')+' '+(r.script_note||'')).toLowerCase();
-    if(q && !s.includes(q)) continue;
+  
+  // Apply all filters
+  let filteredRows = data.rows;
+  
+  // Filter by version
+  if(selectedVersions.size > 0){
+    filteredRows = filteredRows.filter(r => {
+      const version = (r.version || '').toLowerCase();
+      const alias = (r.alias || '').toLowerCase();
+      const fullName = (r.full_name || '').toLowerCase();
+      
+      for(const v of selectedVersions){
+        const vLower = v.toLowerCase();
+        if(version === vLower || version.startsWith(vLower)) return true;
+        if(alias.startsWith(vLower + '-') || fullName.includes(vLower + '-')) return true;
+      }
+      return false;
+    });
+  }
+  
+  // Filter by zone
+  if(selectedZones.size > 0){
+    filteredRows = filteredRows.filter(r => {
+      const zone = (r.zone || '').toLowerCase();
+      for(const z of selectedZones){
+        if(zone === z.toLowerCase()) return true;
+      }
+      return false;
+    });
+  }
+  
+  // Filter by status
+  if(selectedStatuses.size > 0){
+    filteredRows = filteredRows.filter(r => {
+      const status = (r.script_note || '').toUpperCase();
+      for(const s of selectedStatuses){
+        if(status === s.toUpperCase()) return true;
+      }
+      return false;
+    });
+  }
+  
+  // Filter by user
+  if(selectedUsers.size > 0){
+    filteredRows = filteredRows.filter(r => {
+      const user = (r.user || '').trim();
+      for(const u of selectedUsers){
+        if(user === u) return true;
+      }
+      return false;
+    });
+  }
+  
+  // Filter by running status
+  if(selectedRunningStatuses.size > 0){
+    filteredRows = filteredRows.filter(r => {
+      let runningStatus = (r.running_status || '').toLowerCase();
+      if(runningStatus === '没了!') runningStatus = 'not found';
+      for(const rs of selectedRunningStatuses){
+        if(runningStatus === rs.toLowerCase()) return true;
+      }
+      return false;
+    });
+  }
+  
+  // Calculate and display statistics
+  calculateStatistics(data.rows);
+  
+  // Sort rows by script_note: READY -> PREEMPTED -> CREATING -> NOT FOUND -> others
+  const statusOrder = {'READY': 1, 'PREEMPTED': 2, 'CREATING': 3, 'NOT FOUND': 4};
+  const sortedRows = [...filteredRows].sort((a, b) => {
+    const aNote = (a.script_note || '').toUpperCase();
+    const bNote = (b.script_note || '').toUpperCase();
+    const aOrder = statusOrder[aNote] || 99;
+    const bOrder = statusOrder[bNote] || 99;
+    return aOrder - bOrder;
+  });
+  
+  for(const r of sortedRows){
     const tr = document.createElement('tr');
     
     // Normalize status
@@ -1854,7 +2506,7 @@ async function checkOngoingOperations(alias){
       }
       
       // Start polling for this operation
-      pollApplyWithProgress(op.tid, alias, 12);
+      pollApplyWithProgress(op.tid, alias, 20);
       return;
     }
     
@@ -1892,8 +2544,8 @@ async function applyTpu(alias){
   document.getElementById('progress-'+alias).style.display = 'block';
   
   // Default values
-  const times = 12;
-  const wait = 8;
+  const times = 20;
+  const wait = 5;
   const pre = 'true';
   
   const res = await fetch(`{{ url_for('api_apply_async') }}`,{
@@ -1925,8 +2577,8 @@ async function reapplyTpu(alias){
   document.getElementById('progress-'+alias).style.display = 'block';
   
   // Default values
-  const times = 12;
-  const wait = 8;
+  const times = 20;
+  const wait = 5;
   const pre = 'true';
   
   const res = await fetch(`{{ url_for('api_reapply_async') }}`,{
@@ -2289,8 +2941,8 @@ def api_ongoing_apply_run_operations():
 def api_apply_async():
     p = request.get_json(silent=True) or {}
     alias = str(p.get("alias","")).strip()
-    times = int(p.get("times", 12))
-    wait = int(p.get("wait", 8))
+    times = int(p.get("times", 20))
+    wait = int(p.get("wait", 5))
     pre = p.get("pre", None)  # 目前仅记录；真正 norm/pre 的判定在"申请并 …"里使用
     if not alias: return jsonify({"ok": False, "msg": "缺少 alias"})
     tid = _register_task("apply", {"alias": alias, "times": times, "wait": wait, "pre": pre})
@@ -2301,8 +2953,8 @@ def api_apply_async():
 def api_reapply_async():
     p = request.get_json(silent=True) or {}
     alias = str(p.get("alias","")).strip()
-    times = int(p.get("times", 12))
-    wait = int(p.get("wait", 8))
+    times = int(p.get("times",20))
+    wait = int(p.get("wait", 5))
     pre = p.get("pre", None)
     if not alias: return jsonify({"ok": False, "msg": "缺少 alias"})
     tid = _register_task("reapply", {"alias": alias, "times": times, "wait": wait, "pre": pre})
@@ -2482,8 +3134,8 @@ def _run_apply_then_job(username: str, dir_path: str, tpu: str, tid: str):
             OP_TASKS[tid]["msg"] = f"Applying for TPU {tpu}..."
     
     # Apply for the TPU with retry logic (same as _run_apply)
-    times = 12
-    sleep_sec = 8
+    times = 20
+    sleep_sec = 5
     ok = False
     last = ""
     log_output = ""
