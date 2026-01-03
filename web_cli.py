@@ -2528,9 +2528,22 @@ async function loadPanel(forceRefresh = false){
   // Calculate and display statistics (async now)
   calculateStatistics(data.rows).catch(e => console.error('Error calculating statistics:', e));
   
-  // Fetch ongoing run operations once (optimization: avoid calling for each TPU)
+  // Fetch all ongoing operations once (optimization: avoid calling for each TPU)
+  // This includes both apply/reapply operations and run operations
+  let allApplyReapplyOperations = {};  // {alias: [operations]}
   let allRunOperations = [];
+  
   try {
+    // Fetch all apply/reapply operations in one call
+    const applyRes = await fetch(`{{ url_for('api_all_ongoing_operations') }}`);
+    const applyData = await applyRes.json();
+    allApplyReapplyOperations = (applyData.operations && typeof applyData.operations === 'object') ? applyData.operations : {};
+  } catch(e) {
+    console.error('Failed to fetch apply/reapply operations:', e);
+  }
+  
+  try {
+    // Fetch all run operations in one call
     const runRes = await fetch(`{{ url_for('api_ongoing_apply_run_operations') }}`);
     const runData = await runRes.json();
     allRunOperations = (runData.operations && runData.operations.length > 0) ? runData.operations : [];
