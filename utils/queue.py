@@ -128,7 +128,7 @@ def run_queued_job(user_obj, args):
         - id: the id of the task to be run
         - user_obj: User object
     """
-    queue = read_and_loxck_queue()
+    queue = read_and_lock_queue()
     try:
         # read the tpu and id from the args, tpu contains 'v?', where ? is a number between 0 and 9
         # id is a pure integer
@@ -505,7 +505,7 @@ def Queue(user_obj, args):
     subprocess.run(["tmux", "new-window", "-t", f"queue:{unique_id}"], check=True)
 
     print(f"{INFO} Queue: Staging job in tmux window queue:{unique_id}, please wait for seconds...")
-    time.sleep(2.5)
+    time.sleep(5)
 
     # verify window exists
     try:
@@ -540,12 +540,12 @@ def Queue(user_obj, args):
         return
 
     # start staging
-    time.sleep(2.5)
+    time.sleep(5)
     subprocess.run(
         ["tmux", "send-keys", "-t", f"queue:{unique_id}", f"cd {shlex.quote(dir_path)}", "Enter"],
         check=True,
     )
-    time.sleep(2.5)
+    time.sleep(5)
     subprocess.run(
         ["tmux", "send-keys", "-t", f"queue:{unique_id}", f"source just_staging.sh {unique_id}; sleep 600; exit", "Enter"],
         check=True,

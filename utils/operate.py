@@ -3,9 +3,19 @@ import subprocess
 from .data_io import read_and_lock_data, write_and_unlock_data, release_lock_data, read_data
 from .helpers import *
 from .constants import *
-from .sheet import read_sheet_info, write_sheet_info, get_tpu_info_sheet
+from .sheet import read_sheet_info, write_sheet_info, get_tpu_info_sheet, get_tpu_usage_by_zone_and_type, write_tpu_usage_to_sheet
 
 def update_tpu_status_for_spreadsheet():
+
+    # After the loop, get TPU usage statistics and write to K, L columns
+    print(f"{INFO} Getting TPU usage statistics by zone and type...")
+    usage_stats = get_tpu_usage_by_zone_and_type()
+    if usage_stats:
+        write_tpu_usage_to_sheet(usage_stats)
+        print(f"{GOOD} TPU usage statistics updated in spreadsheet")
+    else:
+        print(f"{WARNING} No TPU usage statistics found")
+        
     tpu_information = read_sheet_info()
     for full_name, info in tpu_information.items():
         result = check_tpu_status(full_name, quiet=True)
@@ -27,6 +37,7 @@ def update_tpu_status_for_spreadsheet():
         if previous_note != info['script_note']:
             print(f"{INFO} TPU {full_name} status: {previous_note} -> {info['script_note']}")
             write_sheet_info(info)
+    
  
 def kill_jobs_tpu(tpu, username = None, ignore_window = None):
     zone, pre, spot, tpu = get_zone_pre_spot(tpu)
@@ -56,7 +67,7 @@ def kill_jobs_tpu(tpu, username = None, ignore_window = None):
 
         list_cmd = (
             f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --project {PROJECT} --worker=all "
-            "--command \"ps -eo pid,ppid,stat,cmd | grep 'main.py' | grep -v 'grep' || true\""
+            "--command \"ps -eo pid,ppid,stat,cmd | grep 'python' | grep -v 'grep' || true\""
         )
         result = subprocess.run(list_cmd, shell=True, timeout=60, check=False,
                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
@@ -88,11 +99,27 @@ def kill_jobs_tpu(tpu, username = None, ignore_window = None):
         )
         subprocess.run(kill_cmd, shell=True, timeout=60, check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-        print(f"{INFO} Cleaning /dev/accel0 occupation...")
+        # 根据 TPU 版本选择不同的设备路径
+        if 'v5' in tpu or 'v6' in tpu:
+            print(f"{INFO} Cleaning /dev/vfio/* occupation...")
+            kill_accel_cmd = (
+                f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --project {PROJECT} --worker=all "
+                "--command \"pids=$(sudo lsof -w /dev/vfio/vfio 2>/dev/null | grep 'python' | grep -v 'grep' | awk '{print $2}'); "
+                "if [ ! -z \\\"$pids\\\" ]; then sudo kill -9 $pids; fi\""
+            )
+        else:
+            print(f"{INFO} Cleaning /dev/accel0 occupation...")
+            kill_accel_cmd = (
+                f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --project {PROJECT} --worker=all "
+                "--command \"pids=$(sudo lsof -w /dev/accel0 | grep 'python' | grep -v 'grep' | awk '{print $2}'); "
+                "if [ ! -z \\\"$pids\\\" ]; then sudo kill -9 $pids; fi\""
+            )
+        subprocess.run(kill_accel_cmd, shell=True, timeout=60, check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+        print(f"{INFO} Cleaning /tmp/tpu_logs occupation...")
         kill_accel_cmd = (
             f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --project {PROJECT} --worker=all "
-            "--command \"pids=$(sudo lsof -w /dev/accel0 | grep 'python' | grep -v 'grep' | awk '{print $2}'); "
-            "if [ ! -z \\\"$pids\\\" ]; then sudo kill -9 $pids; fi\""
+            "--command \"sudo rm -rf /tmp/tpu_logs ; sudo rm /tmp/libtpu_lockfile\""
         )
         subprocess.run(kill_accel_cmd, shell=True, timeout=60, check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
@@ -156,7 +183,7 @@ def set_wandb(tpu):
     data = read_data()
     wandb_key, conda_env = data["wandb_api_key"], data["conda_env_name"]
     data_root = "kmh-nfs-ssd-eu-mount" if 'eu' in zone else "kmh-nfs-ssd-us-mount"
-    conda_path = 'python' if 'v6' in tpu else '/kmh-nfs-ssd-us-mount/code/eva/miniforge3/bin/python'
+    conda_path = '/kmh-nfs-ssd-us-mount/code/eva/miniforge3/bin/python' if 'us-central2' in zone else 'python'
 
     remote_cmd = f'{conda_path} -m wandb login {wandb_key}'
     # remote_cmd = f'python -m wandb login {wandb_key}'
@@ -189,9 +216,9 @@ def apply(args):
 def apply_until_success(args):
     if '-norm' in args:
         tpu = args[1] if args[0] == '-norm' else args[0]
-        return apply_and_set_env(tpu, preemptible=False, delete=False, repeat_time = 36000)
+        return apply_and_set_env(tpu, preemptible=False, delete=False, repeat_time = 100000)
     else:
-        return apply_and_set_env(args[0], preemptible=True, delete=False, repeat_time = 36000)
+        return apply_and_set_env(args[0], preemptible=True, delete=False, repeat_time = 100000)
     
 def reapply(args):
     if '-norm' in args:
@@ -203,11 +230,11 @@ def reapply(args):
 def reapply_until_success(args):
     if '-norm' in args:
         tpu = args[1] if args[0] == '-norm' else args[0]
-        return apply_and_set_env(tpu, preemptible=False, delete=True, repeat_time = 36000)
+        return apply_and_set_env(tpu, preemptible=False, delete=True, repeat_time = 100000)
     else:
-        return apply_and_set_env(args[0], preemptible=True, delete=True, repeat_time = 36000)
+        return apply_and_set_env(args[0], preemptible=True, delete=True, repeat_time = 100000)
 
-def apply_and_set_env(tpu, preemptible = False, spot = False, delete=True, repeat_time=None, retry_interval=10):
+def apply_and_set_env(tpu, preemptible = False, spot = False, delete=True, repeat_time=None, retry_interval=0.5):
     info_str = 'pre' if preemptible else 'norm'
     zone, pre, spot, tpu = get_zone_pre_spot(tpu)
     print(zone, pre, spot, tpu, preemptible)
@@ -274,7 +301,7 @@ def apply_and_set_env(tpu, preemptible = False, spot = False, delete=True, repea
 
         print(f"{INFO} Retrying TPU creation in {retry_interval}s...")
 
-        time.sleep(retry_interval + random.randint(0, 10))
+        time.sleep(retry_interval + random.uniform(0, 0.5))
 
     # short pause before querying state
     time.sleep(5)
@@ -469,7 +496,10 @@ def check_env(tpu, quiet = False, recurse=0):
     data = read_data()
     conda_env = data["conda_env_name"]
     data_root = "kmh-nfs-ssd-eu-mount" if 'eu' in zone else "kmh-nfs-ssd-us-mount"
-    conda_path = 'python' if 'v6' in tpu else '/kmh-nfs-ssd-us-mount/code/eva/miniforge3/bin/python'
+
+    # conda_path = 'python' if 'v6' in tpu else '/kmh-nfs-ssd-us-mount/code/eva/miniforge3/bin/python'
+    conda_path = '/kmh-nfs-ssd-us-mount/code/eva/miniforge3/bin/python' if 'us-central2' in zone else 'python'
+
     cmd = f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --project {PROJECT} --worker=all --command \"{conda_path} -c 'import jax; print(jax.devices())'\""
     if not quiet:
         print(f"{INFO} check_env: Checking environment in TPU {tpu}... This may take a while...")
@@ -610,6 +640,7 @@ def mount_disk(tpu, quiet = False):
         elif 'us-central1' in zone: bucket = 'gs://kmh-gcp-us-central1'
         elif 'us-central2' in zone: bucket = 'gs://kmh-gcp-us-central2'
         elif 'asia-northeast1' in zone: bucket = 'gs://kmh-gcp-asia-northeast1-b'
+        elif 'europe-west4' in zone: bucket = 'gs://kmh-gcp'
         else: raise ValueError(f"{FAIL} mount_disk: Unknown zone {zone}")
 
         v = 'v6' if 'v6' in tpu else 'v5'
@@ -652,6 +683,37 @@ def mount_disk(tpu, quiet = False):
         print(f"stderr: {e.stderr}")
         print(f"stdout: {e.stdout}")
         return 'mounting failed'
+
+    v5_cmd = f"""
+    gcloud compute tpus tpu-vm ssh {tpu} \
+  --zone {zone} \
+  --worker=all \
+  --command='
+    rm -rf ~/.local && \
+    export PIP_DEFAULT_TIMEOUT=120 && \
+    pip install setuptools==65.5.1 && \
+    pip install jax[tpu]==0.4.37 jaxlib -f https://storage.googleapis.com/jax-releases/libtpu_releases.html && \
+    pip install flax>=0.8 && \
+    pip install pillow clu tensorflow==2.15.0 "keras<3" "torch<=2.4" torchvision tensorflow_datasets matplotlib==3.9.2 && \
+    pip install orbax-checkpoint==0.4.4 ml-dtypes==0.5.0 tensorstore==0.1.67 && \
+    pip install diffusers dm-tree cached_property ml-collections transformers==4.38.2 lpips_j && \
+    pip install wandb
+    pip install gcsfs
+  '
+  """
+    if 'v5' in tpu:
+        print(f"{INFO} Running birdy v5 command for {tpu}...")
+        try:
+            subprocess.run(v5_cmd, shell=True, timeout=600, check=True,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except subprocess.TimeoutExpired:
+            print(f"{FAIL} mount_disk: v5 mounting timed out")
+            return 'v5 mounting timeout'
+        except subprocess.CalledProcessError as e:
+            print(f"{FAIL} mount_disk: v5 mounting failed: {e}")
+            print(f"stderr: {e.stderr}")
+            print(f"stdout: {e.stdout}")
+            return 'v5 mounting failed'
     
     print(f"{INFO} Mounting disk in TPU {tpu} done")
     print(f"{INFO} Checking environment in TPU {tpu}...")
@@ -683,7 +745,7 @@ def test_remote(tpu):
         data = read_data()
         conda_env = data["conda_env_name"]
         data_root = "kmh-nfs-ssd-eu-mount" if 'eu' in zone else "kmh-nfs-ssd-us-mount"
-        conda_path = 'python' if 'v6' in tpu else '/kmh-nfs-ssd-us-mount/code/eva/miniforge3/bin/python'
+        conda_path = '/kmh-nfs-ssd-us-mount/code/eva/miniforge3/bin/python' if 'us-central2' in zone else 'python'
         cmd = f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --project {PROJECT} --worker=all --command \"{conda_path} -c '{cmd}'\""
         # cmd = f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --worker=all --command \"python -c '{cmd}'\""
         try:

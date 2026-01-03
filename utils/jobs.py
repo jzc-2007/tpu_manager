@@ -444,6 +444,26 @@ def resume_rerun_job(job, new_tpu = None, load_ckpt = True):
             return
     tpu = job["tpu"] if new_tpu is None else new_tpu
     zone, _, _, _ = get_zone_pre_spot(tpu)
+
+    # make sure that the tpu is ready
+    if tpu is not None:
+        tpu_status = check_tpu_status(tpu)
+        if tpu_status == 'preempted':
+            print(f"{WARNING} {operation}_job: TPU {tpu} is preempted, trying to reapply...")
+            res = apply_and_set_env(tpu, preemptible=True, delete=True)
+            if res == 'success':
+                print(f"{GOOD} {operation}_job: Reapply TPU {tpu} done")
+            else:
+                print(f"{FAIL} {operation}_job: Reapply TPU {tpu} failed, please contact the admin")
+                release_lock_data()
+                return
+        elif tpu_status == 'failed':
+            print(f"{FAIL} {operation}_job: Failed to query status")
+            print(f"{FAIL} {operation}_job: This may indicate that this TPU is deleted, please contact the admin")
+            
+        tpu_status = check_tpu_status(tpu)
+        assert tpu_status == 'ready', f"TPU {tpu} is not ready, status: {tpu_status}"
+        
     data = read_and_lock_data()
     try:
         user = data['users'][job["user"]]
@@ -512,24 +532,6 @@ def resume_rerun_job(job, new_tpu = None, load_ckpt = True):
         log_dir = job["log_dir"]
         print(f"{INFO} {operation} job {job['windows_id']} for user {user_obj.name} with new windows id {id}")
 
-        # make sure that the tpu is ready
-        if tpu is not None:
-            tpu_status = check_tpu_status(tpu)
-            if tpu_status == 'preempted':
-                print(f"{WARNING} {operation}_job: TPU {tpu} is preempted, trying to reapply...")
-                res = apply_and_set_env(tpu, preemptible=True, delete=True)
-                if res == 'success':
-                    print(f"{GOOD} {operation}_job: Reapply TPU {tpu} done")
-                else:
-                    print(f"{FAIL} {operation}_job: Reapply TPU {tpu} failed, please contact the admin")
-                    release_lock_data()
-                    return
-            elif tpu_status == 'failed':
-                print(f"{FAIL} {operation}_job: Failed to query status")
-                print(f"{FAIL} {operation}_job: This may indicate that this TPU is deleted, please contact the admin")
-                
-            tpu_status = check_tpu_status(tpu)
-            assert tpu_status == 'ready', f"TPU {tpu} is not ready, status: {tpu_status}"
 
         # kill the old job
         kill_jobs_tpu(tpu)
@@ -1429,9 +1431,9 @@ def run_job_on_tpu(job: Job, tpu, quiet = True, ignore_window = None):
 
         # run the job
         os.system(f"tmux new-window -t {session_name}:{window_id}")
-        time.sleep(4.5)
+        time.sleep(8.5)
         os.system(f"tmux send-keys -t {session_name}:{window_id} 'cd {job.stage_dir}' Enter")
-        time.sleep(1.5)
+        time.sleep(8.5)
         os.system(f"tmux send-keys -t {session_name}:{window_id} 'source staging.sh ka={tpu} zone={zone} {job.extra_configs}' Enter")
 
         if not quiet:

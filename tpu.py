@@ -13,6 +13,7 @@ import utils.sheet as sheet
 import utils.clean as clean
 import utils.autenticate as autenticate
 import utils.queue as queue
+import utils.gs_buckets as gs_buckets
 from utils.helpers import *
 
 def find_user(data, args):
@@ -75,6 +76,9 @@ if __name__ == '__main__':
         # ------------ Queue ------------
         elif cmd == 'vq': queue.visualize_queue() if len(args) < 3 else queue.visualize_queue(user = args[2])
         elif cmd == 'dqr': queue.dequeue_and_run(args[2], args[3])
+
+        # ------------ GS Buckets ------------
+        elif cmd == 'cp': gs_buckets.copy_ckpt(args[2], args[3], args[4]) if len(args) == 5 else gs_buckets.copy_ckpt(args[2], dst_zone=args[3])
 
         # ------------ Users ------------
         elif cmd == 'add-user': users.create_user()
@@ -147,6 +151,7 @@ if __name__ == '__main__':
         elif cmd == 'debug-kill': develop.kill_jobs_tpu_new(args[2])
         elif cmd == 'gtis' or cmd == 'get-tpu-info-sheet': print(sheet.get_tpu_info_sheet(args[2]))
         elif cmd == 'twsi': unit_tests.test_write_sheet_info(args[2])
+        elif cmd == 'cc': gs_buckets.copy_checkpoint(args[2], args[3], src_zone=args[4]) if len(args) == 5 else gs_buckets.copy_checkpoint(args[2], args[3]) # copy checkpoint
 
         else: 
         ############### JOBS that require a user ###############

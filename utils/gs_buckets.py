@@ -24,6 +24,8 @@ def check_gs_dir_exists(gs_dir):
 def is_checkpoint(path: str): return True # trivial
 
 def convert_to_gs_by_zone(path: str, zone: str):
+    if path.startswith('gs://'):
+        return path
     if zone.startswith('us-central1'):
         return path.replace('/kmh-nfs-ssd-us-mount/logs/sqa', 'gs://kmh-gcp-us-central1/qiao_zhicheng_hanhong_files')
     if zone.startswith('us-east1'):
@@ -36,7 +38,43 @@ def convert_to_gs_by_zone(path: str, zone: str):
         return path.replace('/kmh-nfs-ssd-us-mount/logs/sqa', 'gs://kmh-gcp-asia-northeast1-b/qiao_zhicheng_hanhong_files')
     if zone.startswith('europe-west4-a'):
         return path.replace('/kmh-nfs-ssd-us-mount/logs/sqa', 'gs://kmh-gcp/qiao_zhicheng_hanhong_files')
+    print(f"{WARNING} convert_to_gs_by_zone: Unknown zone {zone}")
     return None
+
+def convert_name(path:str, zone: str):
+    if zone is None:
+        return path
+    # convert all the substring with ['us-central1', 'us-east1', 'us-east5', 'us-central2', 'asia-northeast1-b', 'europe-west4-a'] to the corresponding zone
+    for z in ['us-central1', 'us-east1', 'us-east5', 'us-central2', 'asia-northeast1-b', 'europe-west4-a']:
+        if z in path:
+            return path.replace(z, zone)
+    return path
+
+def copy_ckpt(path:str, src_zone: str = None, dst_zone: str = None):
+    if src_zone is None:
+        src_zone = get_zone_from_workdir(path)
+    if dst_zone is None:
+        dst_zone = get_zone_from_workdir(path)
+    converted_src = convert_to_gs_by_zone(path, src_zone)
+    converted_dst = convert_to_gs_by_zone(path, dst_zone)
+    converted_src = convert_name(converted_src, src_zone)
+    converted_dst = convert_name(converted_dst, dst_zone)
+    print(f'converted_src: {converted_src}')
+    print(f'converted_dst: {converted_dst}')
+    print(f'copying {converted_src} to {converted_dst}...')
+    # if converted_dst is not None, check if it exists
+    if converted_dst is not None:
+        if FS.exists(converted_dst):
+            print(f'{converted_dst} already exists, are you sure you want to overwrite it? (y/n): ')
+            answer = input()
+            if answer.strip().lower() != 'y' and answer.strip().lower() != 'yes':
+                print(f'{converted_dst} already exists, operation cancelled')
+                return False
+            else:
+                print(f'{converted_dst} already exists, overwriting...')
+    if converted_src is not None and converted_dst is not None:
+        FS.copy(converted_src, converted_dst, recursive=True)
+    return True
 
 def check_gs_logdir_exists(logdir, zone, quiet=True):
     '''
@@ -125,6 +163,12 @@ def check_gs_logdir_exists(logdir, zone, quiet=True):
 
     if not quiet: print(f"{FAIL} {logdir} does not exist, please check the path!!\n" * 10)
     return False
+
+def copy_checkpoint(dir, target_zone, src_zone=None):
+    if target_zone not in zones_list:
+        print(f"{FAIL} copy_checkpoint: target_zone {target_zone} is not valid. Supported zones: {zones_list}")
+        return False
+    return copy_ckpt(dir, src_zone=src_zone, dst_zone=target_zone)
 
 if __name__ == '__main__':
     logdir = '/kmh-nfs-ssd-eu-mount/logs/sqa/TS-imgnet/20251026_035445_aq9ubo_kmh-tpuvm-v6e-32-spot-101_us-central1-b__b_lr_ep_eval'

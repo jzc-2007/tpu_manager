@@ -1,0 +1,17 @@
+gcloud compute tpus queued-resources create kmh-tpuvm-v6e-64-spot-test-queue --node-id kmh-tpuvm-v6e-64-spot-test-queue --zone europe-west4-a --accelerator-type=v6e-64 --runtime-version=v2-alpha-tpuv6e --spot
+gcloud compute tpus queued-resources create kmh-tpuvm-v6e-64-spot-413 --node-id kmh-tpuvm-v6e-64-spot-413 --zone southamerica-west1-a --accelerator-type=v6e-32 --runtime-version=v2-alpha-tpuv6e --spot
+
+gcloud compute tpus tpu-vm create kmh-tpuvm-v5e-128-41 \
+    --zone=us-west4-b \
+    --accelerator-type=v5litepod-128 \
+    --version=v2-alpha-tpuv5 \
+    --project=he-vision-group
+
+gcloud compute tpus queued-resources create kmh-tpuvm-v5e-64-41-std --node-id kmh-tpuvm-v5e-64-41-std --zone us-central1-a --accelerator-type=v5litepod-64 --runtime-version=v2-alpha-tpuv5 --spot
+
+gcloud compute tpus queued-resources create kmh-tpuvm-v6e-32-spot-501 --node-id kmh-tpuvm-v6e-32-spot-501 --zone us-east5-a --accelerator-type=v6e-32 --runtime-version=v2-alpha-tpuv6e --spot
+gcloud compute tpus tpu-vm create kmh-tpuvm-v6e-32-501 \
+    --zone=us-east5-a \
+    --accelerator-type=v6e-32 \
+    --version=v2-alpha-tpuv6e \
+    --project=he-vision-group

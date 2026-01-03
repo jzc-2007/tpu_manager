@@ -15,7 +15,7 @@ RED, GREEN, YELLOW, PURPLE, NC = "\033[1;31m", "\033[1;32m", "\033[1;33m", "\033
 GOOD, INFO, WARNING, FAIL = f"{GREEN}[GOOD]{NC}", f"{PURPLE}[INFO]{NC}", f"{YELLOW}[WARNING]{NC}", f"{RED}[FAIL]{NC}"
 LOG = f"{PURPLE}[LOG]{NC}"
 
-NAME_TO_VER = {'v2':'v2','v3':'v3','v4':'v4','v5e':'v5e','v5p':'v5p','v6e':'v6e'}
+NAME_TO_VER = {'v2':'v2','v3':'v3','v4':'v4','v5e':'v5e','v5p':'v5p','v6':'v6e'}
 
 TPU_NUM_LIST = [2**i for i in range(10)]
 NAME_TO_TYPE = {}
@@ -60,25 +60,30 @@ TYPE_DICT['v6'] = ['v6e-' + str(i) for i in TPU_NUM_LIST]
 TYPE_DICT['all'] = TYPE_DICT['v4'] + TYPE_DICT['v5'] + TYPE_DICT['v6']
 
 ZONE_DICT = {
-    'all': ['us-central1-a', 'us-central1-b', 'us-central2-b', 'us-east1-d', 'us-east5-b', 'asia-northeast1-b'],
+    'all': ['us-central1-a', 'us-central1-b', 'us-central2-b', 'us-east1-d', 'us-east5-a', 'us-east5-b', 'asia-northeast1-b', 'europe-west4-a'],
     # big zones
-    'us': ['us-central1-a', 'us-central1-b', 'us-central2-b', 'us-east1-d', 'us-east5-b'],
+    'us': ['us-central1-a', 'us-central1-b', 'us-central2-b', 'us-east1-d', 'us-east5-a', 'us-east5-b'],
     'asia': ['asia-northeast1-b'],
+    'europe': ['europe-west4-a'],
     # small zones
     'us-central': ['us-central1-a', 'us-central1-b', 'us-central2-b'],
-    'us-east': ['us-east1-d', 'us-east5-b'],
+    'us-east': ['us-east1-d', 'us-east5-a', 'us-east5-b'],
     'asia-northeast': ['asia-northeast1-b'],
+    'europe-west': ['europe-west4-a'],
     # specific zones
     'us-central1': ['us-central1-a', 'us-central1-b'],
     'us-central2': ['us-central2-b'],
+    'europe-west4': ['europe-west4-a'],
     'us-east1': ['us-east1-d'],
-    'us-east5': ['us-east5-b'],
+    'us-east5': ['us-east5-a', 'us-east5-b'],
     'asia-northeast1': ['asia-northeast1-b'],
+    'europe-west4-a': ['europe-west4-a'],
     # single zones
     'us-central1-a': ['us-central1-a'],
     'us-central1-b': ['us-central1-b'],
     'us-central2-b': ['us-central2-b'],
     'us-east1-d': ['us-east1-d'],
+    'us-east5-a': ['us-east5-a'],
     'us-east5-b': ['us-east5-b'],
     'asia-northeast1-b': ['asia-northeast1-b'],
 }
@@ -123,9 +128,9 @@ RULE_DICT ={
 REGION_SA_MAP = {
     "us-central1": "bucket-us-central1@he-vision-group.iam.gserviceaccount.com",
     "us-central2": "bucket-us-central2@he-vision-group.iam.gserviceaccount.com",
-    "us-east1": "373438850578-compute@developer.gserviceaccount.com",
+    "us-east1": "tpu-gcs-writer@he-vision-group.iam.gserviceaccount.com", # master SA for now
     "us-east5": "bucket-us-east5@he-vision-group.iam.gserviceaccount.com",
     "asia-northeast1": "bucket-asia@he-vision-group.iam.gserviceaccount.com",
-    "europe-west4": "373438850578-compute@developer.gserviceaccount.com"
+    "europe-west4": "373438850578-compute@developer.gserviceaccount.com",
 }
 DEFAULT_SA = "373438850578-compute@developer.gserviceaccount.com"

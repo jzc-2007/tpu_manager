@@ -1791,7 +1791,7 @@ TPU_PANEL_HTML = r"""
         <button class="btn" onclick="openFilterModal('status')">status</button>
         <button class="btn" onclick="openFilterModal('user')">user</button>
         <button class="btn" onclick="openFilterModal('running_status')">running status</button>
-        <button class="btn" onclick="loadPanel()">refresh</button>
+        <button class="btn" onclick="loadPanel(true)">refresh</button>
       </div>
     </div>
 
@@ -1828,6 +1828,12 @@ let selectedUsers = new Set();
 let selectedRunningStatuses = new Set();
 let currentFilterType = 'type'; // 'type', 'zone', 'status', 'user', or 'running_status'
 
+// Throttle mechanism for spreadsheet reads (30 seconds)
+let lastSheetReadTime = 0;
+let cachedPanelData = null;
+const SHEET_READ_INTERVAL = 30000; // 30 seconds in milliseconds
+let pendingRefresh = false; // Flag to indicate if refresh is needed after operation
+
 // Available zones (from constants.py)
 const availableZones = [
   'us-central1-a', 'us-central1-b', 'us-central2-b', 
@@ -1862,35 +1868,46 @@ function openFilterModal(type){
   body.innerHTML = '';
   
   if(type === 'user'){
-    // For user, fetch data and extract unique users
-    fetch(`{{ url_for('api_list_tpus') }}`)
-      .then(r => r.json())
-      .then(data => {
-        const userSet = new Set();
-        data.rows.forEach(r => {
-          const user = (r.user || '').trim();
-          if(user && user.toLowerCase() !== 'free'){
-            userSet.add(user);
-          }
-        });
-        const options = Array.from(userSet).sort();
-        const selectedSet = selectedUsers;
-        
-        options.forEach(opt => {
-          const label = document.createElement('label');
-          label.className = 'filter-checkbox';
-          const checkbox = document.createElement('input');
-          checkbox.type = 'checkbox';
-          checkbox.value = opt;
-          checkbox.id = `check-${type}-${opt.replace(/\s+/g, '-')}`;
-          checkbox.checked = selectedSet.has(opt);
-          label.appendChild(checkbox);
-          const span = document.createElement('span');
-          span.textContent = opt;
-          label.appendChild(span);
-          body.appendChild(label);
-        });
+    // For user, use cached data if available, otherwise fetch
+    const loadUserOptions = (data) => {
+      const userSet = new Set();
+      data.rows.forEach(r => {
+        const user = (r.user || '').trim();
+        if(user && user.toLowerCase() !== 'free'){
+          userSet.add(user);
+        }
       });
+      const options = Array.from(userSet).sort();
+      const selectedSet = selectedUsers;
+      
+      options.forEach(opt => {
+        const label = document.createElement('label');
+        label.className = 'filter-checkbox';
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.value = opt;
+        checkbox.id = `check-${type}-${opt.replace(/\s+/g, '-')}`;
+        checkbox.checked = selectedSet.has(opt);
+        label.appendChild(checkbox);
+        const span = document.createElement('span');
+        span.textContent = opt;
+        label.appendChild(span);
+        body.appendChild(label);
+      });
+    };
+    
+    // Use cached data if available and recent, otherwise fetch
+    if(cachedPanelData && (Date.now() - lastSheetReadTime < SHEET_READ_INTERVAL)) {
+      loadUserOptions(cachedPanelData);
+    } else {
+      fetch(`{{ url_for('api_list_tpus') }}`)
+        .then(r => r.json())
+        .then(data => {
+          cachedPanelData = data;
+          lastSheetReadTime = Date.now();
+          loadUserOptions(data);
+        });
+    }
   } else {
     let options = [];
     let selectedSet = new Set();
@@ -1966,7 +1983,7 @@ function applyFilter(){
   
   closeFilterModal();
   updateFilterTags();
-  loadPanel();
+  loadPanel(false); // Use throttled version, don't force refresh for filter changes
 }
 
 function updateFilterTags(){
@@ -2051,7 +2068,7 @@ function removeFilter(type, value){
     selectedRunningStatuses.delete(value);
   }
   updateFilterTags();
-  loadPanel();
+  loadPanel(false); // Use throttled version, don't force refresh for filter changes
 }
 
 function setTopbarVar(){
@@ -2160,11 +2177,55 @@ const TOTAL_CAPACITY = {
   'v5': 1024,
   'v6': 1536,
   // Zone-specific capacities
-  'v5-us-central1-a': 288
+  'v5-us-central1-a': 1184,
+  'v6-us-east1-d': 64,
+  'v4-us-central2-b': 120,
+  'v6-europe-west4-a': 64,
 };
 
+// Cache for gcloud counts
+let cachedGcloudCounts = null;
+let lastGcloudFetchTime = 0;
+const GCLOUD_FETCH_INTERVAL = 60000; // 1 minute
+const GCLOUD_ENABLED = true; // Enabled with timeout protection
+
+// Fetch gcloud counts (with caching and timeout)
+async function fetchGcloudCounts(){
+  if (!GCLOUD_ENABLED) {
+    return {};
+  }
+  const now = Date.now();
+  if(cachedGcloudCounts && (now - lastGcloudFetchTime < GCLOUD_FETCH_INTERVAL)){
+    return cachedGcloudCounts;
+  }
+  
+  try {
+    // Use AbortController for timeout (3 seconds)
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 3000);
+    
+    const res = await fetch(`{{ url_for('api_tpu_gcloud_counts') }}`, {
+      signal: controller.signal
+    });
+    clearTimeout(timeoutId);
+    
+    const data = await res.json();
+    if(data.ok && data.counts){
+      cachedGcloudCounts = data.counts;
+      lastGcloudFetchTime = now;
+      return data.counts;
+    }
+  } catch(e) {
+    if(e.name !== 'AbortError') {
+      console.error('Failed to fetch gcloud counts:', e);
+    }
+    // Return cached data or empty object on error
+  }
+  return cachedGcloudCounts || {};
+}
+
 // Calculate and display statistics
-function calculateStatistics(allRows){
+async function calculateStatistics(allRows){
   const stats = {}; // {version: {zone: {READY: count, CREATING: count, runningReserved: {type: count, a100: count, cost: number}}}}
   
   allRows.forEach(r => {
@@ -2217,6 +2278,19 @@ function calculateStatistics(allRows){
       stats[version][zone].runningReserved[tpuType] += cardCount;
     }
   });
+  
+  // Fetch gcloud counts (with timeout protection)
+  let gcloudCounts = {};
+  try {
+    // Use Promise.race to add timeout (2 seconds max wait)
+    gcloudCounts = await Promise.race([
+      fetchGcloudCounts(),
+      new Promise((resolve) => setTimeout(() => resolve({}), 2000))
+    ]);
+  } catch(e) {
+    console.error('Error fetching gcloud counts in calculateStatistics:', e);
+    gcloudCounts = {};
+  }
   
   // Display statistics
   const statsContainer = document.getElementById('statistics-display');
@@ -2278,22 +2352,31 @@ function calculateStatistics(allRows){
         html += `<span style="color:#66d9ef">Running ${running} </span>`;
         html += `<span style="color:#20c997">Ready: ${ready}</span>`;
         html += `<span style="color:#9b59b6">Creating: ${creating}</span>`;
+        
+        // Calculate "others" usage from gcloud counts
+        const gcloudTotal = (gcloudCounts[v] && gcloudCounts[v][zone]) ? gcloudCounts[v][zone] : 0;
+        const others = Math.max(0, gcloudTotal - total);
+        if(others > 0){
+          html += `<span style="color:#9fb0d1">Others: ${others}</span>`;
+        }
+        
         if(totalA100 > 0){
           html += `<span style="color:#ffc107">Compute:${totalA100.toFixed(2)} A100s</span>`;
           html += `<span style="color:#ff6b6b">Cost: $${totalCost.toFixed(2)}/h</span>`;
         }
         html += `</div></div>`;
         
-        // Progress bar - based on free/running/reserved/creating
-        const totalUsed = free + running + reserved + creating;
+        // Progress bar - based on free/running/reserved/creating and others
+        const totalUsed = free + running + reserved + creating + others;
         const totalPercent = Math.min((totalUsed / maxCapacity) * 100, 100);
         
         // Calculate percentages as portion of total used (for proper stacking)
-        const totalForBar = free + running + reserved + creating;
+        const totalForBar = free + running + reserved + creating + others;
         const freePercent = totalForBar > 0 ? (free / totalForBar) * totalPercent : 0;
         const runningPercent = totalForBar > 0 ? (running / totalForBar) * totalPercent : 0;
         const reservedPercent = totalForBar > 0 ? (reserved / totalForBar) * totalPercent : 0;
         const creatingPercent = totalForBar > 0 ? (creating / totalForBar) * totalPercent : 0;
+        const othersPercent = totalForBar > 0 ? (others / totalForBar) * totalPercent : 0;
         
         html += `<div style="position:relative;width:100%;height:28px;background:#2a3a66;border-radius:4px;overflow:hidden;border:1px solid var(--border);">`;
         let currentLeft = 0;
@@ -2311,9 +2394,13 @@ function calculateStatistics(allRows){
         }
         if(creating > 0){
           html += `<div style="position:absolute;left:${currentLeft}%;width:${creatingPercent}%;height:100%;background:#9b59b6;z-index:2;"></div>`;
+          currentLeft += creatingPercent;
+        }
+        if(others > 0){
+          html += `<div style="position:absolute;left:${currentLeft}%;width:${othersPercent}%;height:100%;background:#9fb0d1;z-index:2;"></div>`;
         }
         html += `<div style="position:absolute;left:0;top:0;width:100%;height:100%;display:flex;align-items:center;justify-content:center;color:var(--txt);font-size:12px;font-weight:600;z-index:3;text-shadow:0 0 2px rgba(0,0,0,0.8);">`;
-        html += `${total} / ${maxCapacity} (${totalPercent.toFixed(1)}%)`;
+        html += `${gcloudTotal > 0 ? gcloudTotal : total} / ${maxCapacity} (${totalPercent.toFixed(1)}%)`;
         html += `</div></div>`;
         html += `</div>`;
       }
@@ -2344,9 +2431,33 @@ function calculateStatistics(allRows){
   }
 }
 
-async function loadPanel(){
-  const res = await fetch(`{{ url_for('api_list_tpus') }}`);
-  const data = await res.json();
+// Throttled version of loadPanel that respects 30-second interval
+async function loadPanel(forceRefresh = false){
+  const now = Date.now();
+  const timeSinceLastRead = now - lastSheetReadTime;
+  
+  // If force refresh or more than 30 seconds have passed, read from API
+  if(forceRefresh || timeSinceLastRead >= SHEET_READ_INTERVAL || !cachedPanelData){
+    try {
+      const res = await fetch(`{{ url_for('api_list_tpus') }}`);
+      const data = await res.json();
+      cachedPanelData = data;
+      lastSheetReadTime = now;
+      pendingRefresh = false; // Clear pending flag after successful read
+    } catch(e) {
+      console.error('Failed to load panel data:', e);
+      // If fetch fails and we have cached data, use it
+      if(!cachedPanelData) {
+        alert('加载数据失败，请稍后重试');
+        return;
+      }
+    }
+  }
+  
+  // Use cached data if available
+  const data = cachedPanelData;
+  if(!data) return;
+  
   const tbody = document.getElementById('panel-body');
   tbody.innerHTML = "";
   
@@ -2414,8 +2525,18 @@ async function loadPanel(){
     });
   }
   
-  // Calculate and display statistics
-  calculateStatistics(data.rows);
+  // Calculate and display statistics (async now)
+  calculateStatistics(data.rows).catch(e => console.error('Error calculating statistics:', e));
+  
+  // Fetch ongoing run operations once (optimization: avoid calling for each TPU)
+  let allRunOperations = [];
+  try {
+    const runRes = await fetch(`{{ url_for('api_ongoing_apply_run_operations') }}`);
+    const runData = await runRes.json();
+    allRunOperations = (runData.operations && runData.operations.length > 0) ? runData.operations : [];
+  } catch(e) {
+    console.error('Failed to fetch run operations:', e);
+  }
   
   // Sort rows by script_note: READY -> PREEMPTED -> CREATING -> NOT FOUND -> others
   const statusOrder = {'READY': 1, 'PREEMPTED': 2, 'CREATING': 3, 'NOT FOUND': 4};
@@ -2480,19 +2601,32 @@ async function loadPanel(){
     `;
     tbody.appendChild(tr);
     
-    // Check for ongoing operations for this TPU (including run operations)
-    checkOngoingOperations(r.alias);
+    // Check for ongoing operations for this TPU (pass cached operations)
+    checkOngoingOperations(r.alias, allApplyReapplyOperations, allRunOperations);
   }
 }
 
-async function checkOngoingOperations(alias){
+async function checkOngoingOperations(alias, cachedApplyReapplyOperations = null, cachedRunOperations = null){
   try{
-    // Check for apply/reapply operations
-    const res = await fetch(`{{ url_for('api_tpu_ongoing_operations', alias='__ALIAS__') }}`.replace('__ALIAS__', alias));
-    const data = await res.json();
+    // Use cached apply/reapply operations if provided, otherwise fetch (fallback)
+    let applyReapplyOps = cachedApplyReapplyOperations;
+    if(!applyReapplyOps || typeof applyReapplyOps !== 'object') {
+      // Fallback: fetch for this specific TPU only if cache not available
+      try {
+        const res = await fetch(`{{ url_for('api_tpu_ongoing_operations', alias='__ALIAS__') }}`.replace('__ALIAS__', alias));
+        const data = await res.json();
+        applyReapplyOps = {};
+        if(data.operations && data.operations.length > 0) {
+          applyReapplyOps[alias] = data.operations;
+        }
+      } catch(e) {
+        applyReapplyOps = {};
+      }
+    }
     
-    if(data.operations && data.operations.length > 0){
-      const op = data.operations[0]; // Get the first ongoing operation
+    // Check for apply/reapply operations for this TPU
+    if(applyReapplyOps[alias] && applyReapplyOps[alias].length > 0){
+      const op = applyReapplyOps[alias][0]; // Get the first ongoing operation
       
       // Hide button and show progress
       document.getElementById('btn-'+alias).style.display = 'none';
@@ -2510,13 +2644,21 @@ async function checkOngoingOperations(alias){
       return;
     }
     
-    // Also check for run operations that use this TPU
-    const runRes = await fetch(`{{ url_for('api_ongoing_apply_run_operations') }}`);
-    const runData = await runRes.json();
+    // Use cached run operations if provided, otherwise fetch (fallback)
+    let runOperations = cachedRunOperations;
+    if(!runOperations || !Array.isArray(runOperations)) {
+      try {
+        const runRes = await fetch(`{{ url_for('api_ongoing_apply_run_operations') }}`);
+        const runData = await runRes.json();
+        runOperations = (runData.operations && runData.operations.length > 0) ? runData.operations : [];
+      } catch(e) {
+        runOperations = [];
+      }
+    }
     
-    if(runData.operations && runData.operations.length > 0){
+    if(runOperations.length > 0){
       // Find run operations that use this TPU
-      const runOp = runData.operations.find(op => op.meta && op.meta.tpu === alias);
+      const runOp = runOperations.find(op => op.meta && op.meta.tpu === alias);
       if(runOp){
         // Hide button and show progress
         document.getElementById('btn-'+alias).style.display = 'none';
@@ -2659,7 +2801,24 @@ async function pollApplyWithProgress(tid, alias, totalTimes){
       progressFill.style.background = 'linear-gradient(90deg,#20c997,#66d9ef)';
     }, 3000);
     
-    // Don't call loadPanel() here as it resets the progress bar
+    // Mark that refresh is needed after operation completes
+    pendingRefresh = true;
+    
+    // Schedule refresh if enough time has passed, or schedule it for later
+    const now = Date.now();
+    const timeSinceLastRead = now - lastSheetReadTime;
+    if(timeSinceLastRead >= SHEET_READ_INTERVAL) {
+      // Can refresh immediately
+      loadPanel(true);
+    } else {
+      // Schedule refresh after the remaining time
+      const remainingTime = SHEET_READ_INTERVAL - timeSinceLastRead;
+      setTimeout(() => {
+        if(pendingRefresh) {
+          loadPanel(true);
+        }
+      }, remainingTime);
+    }
     break;
   }
 }
@@ -2791,12 +2950,28 @@ async function pollApply(tid, alias){
     }
     if(el){ el.textContent = (data.status==='ok'?'✅ 成功':'❌ 失败'); }
     alert((data.status==='ok'?'✅ Apply 成功':'❌ Apply 失败') + '\\n' + (data.msg||''));
-    loadPanel();
+    // Mark that refresh is needed after operation completes
+    pendingRefresh = true;
+    // Schedule refresh if enough time has passed, or schedule it for later
+    const now = Date.now();
+    const timeSinceLastRead = now - lastSheetReadTime;
+    if(timeSinceLastRead >= SHEET_READ_INTERVAL) {
+      // Can refresh immediately
+      loadPanel(true);
+    } else {
+      // Schedule refresh after the remaining time
+      const remainingTime = SHEET_READ_INTERVAL - timeSinceLastRead;
+      setTimeout(() => {
+        if(pendingRefresh) {
+          loadPanel(true);
+        }
+      }, remainingTime);
+    }
     break;
   }
 }
 
-window.addEventListener('load', loadPanel);
+window.addEventListener('load', () => loadPanel(true)); // Force initial load
 
 </script>
 </body>
@@ -2902,6 +3077,22 @@ def api_list_tpus():
         return jsonify({"ok": False, "msg": str(e), "rows": []})
     return jsonify({"ok": True, "rows": rows})
 
+@app.route("/api/tpu-gcloud-counts")
+def api_tpu_gcloud_counts():
+    """Get TPU counts from spreadsheet K and L columns, aggregated by zone and type"""
+    try:
+        # Use spreadsheet module to read from K and L columns
+        if not SHEET_MODULE_OK or not hasattr(sheet_mod, 'read_tpu_total_counts_from_sheet'):
+            return jsonify({"ok": False, "msg": "Spreadsheet module not available", "counts": {}})
+        
+        try:
+            counts = sheet_mod.read_tpu_total_counts_from_sheet()  # type: ignore
+            return jsonify({"ok": True, "counts": counts})
+        except Exception as e:
+            return jsonify({"ok": False, "msg": str(e), "counts": {}})
+    except Exception as e:
+        return jsonify({"ok": False, "msg": str(e), "counts": {}})
+
 @app.route("/api/tpu/<alias>/ongoing-operations")
 def api_tpu_ongoing_operations(alias: str):
     """Get ongoing apply/reapply operations for a specific TPU"""
@@ -2918,6 +3109,26 @@ def api_tpu_ongoing_operations(alias: str):
                     "ts": task["ts"]
                 })
         return jsonify({"ok": True, "operations": ongoing_ops})
+
+@app.route("/api/all-ongoing-operations")
+def api_all_ongoing_operations():
+    """Get all ongoing apply/reapply operations for all TPUs (optimization: single call instead of N calls)"""
+    with OP_LOCK:
+        all_ops = {}  # {alias: [operations]}
+        for tid, task in OP_TASKS.items():
+            if (task["status"] in ["pending", "applying"] and 
+                task["kind"] in ["apply", "reapply"]):
+                alias = task.get("meta", {}).get("alias")
+                if alias:
+                    if alias not in all_ops:
+                        all_ops[alias] = []
+                    all_ops[alias].append({
+                        "tid": tid,
+                        "status": task["status"],
+                        "msg": task["msg"],
+                        "ts": task["ts"]
+                    })
+        return jsonify({"ok": True, "operations": all_ops})
 
 @app.route("/api/ongoing-apply-run-operations")
 def api_ongoing_apply_run_operations():
