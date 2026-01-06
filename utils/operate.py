@@ -214,11 +214,18 @@ def apply(args):
         return apply_and_set_env(args[0], preemptible=True, delete=False)
 
 def apply_until_success(args):
+    retry_interval = None
+    max_attempt = None
+    for arg in args:
+        if arg.startswith('t='):
+            retry_interval = int(arg.split('=')[1])
+        if arg.startswith('m='):
+            max_attempt = int(arg.split('=')[1])
     if '-norm' in args:
         tpu = args[1] if args[0] == '-norm' else args[0]
-        return apply_and_set_env(tpu, preemptible=False, delete=False, repeat_time = 100000)
+        return apply_and_set_env(tpu, preemptible=False, delete=False, repeat_time = 100000, retry_interval = retry_interval, max_attempt = max_attempt)
     else:
-        return apply_and_set_env(args[0], preemptible=True, delete=False, repeat_time = 100000)
+        return apply_and_set_env(args[0], preemptible=True, delete=False, repeat_time = 100000, retry_interval = retry_interval, max_attempt = max_attempt)
     
 def reapply(args):
     if '-norm' in args:
@@ -234,7 +241,11 @@ def reapply_until_success(args):
     else:
         return apply_and_set_env(args[0], preemptible=True, delete=True, repeat_time = 100000)
 
-def apply_and_set_env(tpu, preemptible = False, spot = False, delete=True, repeat_time=None, retry_interval=0.5):
+def apply_and_set_env(tpu, preemptible = False, spot = False, delete=True, repeat_time=None, retry_interval=None, max_attempt=None):
+    if retry_interval is None:
+        retry_interval = 10
+    if max_attempt is None:
+        max_attempt = 2000
     info_str = 'pre' if preemptible else 'norm'
     zone, pre, spot, tpu = get_zone_pre_spot(tpu)
     print(zone, pre, spot, tpu, preemptible)
@@ -275,8 +286,12 @@ def apply_and_set_env(tpu, preemptible = False, spot = False, delete=True, repea
     attempt = 0
 
     print(f'cmd:{base_cmd}')
+    last_trial_time = time.time()
 
     while True:
+        if time.time() - last_trial_time < retry_interval and attempt > 1:
+            time.sleep(retry_interval - (time.time() - last_trial_time))
+
         attempt += 1
         cmd_timeout = 600
         try:
@@ -299,9 +314,12 @@ def apply_and_set_env(tpu, preemptible = False, spot = False, delete=True, repea
             raise NotADirectoryError(f'xibo lives. timeout')
             return 'timeout'
 
-        print(f"{INFO} Retrying TPU creation in {retry_interval}s...")
+        last_trial_time = time.time()
 
-        time.sleep(retry_interval + random.uniform(0, 0.5))
+        if attempt > max_attempt:
+            print(f"{FAIL} apply_{info_str}: max_attempt {max_attempt} exceeded, giving up")
+            raise NotADirectoryError(f'xibo lives. timeout')
+            return 'timeout'
 
     # short pause before querying state
     time.sleep(5)
@@ -717,15 +735,17 @@ def mount_disk(tpu, quiet = False):
     
     print(f"{INFO} Mounting disk in TPU {tpu} done")
     print(f"{INFO} Checking environment in TPU {tpu}...")
+
+    print(f"{INFO} Setting wandb again to make sure it works...")
+    res = set_wandb(tpu)
+    if res != 'success':
+        print(f"{FAIL} mount_disk: setting wandb failed")
+        return 'wandb failed'
+
     state = check_env(tpu)
 
     if state == 'success':
         print(f"{GOOD} Environment in TPU {tpu} is good, done mounting disk")
-        print(f"{INFO} Setting wandb again to make sure it works...")
-        res = set_wandb(tpu)
-        if res != 'success':
-            print(f"{FAIL} mount_disk: setting wandb failed")
-            return 'wandb failed'
         return 'success'
     else:
         print(f"{FAIL} Environment in TPU {tpu} is not good")

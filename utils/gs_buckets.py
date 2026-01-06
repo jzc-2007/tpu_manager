@@ -57,8 +57,8 @@ def copy_ckpt(path:str, src_zone: str = None, dst_zone: str = None):
         dst_zone = get_zone_from_workdir(path)
     converted_src = convert_to_gs_by_zone(path, src_zone)
     converted_dst = convert_to_gs_by_zone(path, dst_zone)
-    converted_src = convert_name(converted_src, src_zone)
-    converted_dst = convert_name(converted_dst, dst_zone)
+    # converted_src = convert_name(converted_src, src_zone)
+    # converted_dst = convert_name(converted_dst, dst_zone)
     print(f'converted_src: {converted_src}')
     print(f'converted_dst: {converted_dst}')
     print(f'copying {converted_src} to {converted_dst}...')
@@ -168,7 +168,8 @@ def copy_checkpoint(dir, target_zone, src_zone=None):
     if target_zone not in zones_list:
         print(f"{FAIL} copy_checkpoint: target_zone {target_zone} is not valid. Supported zones: {zones_list}")
         return False
-    return copy_ckpt(dir, src_zone=src_zone, dst_zone=target_zone)
+    # return copy_ckpt(dir, src_zone=src_zone, dst_zone=target_zone)
+    return check_gs_logdir_exists(dir, target_zone, quiet=False)
 
 if __name__ == '__main__':
     logdir = '/kmh-nfs-ssd-eu-mount/logs/sqa/TS-imgnet/20251026_035445_aq9ubo_kmh-tpuvm-v6e-32-spot-101_us-central1-b__b_lr_ep_eval'
