@@ -76,7 +76,7 @@ def copy_ckpt(path:str, src_zone: str = None, dst_zone: str = None):
         FS.copy(converted_src, converted_dst, recursive=True)
     return True
 
-def check_gs_logdir_exists(logdir, zone, quiet=True):
+def check_gs_logdir_exists(logdir, zone, quiet=True, all=False):
     '''
     logdir is the dir for resume checkpoint
     zone the is the zone of current / new tpu to resume
@@ -98,6 +98,11 @@ def check_gs_logdir_exists(logdir, zone, quiet=True):
             print(f'Preparing to copy checkpoint from {converted} to current zone {zone} gs bucket...')
             
             dest_path = convert_to_gs_by_zone(logdir, zone)
+
+            if all:
+                FS.copy(converted, dest_path, recursive=True)
+                print(f'Copy done.')
+                return True
             
             # --- Start of Modification: Find Latest Checkpoint ---
             try:
@@ -164,12 +169,12 @@ def check_gs_logdir_exists(logdir, zone, quiet=True):
     if not quiet: print(f"{FAIL} {logdir} does not exist, please check the path!!\n" * 10)
     return False
 
-def copy_checkpoint(dir, target_zone, src_zone=None):
+def copy_checkpoint(dir, target_zone, src_zone=None, all=False):
     if target_zone not in zones_list:
         print(f"{FAIL} copy_checkpoint: target_zone {target_zone} is not valid. Supported zones: {zones_list}")
         return False
     # return copy_ckpt(dir, src_zone=src_zone, dst_zone=target_zone)
-    return check_gs_logdir_exists(dir, target_zone, quiet=False)
+    return check_gs_logdir_exists(dir, target_zone, quiet=False, all=all)
 
 if __name__ == '__main__':
     logdir = '/kmh-nfs-ssd-eu-mount/logs/sqa/TS-imgnet/20251026_035445_aq9ubo_kmh-tpuvm-v6e-32-spot-101_us-central1-b__b_lr_ep_eval'

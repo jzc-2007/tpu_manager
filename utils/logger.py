@@ -4,6 +4,8 @@ from .data_io import read_and_lock_data, write_and_unlock_data, release_lock_dat
 from .users import user_from_dict
 
 import os, yaml
+import gspread
+from google.oauth2.service_account import Credentials
 
 
 
@@ -74,6 +76,112 @@ def register_tpu():
     except Exception as e:
         print(f"{FAIL} Failed to register TPU: {e}")
         release_lock_data()
+
+def register_tpu_and_write_spreadsheet(full_name, zone, pre=False, spot = True, tpu_alias = None, spreadsheet_name = None):
+    if tpu_alias is None:
+        tpu_alias = full_name
+    if spreadsheet_name is None:
+        spreadsheet_name = full_name
+    assert full_name.startswith('kmh-tpuvm-'), f"Full name {full_name} does not start with 'kmh-tpuvm-'"
+    data = read_and_lock_data()
+    try:
+        if tpu_alias in data['tpu_aliases']:
+            raise ValueError(f"TPU alias {tpu_alias} already exists")
+        data['tpu_aliases'][tpu_alias] = full_name
+        data['tpu_aliases'][spreadsheet_name] = full_name
+        if zone not in data['all_tpus']:
+            data['all_tpus'][zone] = []
+            print(f"{WARNING} Zone {zone} not found, creating new zone entry")
+        data['all_tpus'][zone].append(full_name)
+        if pre:
+            data['pre_info']['preemptible'].append(full_name)
+        if spot:
+            data['pre_info']['spot'].append(full_name)
+        write_and_unlock_data(data)
+        print(f"{GOOD} Successfully registered TPU {tpu_alias} with full name {full_name}")
+        
+        # Write to spreadsheet
+        try:
+            secret_path = SECRET_PATH
+            sheet_id = "1MFtgLx7uzBFdiPxrIqck00ilrSslZU2w2jRwriVpKMw"
+            sheet_name = "ka[experimental]"
+            
+            # Authenticate
+            scopes = ["https://www.googleapis.com/auth/spreadsheets"]
+            creds = Credentials.from_service_account_file(secret_path, scopes=scopes)
+            client = gspread.authorize(creds)
+            
+            # Open the sheet
+            ws = client.open_by_key(sheet_id).worksheet(sheet_name)
+            
+            # Find the last row of the TPU table.
+            # IMPORTANT:
+            # - We define last_row as the last row that has data in column B/C/D/E.
+            # - We ignore the top 10 rows (headers), so last_row is at least 10.
+            # This avoids being affected by unrelated sections (e.g. K/L usage stats).
+            last_row = 10
+            for sentinel_col in range(2, 6):  # COL B, C, D, E
+                col_values = ws.col_values(sentinel_col)
+                last_row = max(last_row, len(col_values))
+            
+            # Determine TPU version and type from full_name
+            tpu_version = None
+            tpu_type = None
+            for key in NAME_TO_VER:
+                if key in full_name:
+                    tpu_version = NAME_TO_VER[key]
+                    break
+            for key in NAME_TO_TYPE:
+                if key in full_name:
+                    tpu_type = NAME_TO_TYPE[key]
+                    break
+            
+            # If we can't determine type from full_name, try to extract from spreadsheet_name
+            if tpu_type is None and spreadsheet_name:
+                for key in NAME_TO_TYPE:
+                    if key in spreadsheet_name:
+                        tpu_type = NAME_TO_TYPE[key]
+                        break
+            
+            # Prepare the row data: [empty, tpu_alias, belong, running_status, user, user_note, script_note, env, other_note]
+            # Column A: empty (or can be left empty)
+            # Column B: spreadsheet_name (TPU alias)
+            # Column C: belong (default to empty string or 'ka' - using empty for now)
+            # Column D: running_status ('free' -> will be written as '闲的')
+            # Column E: user ('free' -> will be written as '闲的')
+            # Column F: user_note (empty)
+            # Column G: script_note ('READY')
+            # Column H: env (zone)
+            # Column I: other_note (empty)
+            
+            new_row = [
+                '',  # Column A
+                spreadsheet_name,  # Column B: TPU alias
+                'unknown',  # Column C: belong (can be filled later)
+                '闲的',  # Column D: running_status (free)
+                '闲的',  # Column E: user (free)
+                '.',  # Column F: user_note
+                'READY',  # Column G: script_note
+                zone,  # Column H: env (zone)
+                '.'  # Column I: other_note
+            ]
+            
+            # Write exactly one line under the current last line of the table (A..I).
+            target_row = last_row + 1
+            ws.update(
+                f"A{target_row}:I{target_row}",
+                [new_row],
+                value_input_option='USER_ENTERED'
+            )
+            print(f"{GOOD} Successfully added TPU {spreadsheet_name} to spreadsheet at row {target_row}")
+        except Exception as e:
+            print(f"{WARNING} Failed to write to spreadsheet: {e}")
+            # Don't fail the whole function if spreadsheet write fails
+        
+    except Exception as e:
+        print(f"{FAIL} Failed to register TPU: {e}")
+        release_lock_data()
+    
 
 def del_registered_tpu(alias):
     data = read_and_lock_data()

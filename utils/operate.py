@@ -608,6 +608,11 @@ def mount_disk(tpu, quiet = False):
         sudo DEBIAN_FRONTEND=noninteractive apt-get -y install nfs-common
         ps -ef | grep -i unattended | grep -v 'grep' | awk '{{print \\$2}}' | xargs -r sudo kill -9
         sleep 2
+
+        sudo rm -rf /home/zak 2>/dev/null || true
+        sudo rm -rf /home/dmy 2>/dev/null || true
+        sudo rm -rf /mnt/zhhm 2>/dev/null || true
+        sudo rm -rf /home/linluqiu 2>/dev/null || true
       "
     '''
 

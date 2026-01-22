@@ -64,8 +64,13 @@ def check_code_lock():
     return lock['code']['status']
 
 def read_data():
-    with open(DATA_PATH, 'r') as file:
-        data = json.load(file)
+    try:
+        with open(DATA_PATH, 'r') as file:
+            data = json.load(file)
+    except json.JSONDecodeError as e:
+        print(f"{FAIL} read_data: JSON parsing error in {DATA_PATH} at line {e.lineno}, column {e.colno}: {e.msg}")
+        print(f"Error details: {e}")
+        raise
     return data
 
 def read_queue():
@@ -157,8 +162,13 @@ def read_and_lock_data():
         if num_ack > 180:
             print(f"{FAIL} read_and_lock_data: Lock not released after 30 mins, this may indicate a deadlock. Please check the lock file and release it manually.")
             raise Exception("Lock not released after 30 mins, this may indicate a deadlock. Please check the lock file and release it manually.")
-    with open(DATA_PATH, 'r') as file:
-        data = json.load(file)
+    try:
+        with open(DATA_PATH, 'r') as file:
+            data = json.load(file)
+    except json.JSONDecodeError as e:
+        print(f"{FAIL} read_and_lock_data: JSON parsing error in {DATA_PATH} at line {e.lineno}, column {e.colno}: {e.msg}")
+        print(f"Error details: {e}")
+        raise
     return data
 
 def read_and_lock_queue():
@@ -182,8 +192,22 @@ def read_and_lock_queue():
     return queue
 
 def write_and_unlock_data(data):
-    with open(DATA_PATH, 'w') as file:
-        json.dump(data, file, indent=4)
+    try:
+        # Write to a temporary file first to ensure atomic write
+        temp_path = DATA_PATH + '.tmp'
+        with open(temp_path, 'w') as file:
+            json.dump(data, file, indent=4)
+        # Atomically replace the original file
+        os.replace(temp_path, DATA_PATH)
+    except Exception as e:
+        # If write fails, try to clean up temp file
+        if os.path.exists(DATA_PATH + '.tmp'):
+            try:
+                os.remove(DATA_PATH + '.tmp')
+            except:
+                pass
+        print(f"{FAIL} write_and_unlock_data: Failed to write data: {e}")
+        raise
     with open(LOCK_PATH, 'r') as file:
         lock = json.load(file)
     lock['data']['status'] = False

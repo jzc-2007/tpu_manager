@@ -29,7 +29,7 @@ def read_sheet_info() -> dict:
 
     # 3. find the number of rows
     last_row = 0
-    for sentinel_col in range(2, 4): # COL B, C (ka, belonging)
+    for sentinel_col in range(2, 7): # COL B, C (ka, belonging)
         col_values = ws.col_values(sentinel_col)
         last_row = max(last_row, len(col_values))
 
@@ -38,13 +38,13 @@ def read_sheet_info() -> dict:
     
     tpu_information = {}
     for i, row in enumerate(table):
-        if len(row) > 1 and row[1].startswith('v'):
+        if len(row) > 1 and (row[1].startswith('v') or row[1].startswith('kmh-tpuvm-')):
             assert len(row) >= 7, f"line {i+1} is too short: {row}"
             _, tpu, belong, running_status, user, user_note, script_note, env, other = row[:9]
             zone, pre, spot, full_name = get_zone_pre_spot(tpu)
             
             assert zone is not None, f"line {i+1} tpu {tpu} not found in zone"
-            assert zone.startswith(env), f"line {i+1} zone {zone} does not start with env {env}"
+            assert zone.startswith(env), f"line {i+1} zone {zone} does not start with env {env}, for tpu {tpu}"
 
             # print(running_status, user, user_note, script_note)
             assert running_status in ['running', 'reserved', 'reserved(error)', '闲的', '没了!'], f"line {i+1} running status {running_status} cannot be recognized"
@@ -84,6 +84,8 @@ def read_sheet_info() -> dict:
                 'other_note': other,
                 'line': i + 1
             }
+
+    # assert 'kmh-tpuvm-v6e-64-spot-keya-su30sn' in tpu_information, f"kmh-tpuvm-v6e-64-spot-keya-su30sn not found in tpu_information"
 
     return tpu_information
 

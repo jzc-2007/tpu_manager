@@ -5,7 +5,7 @@ from . import users
 from .data_io import read_and_lock_data, write_and_unlock_data, release_lock_data, read_data, read_and_lock_legacy, write_legacy, write_and_unlock_legacy, release_lock_legacy
 from .operate import check_tpu_status, apply_and_set_env, kill_jobs_tpu, restart, check_tpu_running
 from .sheet import get_tpu_info_sheet, write_sheet_info, read_tpu_info_from_type, find_tpu_from_type
-from .logger import get_wandb_notes
+from .logger import get_wandb_notes, register_tpu_and_write_spreadsheet
 from .autenticate import autenticate
 from .gs_buckets import check_gs_logdir_exists
 
@@ -715,7 +715,7 @@ def parse_config_args(user_obj, args):
     config_args = ""
     tag, rule, tpu = None, None, None
     monitor = True
-    ignore_keys = ['dir', 'user', 'id', 'tag', 'rule', 'monitor', 'ssn']
+    ignore_keys = ['dir', 'user', 'id', 'tag', 'rule', 'monitor', 'ssn', 'zone', 'sname', 'tpu', 'pre', 'spot']
     customized_settings = {}
     dir_id = '1'
     spreadsheet_notes = None
@@ -821,6 +821,37 @@ def run(user_obj, args, monitor_job = True):
     # print('args:', args)
     data = read_data()
     user_obj = users.user_from_dict(data['users'][user_obj.name])
+
+    if '--register' in args:
+        zone = None
+        alias = None
+        spreadsheet_name = None
+        tpu = None
+        for arg in args:
+            if 'zone=' in arg:
+                zone = arg.split('zone=')[1]
+            if 'alias=' in arg:
+                alias = arg.split('alias=')[1]
+            if 'spreadsheet_name=' in arg or 'sname=' in arg:
+                spreadsheet_name = arg.split('spreadsheet_name=')[1] if 'spreadsheet_name=' in arg else arg.split('sname=')[1]
+            if 'tpu=' in arg:
+                tpu = arg.split('tpu=')[1]
+            if 'pre=' in arg:
+                pre = arg.split('pre=')[1]
+            if 'spot=' in arg:
+                spot = arg.split('spot=')[1]
+            if arg.startswith('kmh-tpuvm-'):
+                tpu = arg
+        if zone is None:
+            print(f"{FAIL} run: No zone provided when registering TPU")
+            return
+        if tpu is None:
+            print(f"{FAIL} run: No TPU provided when registering TPU")
+            return
+
+        print(f"{INFO} run: Registering TPU {tpu} in zone {zone} with alias {alias} and spreadsheet name {spreadsheet_name}, Default pre=False, spot=True")
+        register_tpu_and_write_spreadsheet(tpu, zone, tpu_alias=alias, spreadsheet_name=spreadsheet_name)
+        time.sleep(3)
     
     dir_id, dir_path, tpu, tag, rule, monitor, config_args, customized_settings, spreadsheet_notes = parse_config_args(user_obj, args)
 
@@ -1180,6 +1211,8 @@ def check_jobs(user_obj, args, config = None):
             if job_data["status"] == 'error':
                 if job_data["error"] == 'preempted': print(f"Status: {RED}Preempted{NC}")
                 elif job_data["error"] == 'OOM': print(f"Status: {RED}OOM{NC}")
+                elif job_data["error"] == 'file error': print(f"Status: {RED}没mount, 啥比{NC}")
+                elif job_data["error"] == 'invalid pointer': print(f"Status: {RED}invalid pointer{NC}")
                 else: print(f"Status: {RED}Error{NC}\nmsg: {msg}")
                 print('-'*40)
                 continue
@@ -1213,6 +1246,8 @@ def check_jobs(user_obj, args, config = None):
                             last_line_cut = last_line_cut.replace(ex, '')
                     if not found: break
                 if (re.search(r'Job failed', last_line_cut) or re.search(r'[eE]rror', last_line_cut) or re.search(r'FAIL', last_line_cut)) and 's' in config:
+                    # read the logdir
+                    logfile = read_head_tail(job_data['log_dir']+'/output.log', n=500)
                     if re.search(r'Allocation type', last_line):
                         print(f"Status: {RED}OOM Error{NC}\nmsg: {msg}")
                         write_error_to_job(user_obj, job_data, 'OOM')
@@ -1220,11 +1255,15 @@ def check_jobs(user_obj, args, config = None):
                         print(f"Status: {RED}GRPC Error{NC}\nmsg: {msg}")
                         write_error_to_job(user_obj, job_data, 'grpc')
                         ack_MONITOR()
-                    elif re.search(r'python: No such file or directory', last_line):
-                        print(f"Status: {RED}File Error{NC}\nmsg: {msg}")
+                    elif re.search(r'python: No such file or directory', logfile):
+                        print(f"Status: {RED}没mount, 啥比{NC}\nmsg: {msg}")
                         write_error_to_job(user_obj, job_data, 'file error')
                         ack_MONITOR()
-                    elif re.search(r'DEADLINE_EXCEEDED', last_line):
+                    elif re.search(r'Attempt to free invalid pointer', logfile):
+                        print(f"Status: {RED}invalid pointer{NC}\nmsg: {msg}")
+                        write_error_to_job(user_obj, job_data, 'invalid pointer')
+                        ack_MONITOR()
+                    elif re.search(r'DEADLINE_EXCEEDED', logfile):
                         print(f"Status: {RED}DEADLINE EXCEEDED{NC}\nmsg: {msg}")
                         write_error_to_job(user_obj, job_data, 'deadline exceeded')
                         ack_MONITOR()
@@ -1708,3 +1747,20 @@ def ack_MONITOR():
     except:
         print(f"{RED}[Error] {NC}ack_MONITOR: Failed to acknowledge monitor")
         release_lock_data()
+
+from collections import deque
+
+def read_head_tail(path, n=1000, encoding="utf-8"):
+    # head = []
+    # tail = deque(maxlen=n)
+
+    # with open(path, 'r', encoding=encoding, errors='ignore') as f:
+    #     for i, line in enumerate(f):
+    #         if i < n:
+    #             head.append(line)
+    #         tail.append(line)
+
+    # return head, list(tail)
+    with open(path, 'r') as f:
+        x = f.read()
+    return x
