@@ -183,6 +183,37 @@ def register_tpu_and_write_spreadsheet(full_name, zone, pre=False, spot = True, 
         release_lock_data()
     
 
+def fang_new_tpu(new_tpu_name, old_tpu_alias):
+    data = read_and_lock_data()
+    try:
+        if old_tpu_alias not in data['tpu_aliases']:
+            raise ValueError(f"Old TPU alias {old_tpu_alias} not found")
+        old_full_name = data['tpu_aliases'][old_tpu_alias]
+        zone = None
+        for z in data['all_tpus']:
+            if old_full_name in data['all_tpus'][z]:
+                zone = z
+                break
+        if zone is None:
+            raise ValueError(f"Old TPU full name {old_full_name} not found in any zone")
+        # replace the four appear of old_full_name with new_tpu_name: 2 alias, 1 in zone, 1 in spot
+        all_aliases = [alias for alias in list(data['tpu_aliases'].keys()) if data['tpu_aliases'][alias] == old_full_name]
+        assert len(all_aliases) in [1,2], f"found more than 2 aliases for the old TPU. FUCK YOU! please modify manually. get aliases: {all_aliases}"
+        for alias_ in all_aliases:
+            data['tpu_aliases'][alias_] = new_tpu_name
+        data['all_tpus'][zone].remove(old_full_name)
+        data['all_tpus'][zone].append(new_tpu_name)
+        if old_full_name in data['pre_info']['spot']:
+            data['pre_info']['spot'].remove(old_full_name)
+            data['pre_info']['spot'].append(new_tpu_name)
+        else: raise NotADirectoryError(f'FUCK YOU')
+        write_and_unlock_data(data)
+        print(f"{GOOD} Successfully fanged new TPU {new_tpu_name} from old TPU alias {old_tpu_alias}")
+    except Exception as e:
+        print(f"{FAIL} Failed to fang new TPU: {e}")
+        release_lock_data()
+
+
 def del_registered_tpu(alias):
     data = read_and_lock_data()
     try:

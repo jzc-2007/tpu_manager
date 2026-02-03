@@ -1,6 +1,7 @@
 .xiboconfig
 *.json
 config.sh
+passwords.json
 test*
 **__pycache__**
 **/__pycache__/**

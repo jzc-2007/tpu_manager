@@ -183,7 +183,7 @@ def set_wandb(tpu):
     data = read_data()
     wandb_key, conda_env = data["wandb_api_key"], data["conda_env_name"]
     data_root = "kmh-nfs-ssd-eu-mount" if 'eu' in zone else "kmh-nfs-ssd-us-mount"
-    conda_path = '/kmh-nfs-ssd-us-mount/code/eva/miniforge3/bin/python' if 'us-central2' in zone else 'python'
+    conda_path = '/kmh-nfs-ssd-us-mount/code/hanhong/miniforge3/bin/python' if 'us-central2' in zone else 'python'
 
     remote_cmd = f'{conda_path} -m wandb login {wandb_key}'
     # remote_cmd = f'python -m wandb login {wandb_key}'
@@ -375,12 +375,21 @@ def check_tpu_status(tpu, quiet = False):
     """
     zone, pre, spot, tpu = get_zone_pre_spot(tpu)
     if zone is None: return 'no tpu found'
-    cmd = f"gcloud compute tpus tpu-vm describe {tpu} --zone={zone} --project {PROJECT} --format='value(state)'"
+    # try to ensure gcloud is on PATH even in non-interactive shells
+    cmd = (
+        # "PATH=/kmh-nfs-ssd-us-mount/code/siri/google-cloud-sdk/bin:$PATH "
+        f"gcloud compute tpus tpu-vm describe {tpu} --zone={zone} --project {PROJECT} --format='value(state)'"
+    )
+    if not quiet:
+        print(f"{INFO} check_tpu_status: running cmd: {cmd}")
     try:
-        state = subprocess.check_output(cmd, shell=True, stderr=subprocess.DEVNULL).decode().strip()
-    except subprocess.CalledProcessError:
+        state = subprocess.check_output(cmd, shell=True, stderr=subprocess.STDOUT).decode().strip()
+        if not quiet:
+            print(f"{INFO} check_tpu_status: raw output: {state}")
+    except subprocess.CalledProcessError as e:
         if not quiet:
             print(f"{FAIL} check_tpu_status: Failed to query TPU {tpu} state")
+            print(f"{YELLOW}stdout:{NC} {e.stdout.decode().strip() if getattr(e, 'stdout', None) else ''}")
         return 'failed'
     
     return state.lower()
@@ -512,11 +521,11 @@ def check_env(tpu, quiet = False, recurse=0):
     #     return 'success'
     
     data = read_data()
-    conda_env = data["conda_env_name"]
-    data_root = "kmh-nfs-ssd-eu-mount" if 'eu' in zone else "kmh-nfs-ssd-us-mount"
+    # conda_env = data["conda_env_name"]
+    data_root = "kmh-nfs-ssd-us-mount"
 
-    # conda_path = 'python' if 'v6' in tpu else '/kmh-nfs-ssd-us-mount/code/eva/miniforge3/bin/python'
-    conda_path = '/kmh-nfs-ssd-us-mount/code/eva/miniforge3/bin/python' if 'us-central2' in zone else 'python'
+    # conda_path = 'python' if 'v6' in tpu else '/kmh-nfs-ssd-us-mount/code/hanhong/miniforge3/bin/python'
+    conda_path = '/kmh-nfs-ssd-us-mount/code/hanhong/miniforge3/bin/python' if 'us-central2' in zone else 'python'
 
     cmd = f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --project {PROJECT} --worker=all --command \"{conda_path} -c 'import jax; print(jax.devices())'\""
     if not quiet:
@@ -589,6 +598,10 @@ def mount_disk(tpu, quiet = False):
     Mount the disk and setup remote wandb.
     """
     zone, pre, spot, tpu = get_zone_pre_spot(tpu)
+
+    if 'v5p' in tpu: # use mount disk new
+        return mount_disk_new(tpu, quiet=quiet)
+
     if zone is None: return
     print(f"{INFO} Mounting disk in TPU {tpu}...")
 
@@ -747,6 +760,156 @@ def mount_disk(tpu, quiet = False):
         print(f"{FAIL} mount_disk: setting wandb failed")
         return 'wandb failed'
 
+    if 'v5p' in tpu:
+        print(f'skip checking env for v5p')
+        return 'success'
+    
+    state = check_env(tpu)
+
+    if state == 'success':
+        print(f"{GOOD} Environment in TPU {tpu} is good, done mounting disk")
+        return 'success'
+    else:
+        print(f"{FAIL} Environment in TPU {tpu} is not good")
+        print(f"state: {state}")
+        print("Unexpected error, please check the TPU manually, or contact the admin")
+        return 'checking env failed'
+
+def mount_disk_v5(tpu, quiet = False):
+    """
+    Mount the disk and setup remote wandb.
+    """
+    zone, pre, spot, tpu = get_zone_pre_spot(tpu)
+    if zone is None: return
+    print(f"{INFO} Mounting disk in TPU {tpu}...")
+
+    cmd1 = f'''
+    gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --project {PROJECT} --worker=all \
+      --command "
+        systemctl status unattended-upgrades.service || true
+        ps -ef | grep unattended-upgrade | grep -v grep || true
+        systemctl stop unattended-upgrades || true
+        killall unattended-upgrade || true
+
+        for i in {{1..3}}; do
+          ps -ef | grep -i unattended | grep -v 'grep' | awk '{{print \\$2}}' | xargs -r sudo kill -9
+          sleep 2
+        done
+        sudo DEBIAN_FRONTEND=noninteractive apt-get -y update
+        sudo DEBIAN_FRONTEND=noninteractive apt-get -y install nfs-common
+        ps -ef | grep -i unattended | grep -v 'grep' | awk '{{print \\$2}}' | xargs -r sudo kill -9
+        sleep 2
+
+        sudo rm -rf /home/zak 2>/dev/null || true
+        sudo rm -rf /home/dmy 2>/dev/null || true
+        sudo rm -rf /mnt/zhhm 2>/dev/null || true
+        sudo rm -rf /home/linluqiu 2>/dev/null || true
+      "
+    '''
+
+    # sudo mkdir -p /kmh-nfs-ssd-eu-mount
+    # sudo mount -t nfs -o vers=3 10.150.179.250:/kmh_nfs_ssd_eu /kmh-nfs-ssd-eu-mount
+    # sudo chmod go+rw /kmh-nfs-ssd-eu-mount
+    # ls /kmh-nfs-ssd-eu-mount
+
+    cmd2 = f"""
+    gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --project {PROJECT} --worker=all --command "
+    sudo mkdir -p /kmh-nfs-us-mount
+    sudo mount -t nfs -o vers=3 10.26.72.146:/kmh_nfs_us /kmh-nfs-us-mount
+    sudo chmod go+rw /kmh-nfs-us-mount
+    ls /kmh-nfs-us-mount
+
+    sudo mkdir -p /kmh-nfs-ssd-us-mount
+    sudo mount -o vers=3 10.97.81.98:/kmh_nfs_ssd_us /kmh-nfs-ssd-us-mount
+    sudo chmod go+rw /kmh-nfs-ssd-us-mount
+    ls /kmh-nfs-ssd-us-mount
+    "
+
+    """
+
+    assert 'v5p' in tpu
+    #     cmd2 += f'''
+    # gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} \
+    # --worker=all --command "
+    # sudo rm -rf /home/\$(whoami)/.local
+    # echo 'Current dir: '
+    # pwd
+    # conda create -n NNX python==3.10.14 -y
+    # conda activate NNX # These two lines are very smart. If on a device there is no conda, then these two lines error out, but the remaining can still be run.
+    # pip install 'setuptools==69.5.1'
+    # pip install jax[tpu]==0.4.37 -f https://storage.googleapis.com/jax-releases/libtpu_releases.html
+    # pip install jaxlib==0.4.37 flax==0.10.2
+    # # pip install -r requirements.txt # other tang dependencies
+    # pip install pillow clu tensorflow==2.15.0 'keras<3' 'torch<=2.4' torchvision tensorflow_datasets matplotlib==3.9.2
+    # pip install orbax-checkpoint==0.6.4 ml-dtypes==0.5.0 tensorstore==0.1.67
+    # pip install diffusers dm-tree cached_property ml-collections
+    # pip install 'wandb==0.19.9'
+    # pip install gcsfs
+    # pip install lpips-j==0.0.6
+    # "
+    # '''
+    # get bucket name by zone
+    if 'us-east1' in zone: bucket = 'gs://kmh-gcp-us-east1'
+    elif 'us-east5' in zone: bucket = 'gs://kmh-gcp-us-east5'
+    elif 'us-central1' in zone: bucket = 'gs://kmh-gcp-us-central1'
+    elif 'us-central2' in zone: bucket = 'gs://kmh-gcp-us-central2'
+    elif 'asia-northeast1' in zone: bucket = 'gs://kmh-gcp-asia-northeast1-b'
+    elif 'europe-west4' in zone: bucket = 'gs://kmh-gcp'
+    else: raise ValueError(f"{FAIL} mount_disk: Unknown zone {zone}")
+
+    cmd2 += f'''
+    gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --project {PROJECT} \
+    --worker=all --command "
+    sudo rm -rf /home/\$(whoami)/.local
+    echo 'Current dir: '
+    pwd
+    cd
+    gcloud auth activate-service-account --key-file=/kmh-nfs-ssd-us-mount/code/qiao/{zone[:-2]}.json
+    gsutil -m cp -r {bucket}/hanhong/v5_wheels_new.tar.gz ./wheels.tar.gz
+    tar -xvf wheels.tar.gz
+    rm -rf .local || true
+    pip install --no-index --find-links=wheels wheels/*.whl --no-deps --force-reinstall
+    rm -rf wheels wheels.tar.gz
+    "
+    '''
+
+    try:
+        download_process = \
+            subprocess.run(cmd1, shell=True, timeout=600, check=True,\
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL) if quiet \
+            else subprocess.run(cmd1, shell=True, timeout=600, check=True)
+
+        time.sleep(5)
+
+        mount_process = \
+            subprocess.run(cmd2, shell=True, timeout=600, check=True,\
+                                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) if quiet \
+            else subprocess.run(cmd2, shell=True, timeout=600, check=True)
+
+    except subprocess.TimeoutExpired:
+        print(f"{FAIL} mount_disk: mounting disk timed out")
+        return 'mounting timeout'
+    except subprocess.CalledProcessError as e:
+        print(f"{FAIL} mount_disk: {e}")
+        print(f"stderr: {e.stderr}")
+        print(f"stdout: {e.stdout}")
+        return 'mounting failed'
+
+    
+    print(f"{INFO} Mounting disk in TPU {tpu} done")
+    print(f"{INFO} Checking environment in TPU {tpu}...")
+
+    print(f"{INFO} Setting wandb again to make sure it works...")
+    res = set_wandb(tpu)
+    if res != 'success':
+        print(f"{FAIL} mount_disk: setting wandb failed")
+        return 'wandb failed'
+
+    if 'v5p' in tpu:
+        print(f'skip checking env for v5p')
+        return 'success'
+    
     state = check_env(tpu)
 
     if state == 'success':
@@ -770,7 +933,7 @@ def test_remote(tpu):
         data = read_data()
         conda_env = data["conda_env_name"]
         data_root = "kmh-nfs-ssd-eu-mount" if 'eu' in zone else "kmh-nfs-ssd-us-mount"
-        conda_path = '/kmh-nfs-ssd-us-mount/code/eva/miniforge3/bin/python' if 'us-central2' in zone else 'python'
+        conda_path = '/kmh-nfs-ssd-us-mount/code/hanhong/miniforge3/bin/python' if 'us-central2' in zone else 'python'
         cmd = f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --project {PROJECT} --worker=all --command \"{conda_path} -c '{cmd}'\""
         # cmd = f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --worker=all --command \"python -c '{cmd}'\""
         try:
