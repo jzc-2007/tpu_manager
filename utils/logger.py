@@ -2,6 +2,7 @@ from .helpers import *
 from .constants import *
 from .data_io import read_and_lock_data, write_and_unlock_data, release_lock_data, read_data
 from .users import user_from_dict
+from .operate import mount_disk
 
 import os, yaml
 import gspread
@@ -186,6 +187,11 @@ def register_tpu_and_write_spreadsheet(full_name, zone, pre=False, spot = True, 
 def fang_new_tpu(new_tpu_name, old_tpu_alias):
     data = read_and_lock_data()
     try:
+        # first check if the new tpu name already exists
+        if new_tpu_name in data['tpu_aliases'].values():
+            # look for all aliases that map to new_tpu_name
+            all_aliases_for_new_name = [alias for alias, name in data['tpu_aliases'].items() if name == new_tpu_name]
+            raise ValueError(f"New TPU name {new_tpu_name} already exists, with aliases: {all_aliases_for_new_name}")
         if old_tpu_alias not in data['tpu_aliases']:
             raise ValueError(f"Old TPU alias {old_tpu_alias} not found")
         old_full_name = data['tpu_aliases'][old_tpu_alias]
@@ -213,6 +219,9 @@ def fang_new_tpu(new_tpu_name, old_tpu_alias):
         print(f"{FAIL} Failed to fang new TPU: {e}")
         release_lock_data()
 
+def fang_new_tpu_and_mount_disk(new_tpu_name, old_tpu_alias):
+    fang_new_tpu(new_tpu_name, old_tpu_alias)
+    mount_disk(new_tpu_name)
 
 def del_registered_tpu(alias):
     data = read_and_lock_data()

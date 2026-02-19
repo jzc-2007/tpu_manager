@@ -164,7 +164,7 @@ def read_tpu_info_from_type(args):
 def find_tpu_from_type(args):   
     """
     Find the TPU information from specific args, and display it.
-    Supported args: ['v<num>', 'v<num>-<num>', 'v*', 'v<num>+', '-p'/'-pre', '-n'/'-norm']
+    Supported args: ['v<num>', 'v<num>-<num>', 'v*', 'v<num>+', '-p'/'-pre', '-n'/'-norm', '-del'(show deleted)]
     Display Style: ['full', 'category', 'category_note'(default)]
     """
     style = None
@@ -173,6 +173,13 @@ def find_tpu_from_type(args):
             style = arg.split('=')[1]
             break
     information = read_tpu_info_from_type(args)
+    if '-del' not in args:
+        # Exclude deleted: running_status '没了!' or script_note not found/preempted
+        information = {
+            tpu: info for tpu, info in information.items()
+            if info.get('running_status') != '没了!'
+            and (info.get('script_note') or '').lower() not in ['not found', 'preempted']
+        }
     return display_tpu_information(information, style=style)
 
 def get_tpu_info_sheet(tpu):
@@ -243,6 +250,105 @@ def add_spreadsheet_notes(tpu, notes):
         print(f"{INFO} TPU {tpu} notes updated")
     else:
         print(f"{FAIL} TPU {tpu} not found in the sheet")
+
+def keng_tpu(args):
+    """
+    Show all deleted TPUs that start with 'v*-*-tmp*' pattern in the spreadsheet.
+    Can filter by zone (e.g., us-east5-a) or card type (e.g., v6, v6-32).
+    Note: v6e-32 is equivalent to v6-32, and v5p-32 is equivalent to v5-32.
+    Args: optional zone or card type filters
+    """
+    import re
+    
+    # Parse arguments for zone and card type filters
+    zone_filter = None
+    type_filter = None
+    
+    for arg in args:
+        # Check if it's a zone (contains dash and starts with known zone prefixes)
+        if '-' in arg and (arg.startswith('us-') or arg.startswith('asia-') or arg.startswith('europe-')):
+            zone_filter = arg
+        # Check if it's a card type (e.g., v6, v6-32, v5p-32, v6e-32)
+        elif arg.startswith('v') and re.match(r'v\d+(e|p)?(-\d+)?$', arg):
+            type_filter = arg
+    
+    # Normalize type filter (v6e-32 -> v6-32, v5p-32 -> v5-32)
+    if type_filter:
+        type_filter = re.sub(r'v(\d+)(e|p)(-\d+)?', r'v\1\3', type_filter)
+    
+    # Read all TPU information from spreadsheet
+    tpu_information = read_sheet_info()
+    
+    # Filter for deleted TPUs with tmp pattern
+    filtered_tpus = {}
+    # Updated pattern to match v5p-128-tmp, v6e-64-tmp, v6-32-tmp, etc.
+    tmp_pattern = re.compile(r'^v\d+(e|p)?-\d+-tmp', re.IGNORECASE)
+    
+    for tpu_name, info in tpu_information.items():
+        alias = info.get('alias', '')
+        
+        # Check if alias matches v*-*-tmp* pattern
+        if not tmp_pattern.match(alias):
+            continue
+        
+        # Check if TPU is deleted (script_note is 'not found' or 'preempted', OR running_status is '没了!')
+        script_note = info.get('script_note', '').lower()
+        running_status = info.get('running_status', '')
+        if not (script_note in ['not found', 'preempted'] or running_status == '没了!'):
+            continue
+        
+        # Apply zone filter if specified
+        if zone_filter and info.get('zone') != zone_filter:
+            continue
+        
+        # Apply type filter if specified
+        if type_filter:
+            # Extract type from alias (e.g., v6-32 from v6-32-tmp1, v6e-64 from v6e-64-tmp2)
+            alias_match = re.match(r'(v\d+(e|p)?-\d+)', alias, re.IGNORECASE)
+            if alias_match:
+                alias_type = alias_match.group(1)
+                # Normalize alias type (v6e-64 -> v6-64, v5p-32 -> v5-32)
+                alias_type = re.sub(r'v(\d+)(e|p)(-\d+)', r'v\1\3', alias_type)
+                
+                # Check if it matches the type filter
+                # type_filter can be 'v6' (matches v6-*) or 'v6-32' (exact match)
+                if type_filter.count('-') == 0:
+                    # Filter is like 'v6', match all v6-* types
+                    if not alias_type.startswith(type_filter):
+                        continue
+                else:
+                    # Filter is like 'v6-32', exact match
+                    if alias_type != type_filter:
+                        continue
+            else:
+                # Could not extract type from alias, skip
+                continue
+        
+        filtered_tpus[tpu_name] = info
+    
+    # Display the results
+    if not filtered_tpus:
+        print(f"{INFO} No deleted temporary TPUs found matching the criteria")
+        return
+    
+    print(f"{RED}Deleted Temporary TPUs{NC} (Total: {len(filtered_tpus)})")
+    print(f"{'Alias':<20} {'Zone':<20} {'User':<15} {'Note':<30}")
+    print("-" * 90)
+    
+    # Sort by alias
+    sorted_tpus = sorted(filtered_tpus.items(), key=lambda x: x[1]['alias'])
+    
+    for tpu_name, info in sorted_tpus:
+        alias = info.get('alias', 'N/A')
+        zone = info.get('zone', 'N/A')
+        user = info.get('user', 'N/A')
+        note = info.get('user_note', '')
+        
+        # Truncate note if too long
+        if len(note) > 30:
+            note = note[:27] + '...'
+        
+        print(f"{alias:<20} {zone:<20} {user:<15} {note:<30}")
 
 def get_tpu_usage_by_zone_and_type():
     """

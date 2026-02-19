@@ -24,7 +24,8 @@ import os, re, sys, json, time, shlex, subprocess, threading, uuid, shutil, html
 from types import SimpleNamespace
 from functools import lru_cache
 from typing import Any, Dict, List, Optional, Tuple
-from flask import Flask, jsonify, redirect, render_template_string, request, url_for, Response
+from flask import Flask, jsonify, redirect, render_template_string, request, url_for, Response, session
+from functools import wraps
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 TPU_PY_PATH = os.environ.get("TPU_PY_PATH", os.path.join(HERE, "tpu.py"))
@@ -120,11 +121,54 @@ def list_tmux_windows(session_name: str) -> List[Tuple[str, str]]:
 
 def tmux_capture(session: str, window_id: str, last_n: int = 2000) -> str:
     try:
+        # First, try to get the history limit for this pane
+        # Use -S - to capture from the start of history to current position
+        # -E - means to current position (end)
+        # This ensures we get all available history, not just visible area
+        # We also try to increase history limit if needed by using -S with a large negative number
+        # Calculate approximate line count needed (assuming ~80 chars per line)
+        if last_n > 0:
+            approx_lines = max(50000, (last_n // 80) + 1000)  # Add buffer
+        else:
+            approx_lines = 50000
+        
+        # Try to capture with explicit line range
+        # -S -<n> means start from n lines before current, -E - means end at current
+        # But we want from the very beginning, so use -S - (start of history)
         out = subprocess.check_output(
-            ["tmux", "capture-pane", "-t", f"{session}:{window_id}", "-p"],
+            ["tmux", "capture-pane", "-t", f"{session}:{window_id}", "-p", "-S", "-", "-E", "-"],
             text=True, stderr=subprocess.STDOUT
         )
         out = out.rstrip()
+        
+        # If we got content but it's shorter than expected and we need more,
+        # try to increase history limit temporarily
+        if last_n > 0 and len(out) < last_n:
+            # Try to get more by using a larger history buffer
+            # First check current history limit
+            try:
+                hist_limit_cmd = ["tmux", "show-options", "-t", f"{session}:{window_id}", "-wv", "history-limit"]
+                current_limit = subprocess.check_output(hist_limit_cmd, text=True, stderr=subprocess.STDOUT).strip()
+                current_limit_int = int(current_limit) if current_limit.isdigit() else 2000
+                
+                # If current limit is too small, try to increase it temporarily
+                if current_limit_int < approx_lines:
+                    try:
+                        subprocess.check_output(
+                            ["tmux", "set-option", "-t", f"{session}:{window_id}", "-w", "history-limit", str(approx_lines)],
+                            text=True, stderr=subprocess.STDOUT
+                        )
+                        # Retry capture
+                        out = subprocess.check_output(
+                            ["tmux", "capture-pane", "-t", f"{session}:{window_id}", "-p", "-S", "-", "-E", "-"],
+                            text=True, stderr=subprocess.STDOUT
+                        )
+                        out = out.rstrip()
+                    except Exception:
+                        pass  # If we can't increase limit, use what we have
+            except Exception:
+                pass  # If we can't check/change limit, use what we have
+        
         if last_n and len(out) > last_n:
             return out[-last_n:]
         return out
@@ -655,6 +699,105 @@ def fetch_tpu_sheet_rows() -> List[Dict[str, Any]]:
 
 # ---------- Flask ----------
 app = Flask(__name__)
+app.secret_key = os.environ.get('FLASK_SECRET_KEY', 'your-secret-key-change-this-in-production')
+
+# Import authentication functions
+try:
+    from utils import autenticate as auth_mod
+except Exception:
+    auth_mod = None
+
+def get_web_passwords():
+    """Get web passwords from passwords.json"""
+    if auth_mod and hasattr(auth_mod, 'get_web_passwords'):
+        return auth_mod.get_web_passwords()
+    passwords_file = os.path.join(HERE, 'passwords.json')
+    if not os.path.exists(passwords_file):
+        return {}
+    try:
+        with open(passwords_file, 'r') as f:
+            passwords = json.load(f)
+            return passwords if isinstance(passwords, dict) else {}
+    except Exception:
+        return {}
+
+def password_hash(password):
+    """Hash password using SHA256"""
+    import hashlib
+    return hashlib.sha256(password.encode()).hexdigest()
+
+def check_permission(required_permission=None, username=None):
+    """
+    Check if user has required permission.
+    - If required_permission is None, just check if logged in
+    - If required_permission is 'admin', check if user has 'admin' permission
+    - If required_permission is a username, check if user has that username permission
+    - username parameter is for checking access to specific user's data
+    """
+    if 'permissions' not in session:
+        return False
+    
+    permissions = session['permissions']
+    
+    # Admin has all access
+    if 'admin' in permissions:
+        return True
+    
+    # If checking for specific username access
+    if username:
+        return username in permissions
+    
+    # If checking for specific permission
+    if required_permission:
+        return required_permission in permissions
+    
+    # Just check if logged in
+    return True
+
+def require_auth(f):
+    """Decorator to require authentication"""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if 'permissions' not in session:
+            return redirect(url_for('login', next=request.url))
+        return f(*args, **kwargs)
+    return decorated_function
+
+def require_permission(permission=None):
+    """Decorator factory to require specific permission"""
+    def decorator(f):
+        @wraps(f)
+        def decorated_function(*args, **kwargs):
+            if 'permissions' not in session:
+                return redirect(url_for('login', next=request.url))
+            
+            # Check permission
+            if permission == 'admin':
+                if 'admin' not in session['permissions']:
+                    return render_template_string(
+                        '<html><body style="padding:24px;font-family:sans-serif;">'
+                        '<h2>Access Denied</h2><p>Admin permission required.</p>'
+                        '<a href="/">Go back</a></body></html>'
+                    ), 403
+            elif permission and permission not in session['permissions']:
+                return render_template_string(
+                    '<html><body style="padding:24px;font-family:sans-serif;">'
+                    '<h2>Access Denied</h2><p>Insufficient permissions.</p>'
+                    '<a href="/">Go back</a></body></html>'
+                ), 403
+            
+            return f(*args, **kwargs)
+        return decorated_function
+    return decorator
+
+def check_user_access(username: str):
+    """Check if current user can access the given username"""
+    if 'permissions' not in session:
+        return False
+    permissions = session['permissions']
+    if 'admin' in permissions:
+        return True
+    return username in permissions
 
 BASE_HTML = r"""
 <!doctype html>
@@ -2177,7 +2320,8 @@ const TOTAL_CAPACITY = {
   'v5': 1024,
   'v6': 1536,
   // Zone-specific capacities
-  'v5-us-central1-a': 1184,
+  'v5-us-central1-a': 2208,
+  'v6-us-central1-b': 2500,
   'v6-us-east1-d': 64,
   'v4-us-central2-b': 120,
   'v6-europe-west4-a': 64,
@@ -2991,11 +3135,143 @@ window.addEventListener('load', () => loadPanel(true)); // Force initial load
 </html>
 """
 
+# Login page
+LOGIN_HTML = """
+<!doctype html>
+<html lang="zh">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>Login - TPU Manager</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+        }
+        .login-container {
+            background: white;
+            padding: 40px;
+            border-radius: 12px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+            width: 100%;
+            max-width: 400px;
+        }
+        h1 {
+            margin: 0 0 30px 0;
+            color: #333;
+            text-align: center;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            margin-bottom: 8px;
+            color: #555;
+            font-weight: 500;
+        }
+        input[type="password"] {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 6px;
+            font-size: 16px;
+            box-sizing: border-box;
+            transition: border-color 0.3s;
+        }
+        input[type="password"]:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        button {
+            width: 100%;
+            padding: 12px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+        button:hover {
+            background: #5568d3;
+        }
+        .error {
+            color: #e74c3c;
+            margin-top: 10px;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div class="login-container">
+        <h1>TPU Manager</h1>
+        <form method="POST" action="{{ url_for('login') }}">
+            <input type="hidden" name="next" value="{{ request.args.get('next', '') }}">
+            <div class="form-group">
+                <label for="password">Password</label>
+                <input type="password" id="password" name="password" required autofocus>
+            </div>
+            {% if error %}
+            <div class="error">{{ error }}</div>
+            {% endif %}
+            <button type="submit">Login</button>
+        </form>
+    </div>
+</body>
+</html>
+"""
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if request.method == "POST":
+        password = request.form.get('password', '')
+        if not password:
+            return render_template_string(LOGIN_HTML, error="Password is required")
+        
+        passwords = get_web_passwords()
+        password_hash_hex = password_hash(password)
+        
+        if password_hash_hex in passwords:
+            session['permissions'] = passwords[password_hash_hex]
+            session['logged_in'] = True
+            next_url = request.form.get('next') or request.args.get('next') or url_for('index')
+            return redirect(next_url)
+        else:
+            return render_template_string(LOGIN_HTML, error="Invalid password")
+    
+    return render_template_string(LOGIN_HTML)
+
+@app.route("/logout")
+def logout():
+    session.clear()
+    return redirect(url_for('login'))
+
 @app.route("/")
+@require_auth
 def index():
     users = list_all_users()
     if not users:
         return render_template_string("<p style='padding:24px'>没在 data.json 里找到任何用户。</p>")
+    
+    # If user has specific username permissions, filter users
+    if 'admin' not in session.get('permissions', []):
+        user_permissions = session.get('permissions', [])
+        users = [u for u in users if u in user_permissions]
+        if not users:
+            return render_template_string(
+                '<html><body style="padding:24px;font-family:sans-serif;">'
+                '<h2>No Access</h2><p>You do not have permission to access any users.</p>'
+                '<a href="/logout">Logout</a></body></html>'
+            )
+    
     return redirect(url_for("user_page", username=users[0]))
 
 @app.route("/user/<username>")
@@ -3007,16 +3283,33 @@ def user_page(username: str):
 
 # TPU 面板
 @app.route("/tpus")
+@require_auth
 def tpu_panel():
+    # Check if user has 'tpus' permission or is admin
+    permissions = session.get('permissions', [])
+    if 'admin' not in permissions and 'tpus' not in permissions:
+        # Check if any username permission exists (users with username permission can access TPU panel)
+        if not any(p in list_all_users() for p in permissions):
+            return render_template_string(
+                '<html><body style="padding:24px;font-family:sans-serif;">'
+                '<h2>Access Denied</h2><p>TPU panel access requires "tpus" permission or username permission.</p>'
+                '<a href="/">Go back</a></body></html>'
+            ), 403
     return render_template_string(TPU_PANEL_HTML)
 
 # -------- APIs --------
 @app.route("/api/user/<username>/jobs")
+@require_auth
 def api_jobs(username: str):
+    if not check_user_access(username):
+        return jsonify({"ok": False, "error": "Access denied"}), 403
     return jsonify(build_job_rows(username))
 
 @app.route("/api/user/<username>/pending-operations")
+@require_auth
 def api_pending_operations(username: str):
+    if not check_user_access(username):
+        return jsonify({"ok": False, "error": "Access denied"}), 403
     """Get pending operations for a user"""
     with OP_LOCK:
         pending_ops = []
@@ -3036,13 +3329,19 @@ def api_pending_operations(username: str):
         return jsonify({"ok": True, "operations": pending_ops})
 
 @app.route("/api/user/<username>/clean", methods=["POST"])
+@require_auth
 def api_clean(username: str):
+    if not check_user_access(username):
+        return jsonify({"ok": False, "msg": "Access denied"}), 403
     re_flag = request.args.get("re", "0") in ("1", "true", "True", "yes")
     ok, msg = action_clean(username, re_flag=re_flag)
     return jsonify({"ok": ok, "msg": msg})
 
 @app.route("/api/user/<username>/resume-async", methods=["POST"])
+@require_auth
 def api_resume_async(username: str):
+    if not check_user_access(username):
+        return jsonify({"ok": False, "msg": "Access denied"}), 403
     payload = request.get_json(silent=True) or {}
     win = str(payload.get("window_id","")).strip()
     tpu = payload.get("tpu", None)
@@ -3052,7 +3351,10 @@ def api_resume_async(username: str):
     return jsonify({"ok": True, "tid": tid})
 
 @app.route("/api/user/<username>/rerun-async", methods=["POST"])
+@require_auth
 def api_rerun_async(username: str):
+    if not check_user_access(username):
+        return jsonify({"ok": False, "msg": "Access denied"}), 403
     payload = request.get_json(silent=True) or {}
     win = str(payload.get("window_id","")).strip()
     tpu = payload.get("tpu", None)
@@ -3062,7 +3364,10 @@ def api_rerun_async(username: str):
     return jsonify({"ok": True, "tid": tid})
 
 @app.route("/api/user/<username>/kill-async", methods=["POST"])
+@require_auth
 def api_kill_async(username: str):
+    if not check_user_access(username):
+        return jsonify({"ok": False, "msg": "Access denied"}), 403
     payload = request.get_json(silent=True) or {}
     win = str(payload.get("window_id","")).strip()
     if not win: return jsonify({"ok": False, "msg": "缺少 window_id"})
@@ -3071,6 +3376,7 @@ def api_kill_async(username: str):
     return jsonify({"ok": True, "tid": tid})
 
 @app.route("/api/op/<tid>")
+@require_auth
 def op_status(tid: str):
     with OP_LOCK:
         item = OP_TASKS.get(tid)
@@ -3083,6 +3389,7 @@ def op_status(tid: str):
         })
 
 @app.route("/api/tpus")
+@require_auth
 def api_list_tpus():
     try:
         rows = fetch_tpu_sheet_rows()
@@ -3091,6 +3398,7 @@ def api_list_tpus():
     return jsonify({"ok": True, "rows": rows})
 
 @app.route("/api/tpu-gcloud-counts")
+@require_auth
 def api_tpu_gcloud_counts():
     """Get TPU counts from spreadsheet K and L columns, aggregated by zone and type"""
     try:
@@ -3107,6 +3415,7 @@ def api_tpu_gcloud_counts():
         return jsonify({"ok": False, "msg": str(e), "counts": {}})
 
 @app.route("/api/tpu/<alias>/ongoing-operations")
+@require_auth
 def api_tpu_ongoing_operations(alias: str):
     """Get ongoing apply/reapply operations for a specific TPU"""
     with OP_LOCK:
@@ -3124,6 +3433,7 @@ def api_tpu_ongoing_operations(alias: str):
         return jsonify({"ok": True, "operations": ongoing_ops})
 
 @app.route("/api/all-ongoing-operations")
+@require_auth
 def api_all_ongoing_operations():
     """Get all ongoing apply/reapply operations for all TPUs (optimization: single call instead of N calls)"""
     with OP_LOCK:
@@ -3144,6 +3454,7 @@ def api_all_ongoing_operations():
         return jsonify({"ok": True, "operations": all_ops})
 
 @app.route("/api/ongoing-apply-run-operations")
+@require_auth
 def api_ongoing_apply_run_operations():
     """Get all ongoing apply+run operations"""
     with OP_LOCK:
@@ -3162,6 +3473,7 @@ def api_ongoing_apply_run_operations():
         return jsonify({"ok": True, "operations": ongoing_ops})
 
 @app.route("/api/tpu/apply-async", methods=["POST"])
+@require_auth
 def api_apply_async():
     p = request.get_json(silent=True) or {}
     alias = str(p.get("alias","")).strip()
@@ -3174,6 +3486,7 @@ def api_apply_async():
     return jsonify({"ok": True, "tid": tid})
 
 @app.route("/api/tpu/reapply-async", methods=["POST"])
+@require_auth
 def api_reapply_async():
     p = request.get_json(silent=True) or {}
     alias = str(p.get("alias","")).strip()
@@ -3187,7 +3500,10 @@ def api_reapply_async():
 
 # 申请并 Resume/Rerun
 @app.route("/api/user/<username>/apply-resume-async", methods=["POST"])
+@require_auth
 def api_apply_resume_async(username: str):
+    if not check_user_access(username):
+        return jsonify({"ok": False, "msg": "Access denied"}), 403
     p = request.get_json(silent=True) or {}
     alias = str(p.get("alias","")).strip()
     win = str(p.get("window_id","")).strip()
@@ -3198,7 +3514,10 @@ def api_apply_resume_async(username: str):
     return jsonify({"ok": True, "tid": tid})
 
 @app.route("/api/user/<username>/apply-rerun-async", methods=["POST"])
+@require_auth
 def api_apply_rerun_async(username: str):
+    if not check_user_access(username):
+        return jsonify({"ok": False, "msg": "Access denied"}), 403
     p = request.get_json(silent=True) or {}
     alias = str(p.get("alias","")).strip()
     win = str(p.get("window_id","")).strip()
@@ -3210,7 +3529,10 @@ def api_apply_rerun_async(username: str):
 
 # 重新申请并 Resume/Rerun
 @app.route("/api/user/<username>/reapply-resume-async", methods=["POST"])
+@require_auth
 def api_reapply_resume_async(username: str):
+    if not check_user_access(username):
+        return jsonify({"ok": False, "msg": "Access denied"}), 403
     p = request.get_json(silent=True) or {}
     alias = str(p.get("alias","")).strip()
     win = str(p.get("window_id","")).strip()
@@ -3221,7 +3543,10 @@ def api_reapply_resume_async(username: str):
     return jsonify({"ok": True, "tid": tid})
 
 @app.route("/api/user/<username>/reapply-rerun-async", methods=["POST"])
+@require_auth
 def api_reapply_rerun_async(username: str):
+    if not check_user_access(username):
+        return jsonify({"ok": False, "msg": "Access denied"}), 403
     p = request.get_json(silent=True) or {}
     alias = str(p.get("alias","")).strip()
     win = str(p.get("window_id","")).strip()
@@ -3233,6 +3558,7 @@ def api_reapply_rerun_async(username: str):
 
 # -------- Run Modal APIs --------
 @app.route("/api/user/<username>/dirs")
+@require_auth
 def api_user_dirs(username: str):
     """Get directories for a user (like tpu ls <user>)"""
     try:
@@ -3259,6 +3585,7 @@ def api_user_dirs(username: str):
         return jsonify({"ok": False, "msg": str(e), "dirs": []})
 
 @app.route("/api/tpu-types")
+@require_auth
 def api_tpu_types():
     """Get available TPU types"""
     try:
@@ -3281,6 +3608,7 @@ def api_tpu_types():
         return jsonify({"ok": False, "msg": str(e), "types": []})
 
 @app.route("/api/tpus/<tpu_type>")
+@require_auth
 def api_tpus_by_type(tpu_type: str):
     """Get TPUs of a specific type, including all TPUs (running/reserved/free)"""
     try:
@@ -3299,7 +3627,10 @@ def api_tpus_by_type(tpu_type: str):
         return jsonify({"ok": False, "msg": str(e), "tpus": []})
 
 @app.route("/api/user/<username>/run-async", methods=["POST"])
+@require_auth
 def api_run_async(username: str):
+    if not check_user_access(username):
+        return jsonify({"ok": False, "msg": "Access denied"}), 403
     """Run a job on a TPU"""
     p = request.get_json(silent=True) or {}
     dir_path = str(p.get("dir", "")).strip()
@@ -3313,7 +3644,10 @@ def api_run_async(username: str):
     return jsonify({"ok": True, "tid": tid})
 
 @app.route("/api/user/<username>/apply-run-async", methods=["POST"])
+@require_auth
 def api_apply_run_async(username: str):
+    if not check_user_access(username):
+        return jsonify({"ok": False, "msg": "Access denied"}), 403
     """Apply for a TPU and then run a job on it"""
     p = request.get_json(silent=True) or {}
     dir_path = str(p.get("dir", "")).strip()
@@ -3407,7 +3741,14 @@ import re
 ANSI_RE = re.compile(r'\x1B\[[0-?]*[ -/]*[@-~]')
 # -------- Log 页面（安全转义 + 长度限制 + 去色/跟随/自动刷新） --------
 @app.route("/log/<username>/<window_id>")
+@require_auth
 def view_log(username: str, window_id: str):
+    if not check_user_access(username):
+        return render_template_string(
+            '<html><body style="padding:24px;font-family:sans-serif;">'
+            '<h2>Access Denied</h2><p>You do not have permission to view logs for user "{username}".</p>'
+            '<a href="/">Go back</a></body></html>'.format(username=username)
+        ), 403
     # --- 参数与边界 ---
     raw_n = request.args.get("n", "500000")
     try:

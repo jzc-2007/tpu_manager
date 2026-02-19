@@ -178,7 +178,7 @@ e.g. `tpu run v2-32-6 dir=2 tag=baseline lr=3e-4 rule=resume xibo`
 e.g. `tpu run v2-32 --auto xibo`
 - `tpu monitor/check-simp <username>`: Continuously(one-time) monitor jobs for a user.
 - `tpu clean <username>`: Clear finished + error jobs.
-- `tpu find <tpu_type>`: Find available TPUs of a given type.
+- `tpu find <tpu_type>`: Find available TPUs of a given type (add `-del` to include deleted/preempted). Zone shown in [].
 {YELLOW}== Directory Management =={NC}
 - `tpu ls <username>`: List all working directories.
 - `tpu set-cur <n> <username>`: Set current working directory (pwd) to slot `<n>`.
@@ -239,7 +239,7 @@ tpu run v2-32-p1 lyy dir=2 tag=bird  # run in dir 2 with tag
 - Provision: `tpu apply/reapply <tpu>`.
 - Inspect: `tpu describe <tpu>`  |  Status: `tpu check-status <tpu>`.
 - Fix common mount/wandb issues: `tpu solve <tpu>` (community‑extendable).
-- Read Spredsheet to find available TPUs: `tpu find [types]`
+- Read Spredsheet to find available TPUs: `tpu find [types]` (use `-del` to show deleted/preempted; zone in []).
 
 {YELLOW}== Config Aliases & Tags=={NC}
 - Add alias: `tpu -a <alias> <full_config_key> <username>`.

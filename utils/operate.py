@@ -75,7 +75,7 @@ def kill_jobs_tpu(tpu, username = None, ignore_window = None):
 
         if not lines:
             print(f"{INFO} No main.py processes found.")
-            return 'success'
+            # return 'success'
 
         pids = set()
 
@@ -88,7 +88,7 @@ def kill_jobs_tpu(tpu, username = None, ignore_window = None):
 
         if not pids:
             print(f"{INFO} No processes to kill.")
-            return 'success'
+            # return 'success'
 
         pid_list = " ".join(pids)
         print(f"{INFO} Killing PIDs: {pid_list}")
@@ -367,7 +367,7 @@ def delete_tpu(tpu):
         print(f"{FAIL} delete_tpu: TPU deletion failed: {e}")
         return 'delete failed'
     return 'success'
-    
+
 def check_tpu_status(tpu, quiet = False):
     """
     Check whether a TPU is preempted or not.
@@ -514,17 +514,7 @@ def check_env(tpu, quiet = False, recurse=0):
     """
     zone, pre, spot, tpu = get_zone_pre_spot(tpu)
     if zone is None: return 'no tpu found'
-
-    # if 'v5' in tpu:
-    #     if not quiet:
-    #         print(f"{INFO} check_env: TPU {tpu} is v5, skipping environment check.")
-    #     return 'success'
     
-    data = read_data()
-    # conda_env = data["conda_env_name"]
-    data_root = "kmh-nfs-ssd-us-mount"
-
-    # conda_path = 'python' if 'v6' in tpu else '/kmh-nfs-ssd-us-mount/code/hanhong/miniforge3/bin/python'
     conda_path = '/kmh-nfs-ssd-us-mount/code/hanhong/miniforge3/bin/python' if 'us-central2' in zone else 'python'
 
     cmd = f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --project {PROJECT} --worker=all --command \"{conda_path} -c 'import jax; print(jax.devices())'\""
@@ -538,10 +528,12 @@ def check_env(tpu, quiet = False, recurse=0):
     except subprocess.CalledProcessError:
         if not quiet:
             print(f"{FAIL} check_env: Failed to query TPU {tpu} state")
+            print(f"{YELLOW}stdout:{NC} {stderr}")
         return 'failed'
     except subprocess.TimeoutExpired:
         if not quiet:
             print(f"{FAIL} check_env: Checking {tpu}: Timeout expired")
+            print(f"{YELLOW}stdout:{NC} {stderr}")
         return 'timeout'
 
     if 'No such file or directory' in stderr:
@@ -592,6 +584,29 @@ def check_env(tpu, quiet = False, recurse=0):
     print(f"{GOOD} check_remote_env: TPU {tpu} is good!")
     return 'success'
 
+def sqa_new_env(tpu):
+    """
+    Mount the disk and setup remote wandb.
+    """
+    zone, pre, spot, tpu = get_zone_pre_spot(tpu)
+
+    if zone is None: return
+    print(f"{INFO} running command 新 in TPU {tpu}...")
+    cmd1 = f'gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --project {PROJECT} --worker=all --command "source /kmh-nfs-ssd-us-mount/code/zhichengjiang/working/xibo_tpu_manager/新.sh"'
+
+    try:
+        p = subprocess.run(cmd1, shell=True, timeout=600, check=True)
+    except subprocess.TimeoutExpired:
+        print(f"{FAIL} sqa_new_env: running command 新 timed out")
+        return 'running command 新 timeout'
+    except subprocess.CalledProcessError as e:
+        print(f"{FAIL} sqa_new_env: {e}")
+        print(f"stderr: {e.stderr}")
+        print(f"stdout: {e.stdout}")
+        return 'running command 新 failed'
+    
+    print(f"{GOOD} sqa_new_env: running command 新 done")
+    return 'success'
 
 def mount_disk(tpu, quiet = False):
     """
@@ -600,7 +615,7 @@ def mount_disk(tpu, quiet = False):
     zone, pre, spot, tpu = get_zone_pre_spot(tpu)
 
     if 'v5p' in tpu: # use mount disk new
-        return mount_disk_new(tpu, quiet=quiet)
+        return mount_disk_v5(tpu, quiet=quiet)
 
     if zone is None: return
     print(f"{INFO} Mounting disk in TPU {tpu}...")

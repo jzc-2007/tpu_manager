@@ -15,3 +15,10 @@ gcloud compute tpus tpu-vm create kmh-tpuvm-v6e-32-501 \
     --accelerator-type=v6e-32 \
     --version=v2-alpha-tpuv6e \
     --project=he-vision-group
+
+"v6-32-east5b-1": "free",
+"v6-32-east5b-2": "free",
+"v6-64-east5b-1": "free",
+"v6-64-east5b-2": "free",
+"v6-128-east5b-1": "free",
+"v6-128-east5b-2": "free"

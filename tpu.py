@@ -86,10 +86,19 @@ if __name__ == '__main__':
         elif cmd == 'check-env': operate.check_env(args[2])
         elif cmd == 'list-users' or cmd == '-lu': users.list_users()
         elif cmd == 'init': handler.initialization()
+        elif cmd == 'register-web': 
+            password = input('Enter password: ')
+            permissions_input = input('Enter permissions (comma-separated, e.g., "admin" or "bird,tpus"): ')
+            permissions = [p.strip() for p in permissions_input.split(',') if p.strip()]
+            if not permissions:
+                print(f"{FAIL} At least one permission is required.")
+            else:
+                autenticate.register_web(password, permissions)
 
         # ------------ Job related ------------
         elif cmd == 'ssn': sheet.set_spreadsheet_notes(args[2], args[3])
         elif cmd == 'asn': sheet.add_spreadsheet_notes(args[2], args[3])
+        elif cmd == 'keng': sheet.keng_tpu(args[2:])
 
         # ------------ Error Handling ------------
         elif cmd == 'change-ip': handler.change_ip()
@@ -116,6 +125,7 @@ if __name__ == '__main__':
         elif cmd == 'apply-norm': operate.apply_and_set_env(args[2], preemptible=False, delete=False)
         elif cmd == 'reapply-norm': operate.apply_and_set_env(args[2], preemptible=False, delete=True)
         elif cmd == 'mount-disk': operate.mount_disk(args[2])
+        elif cmd == 'mount-disk-new': operate.sqa_new_env(args[2])
         elif cmd == 'set-wandb': operate.set_wandb(args[2])
         elif cmd == 'kill-remote': operate.kill_jobs_tpu(args[2])
         elif cmd == 'find': sheet.find_tpu_from_type(args[2:])
@@ -136,7 +146,7 @@ if __name__ == '__main__':
 
         # ------------ Scripts Acknowledgment ------------
         elif cmd == 'upd-log': jobs.upd_log(args[2], args[3], args[4], args[5], args[6]) #windows, log_dir, stage_dir, ka, time
-        elif cmd =='upd-staging-info': queue.upd_staging_info(args[2], args[3], args[4])
+        elif cmd == 'upd-staging-info': queue.upd_staging_info(args[2], args[3], args[4])
         elif cmd == 'finish-job': queue.finish_job(args[2])
         elif cmd == 'fail-job': queue.fail_job(args[2])
         elif cmd == 'ack': jobs.ack_MONITOR()
@@ -154,6 +164,8 @@ if __name__ == '__main__':
         elif cmd == 'twsi': unit_tests.test_write_sheet_info(args[2])
         elif cmd == 'cc': gs_buckets.copy_checkpoint(args[2], args[3], src_zone=args[4]) if len(args) == 5 else gs_buckets.copy_checkpoint(args[2], args[3]) # copy checkpoint
         elif cmd == 'cca': gs_buckets.copy_checkpoint(args[2], args[3], src_zone=args[4], all=True) if len(args) == 5 else gs_buckets.copy_checkpoint(args[2], args[3], all=True) # copy checkpoint
+        elif cmd == 'fang': logger.fang_new_tpu(args[2], args[3])
+        elif cmd == 'fmd': logger.fang_new_tpu_and_mount_disk(args[2], args[3])
 
         else: 
         ############### JOBS that require a user ###############

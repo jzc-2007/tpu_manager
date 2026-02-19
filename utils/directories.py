@@ -40,6 +40,14 @@ def get_job_config(user_obj, job_id, config_path = '/configs/remote_run_config.y
         config_file = os.path.join(stage_dir, config_path.lstrip('/'))
         print(f"Looking for config file at {config_file}")
         if not os.path.exists(config_file):
+            # check if it is yaml instead of yml
+            config_path_modified = config_path.replace('.yml', '.yaml')
+            config_file_modified = os.path.join(stage_dir, config_path_modified.lstrip('/'))
+            if not os.path.exists(config_file_modified):
+                raise ValueError(f"Config file {config_file_modified} does not exist")
+            config_file = config_file_modified
+        else:
+            config_file = config_file
             raise ValueError(f"Config file {config_file} does not exist")
         with open(config_file, 'r') as f:
             if config_file.endswith('.json'):

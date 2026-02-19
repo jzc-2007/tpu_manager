@@ -1,4 +1,4 @@
-import os, re, time, json, copy
+import os, re, time, json, copy, subprocess
 from .helpers import *
 from .constants import *
 from . import users
@@ -470,7 +470,8 @@ def resume_rerun_job(job, new_tpu = None, load_ckpt = True):
         user_obj = users.user_from_dict(user)
         new_stage = int(job['stage']) + 1 if load_ckpt else 0
         print(f"{INFO} {operation}_job: {operationing} job {job['windows_id']} for user {user_obj.name} with new stage {new_stage}")
-        if new_stage > 12:
+        if new_stage > 2147483647:
+        # if new_stage > 12:
             print(f"{FAIL} {operation}_job: job {job['windows_id']} for user {user_obj.name} has reached max stage, cannot {operation}")
             release_lock_data()
             return
@@ -857,7 +858,8 @@ def run(user_obj, args, monitor_job = True):
 
     # Check the status of the TPU, and reapply if needed
     if tpu is not None:
-        print(f"{INFO} Checking the status of TPU {tpu}...")
+        zone, _, _, _ = get_zone_pre_spot(tpu)
+        print(f"{INFO} Checking the status of TPU {tpu} in zone {zone}...")
         tpu_status = check_tpu_status(tpu)
 
         if tpu_status == 'preempted':
@@ -986,6 +988,22 @@ def run(user_obj, args, monitor_job = True):
         
     try:
         kill_jobs_tpu(tpu)
+
+        # # conduct 新
+        # # condition: there exists 新.sh in the directory and the tpu has not 新 (by checking whether there is a file named ~/sqa冲 on the remote VM)
+        # if os.path.exists(f"{dir_path}/新.sh"):
+        #     # ssh on the remote VM and check whether there is a file named ~/sqa冲
+        #     ssh_cmd = f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --project {PROJECT} --worker=all --command \"if [ -f ~/sqa冲 ]; then echo 'exists'; else echo 'not exists'; fi\""
+        #     result = subprocess.run(ssh_cmd, shell=True, timeout=30, check=False,
+        #                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        #     if result.returncode == 0:
+        #         if result.stdout.strip() == 'not exists':
+        #             print(f"{INFO} run: TPU {tpu} does not have 新, conducting 新...")
+        #             os.system(f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --project {PROJECT} --worker=all --command \"cd {dir_path} && source 新.sh\"")
+        #             print(f"{GOOD} run: Conducting 新 successfully on TPU {tpu}")
+        #     else:
+        #         raise RuntimeError(f"Failed to check whether TPU {tpu} has 新")
+        
         data = read_and_lock_data()
 
         session_name = user_obj.tmux_name
@@ -1148,6 +1166,16 @@ def check_jobs(user_obj, args, config = None):
     if '-nt' in args:
         config += 'T'
 
+    if '--zone' in args or '-z' in args:
+        config += 'z'
+        
+    if '-c' in args:
+        config += 'c'
+        
+    if '-nf' in args:
+        config += '纳'
+    
+
     session_name = user_obj.tmux_name
     windows = os.popen(f"tmux list-windows -t {session_name}").read().splitlines()
     for window in windows:
@@ -1164,6 +1192,12 @@ def check_jobs(user_obj, args, config = None):
                 print('-'*40)
             continue
         else:
+            
+            # if 'c' mode, and config has child window id, skip this window
+            if 'c' in config:
+                if job_data["status"] == 'resumed' or job_data["status"] == 'rerunned':
+                    continue
+            
             father_job = None
             try:
                 father_job = job_data['extra_msgs']['father']
@@ -1197,7 +1231,10 @@ def check_jobs(user_obj, args, config = None):
                 print(f"DIR: {job_data['job_dir'].split('/')[-1]}")
             if 't' in config:
                 print(f"TPU: {job_data['tpu'][10:]}")
-        last_line = os.popen(f"tmux capture-pane -t {session_name}:{window_id} -p").read()
+            if 'z' in config:
+                zone, _, _, _ = get_zone_pre_spot(job_data['tpu'])
+                print(f"ZONE: {zone}")
+        last_line = os.popen(f"tmux capture-pane -t {session_name}:{window_id} -p -S -").read()
         last_line = last_line.rstrip()
         show_length = user_obj.settings['show_length']
         monitor_length = user_obj.settings['monitor_length']
@@ -1231,12 +1268,18 @@ def check_jobs(user_obj, args, config = None):
                 print('-'*40)
                 continue
             elif job_data["status"] == 'finished':
-                print(f"Status: {GREEN}Finished{NC}")
+                print(f"Status: {GREEN}Finished{NC}") if '纳' not in config else (
+                    print(f"Status: {RED}Finished{NC}") if '320' not in job_data['job_tags'] and '[eval]' not in job_data['job_tags'] else print(f"Status: {GREEN}Finished{NC}")
+                )
                 if 'v' in config: print(f"msg: {msg}")
                 print('-'*40)
                 continue
             elif job_data["status"] == 'running' or job_data["status"] == 'starting':
-                exclude_ = ["AttributeError: 'MessageFactory' object has no attribute 'GetPrototype'"]
+                exclude_ = [
+                    "AttributeError: 'MessageFactory' object has no attribute 'GetPrototype'",
+                    "ERROR: pip's dependency",
+                    "lead to an error eventually; if no error is raised",
+                ]
                 # if detect something in exclude_, delete it. do this recursively
                 while True:
                     found = False
@@ -1301,7 +1344,9 @@ def check_jobs(user_obj, args, config = None):
                     print(f"Status: {GREEN}Initializing{NC}")
                     if 'v' in config: print(f"msg: {msg}")
                 elif re.search(r'[sS]taging', last_line_cut) and 's' in config:
-                    print(f"Status: {GREEN}Staging{NC}")
+                    # if '纳' in config:
+                        # raise MAX_LEGACY_LENGTH
+                    print(f"Status: {GREEN}Staging{NC}") if '纳' not in config else print(f"Status: {RED}Staging{NC}")
                     if 'v' in config: print(f"msg: {msg}")
                 elif 's' in config:
                     print(f"Status: {YELLOW}Unknown{NC}\nmsg: {msg}")
@@ -1329,6 +1374,8 @@ def check_jobs_simp(user_obj, args, config = None, num_columns = 3):
         config = 'wst'
     if '-nt' in args:
         config += 'T'
+    if '--zone' in args or '-z' in args:
+        config += 'z'
 
     session_name = user_obj.tmux_name
     job_blocks = []
@@ -1383,9 +1430,15 @@ def check_jobs_simp(user_obj, args, config = None, num_columns = 3):
                 rows_meta.append(("TPU", job_data['tpu'][10:]))
             except Exception:
                 rows_meta.append(("TPU", "(unknown)"))
+        if 'z' in config:
+            zone, _, _, _ = get_zone_pre_spot(job_data['tpu'])
+            try:
+                rows_meta.append(("ZONE", zone))
+            except Exception:
+                rows_meta.append(("ZONE", "(unknown)"))
 
         # ---------- Capture pane & compute msg ----------
-        last_line = os.popen(f"tmux capture-pane -t {session_name}:{window_id} -p").read().rstrip()
+        last_line = os.popen(f"tmux capture-pane -t {session_name}:{window_id} -p -S -").read().rstrip()
         show_length = user_obj.settings['show_length']
         monitor_length = user_obj.settings['monitor_length']
         monitor_verbose = user_obj.settings['monitor_verbose']  # kept for parity; not directly used here
