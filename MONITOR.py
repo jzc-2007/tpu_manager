@@ -382,11 +382,13 @@ def mainloop():
                 new_tpu_name = _pick_idle_tpu(idle_tpus, target_type, target_zone)
                 if not new_tpu_name:
                     add_MONITOR_log(f'{WARNING} 我找不到可用的 IDLE 卡, 型号是 {target_type}, 所在区域是 {target_zone}\n')
+                    remove_sqa(_window)
                     continue
 
                 new_alias = _pick_new_alias(target_type, target_zone)
                 if not new_alias:
                     add_MONITOR_log(f'{WARNING} 我找不到可用的 alias, 型号是 {target_type}, 跳过这个老登\n')
+                    remove_sqa(_window)
                     continue
                 
                 add_MONITOR_log(f'我找到了可用的 alias: {new_alias}, 和卡: {new_tpu_name}\n')
@@ -402,6 +404,7 @@ def mainloop():
                 _append_resume_file_log(_window, "ftmd", fmd_cmd, fmd_result)
                 if fmd_result.returncode != 0:
                     add_MONITOR_log(f'{FAIL} fmd failed, skip resume for window {_window}\n')
+                    remove_sqa(_window)
                     continue
                 add_MONITOR_log(f'放完了，哈哈')
 
@@ -417,6 +420,7 @@ def mainloop():
                 _append_resume_file_log(_window, "resume", resume_cmd, resume_result)
                 if resume_result.returncode != 0:
                     add_MONITOR_log(f'{FAIL} resume failed, skip finish for window {_window}\n')
+                    remove_sqa(_window)
                     continue
                 add_MONITOR_log(f'resume 上了，siuuuuuuuuuuuuuuu')
                 remove_sqa(_window)
