@@ -38,7 +38,6 @@ def write_sqa(window_id):
 def remove_sqa(window_id):
     x = read_sqa()
     x['running'].remove(window_id)
-    x['finished'].append(window_id)
     with open(f'/kmh-nfs-ssd-us-mount/code/qiao/work/tpu_manager/sqa.json', 'w') as file:
         # write as json
         json.dump(x, file)
@@ -104,7 +103,10 @@ def avilable_aliases(tpu_type: str, zone):
     if zone.startswith('us-central1'):
         return [tpu_type + '-tmp' + str(i) for i in range(2, 9)]
     elif zone.startswith('us-east5'):
-        return [tpu_type + '-tmp' + str(i) for i in range(201, 209)]
+        if tpu_type.startswith('v5p'):
+            return [tpu_type + '-tmp' + str(i) for i in range(201, 209)]
+        if tpu_type.startswith('v6e'):
+            return [tpu_type + '-tmp' + str(i) for i in range(51, 59)]
     else:
         raise ValueError(f"Invalid zone: {zone}")
 
@@ -187,6 +189,10 @@ def _parse_idle_tpus_from_tou(stdout):
 def _pick_idle_tpu(idle_tpus, target_type, target_zone):
     for tpu_name, zone in idle_tpus:
         tpu_type = _extract_tpu_type(tpu_name)
+        # check if this tpu is in the data.json
+        data = data_io.read_data()
+        if tpu_name in data['all_tpus'][zone]:
+            continue
         if tpu_type == target_type and zone == target_zone:
             return tpu_name
     return None
@@ -364,6 +370,7 @@ def mainloop():
                 add_MONITOR_log(f'这个老登的卡型号是 {target_type}, 所在区域是 {target_zone}\n')
                 if not target_type or not target_zone:
                     add_MONITOR_log(f'{WARNING} 我无法确定这个老登的卡型号和所在区域, 跳过这个老登\n')
+                    remove_sqa(_window)
                     continue
 
                 tou_result = subprocess.run(
@@ -423,7 +430,7 @@ def mainloop():
                     remove_sqa(_window)
                     continue
                 add_MONITOR_log(f'resume 上了，siuuuuuuuuuuuuuuu')
-                remove_sqa(_window)
+                finish_sqa(_window)
             except Exception as e:
                 add_MONITOR_log(f"{FAIL} 我失败了: {e}")
                 # remove job from sqa.json
@@ -478,7 +485,7 @@ if __name__ == "__main__":
             time_used = time.time() - last_time # in seconds
 
             add_MONITOR_log(f"{INFO} 我看完了。现在是第 {num_loops} 轮，用时 {time_used:.2f} 秒。现在的时间是 {convert_utcstr_to_edtstr(get_abs_time_str())}")
-            subprocess.run('sleep 1800', shell=True)
+            subprocess.run('sleep 900', shell=True)
 
             # while time.time() - last_time < checking_freq:
             #     data = data_io.read_data()
