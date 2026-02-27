@@ -4,6 +4,7 @@ import time
 import multiprocessing
 import re
 import ast
+from collections import deque
 import utils.users as users
 import utils.data_io as data_io
 import utils.operate as operate
@@ -24,34 +25,54 @@ def read_sqa():
     with open(f'/kmh-nfs-ssd-us-mount/code/qiao/work/tpu_manager/sqa.json', 'r') as file:
         x = file.read()
         x = json.loads(x)
+    x.setdefault('running', [])
+    x.setdefault('finished', [])
+    x.setdefault('resume_next_round', [])
     return x
+
+def _write_sqa_content(x):
+    x.setdefault('running', [])
+    x.setdefault('finished', [])
+    x.setdefault('resume_next_round', [])
+    with open(f'/kmh-nfs-ssd-us-mount/code/qiao/work/tpu_manager/sqa.json', 'w') as file:
+        json.dump(x, file)
+        file.write('\n')
 
 def write_sqa(window_id):
     x = read_sqa()
-    x['running'].append(window_id)
-    with open(f'/kmh-nfs-ssd-us-mount/code/qiao/work/tpu_manager/sqa.json', 'w') as file:
-        # write as json
-        json.dump(x, file)
-        file.write('\n')
+    if window_id not in x['running']:
+        x['running'].append(window_id)
+    _write_sqa_content(x)
     return
 
 def remove_sqa(window_id):
     x = read_sqa()
-    x['running'].remove(window_id)
-    with open(f'/kmh-nfs-ssd-us-mount/code/qiao/work/tpu_manager/sqa.json', 'w') as file:
-        # write as json
-        json.dump(x, file)
-        file.write('\n')
+    if window_id in x['running']:
+        x['running'].remove(window_id)
+    _write_sqa_content(x)
     return
 
 def finish_sqa(window_id):
     x = read_sqa()
-    x['running'].remove(window_id)
-    x['finished'].append(window_id)
-    with open(f'/kmh-nfs-ssd-us-mount/code/qiao/work/tpu_manager/sqa.json', 'w') as file:
-        # write as json
-        json.dump(x, file)
-        file.write('\n')
+    if window_id in x['running']:
+        x['running'].remove(window_id)
+    if window_id not in x['finished']:
+        x['finished'].append(window_id)
+    _write_sqa_content(x)
+    return
+
+def add_resume_next_round(window_id):
+    x = read_sqa()
+    if window_id not in x['resume_next_round']:
+        x['resume_next_round'].append(window_id)
+    _write_sqa_content(x)
+    return
+
+def remove_resume_next_round(window_id):
+    x = read_sqa()
+    if window_id in x['resume_next_round']:
+        x['resume_next_round'].remove(window_id)
+    _write_sqa_content(x)
     return
 
 def add_MONITOR_log(log):
@@ -115,7 +136,7 @@ def check_job_status(job):
         return None
     tpu = job["tpu"]
     if tpu == '':
-        print(f"{FAIL} check_job_status: tpu is empty")
+        print(f"{MADE} check_job_status: tpu is empty")
         return None
     tpu_status = operate.check_tpu_status(tpu)
     if tpu_status == 'preempted':
@@ -175,6 +196,20 @@ def _get_job_type_zone(old_tpu):
 
     return target_type, target_zone
 
+def _zone_region(zone):
+    """
+    Convert zone to region-like key.
+    Example:
+      us-central1-a / us-central1-b -> us-central1
+      us-east5-a / us-east5-b       -> us-east5
+    """
+    if not zone:
+        return None
+    parts = zone.split('-')
+    if len(parts) < 3:
+        return zone
+    return '-'.join(parts[:-1])
+
 def _parse_idle_tpus_from_tou(stdout):
     idle_tpus = []
     clean_stdout = _strip_ansi(stdout)
@@ -186,16 +221,87 @@ def _parse_idle_tpus_from_tou(stdout):
         idle_tpus.append((tpu_name.strip(), zone.strip()))
     return idle_tpus
 
+def _get_tpu_usage_from_tou(stdout, tpu_name):
+    clean_stdout = _strip_ansi(stdout)
+    for line in clean_stdout.splitlines():
+        idle_match = re.search(r"\[IDLE\]\s+([^\s]+)\s+\(([^)]+)\)", line)
+        if idle_match and idle_match.group(1).strip() == tpu_name:
+            return 'idle', []
+
+        busy_match = re.search(r"\[BUSY\]\s+([^\s]+)\s+\(([^)]+)\)\s+users=(\[[^\]]*\])", line)
+        if busy_match and busy_match.group(1).strip() == tpu_name:
+            users_raw = busy_match.group(3)
+            try:
+                users = ast.literal_eval(users_raw)
+                if not isinstance(users, list):
+                    users = [str(users)]
+            except Exception:
+                users = []
+            users = [str(u).strip() for u in users if str(u).strip()]
+            return 'busy', users
+
+    return 'unknown', []
+
+def _has_retrying_ssh_error_in_recent_logs(job, recent_lines=40):
+    log_dir = job.get('log_dir')
+    if not log_dir:
+        return False
+
+    log_path = os.path.join(log_dir, 'output.log')
+    if not os.path.isfile(log_path):
+        return False
+
+    try:
+        with open(log_path, 'r', encoding='utf-8', errors='ignore') as f:
+            tail_lines = list(deque(f, maxlen=recent_lines))
+    except Exception:
+        return False
+
+    tail_text = ''.join(tail_lines)
+    return "Retrying: SSH command error" in tail_text
+
 def _pick_idle_tpu(idle_tpus, target_type, target_zone):
+    """
+    Pick idle TPU with policy:
+      1) exact match: same type + same zone
+      2) fallback: allow v5p-128 <-> v6e-64 in the same region
+
+    Return:
+      (new_tpu_name, new_zone, pick_mode)
+      pick_mode in {"exact", "cross_type_same_region"}
+      or (None, None, None) if not found.
+    """
+    data = data_io.read_data()
+    all_tpus = data.get('all_tpus', {})
+    target_region = _zone_region(target_zone)
+
+    # Pass 1: strict same type + same zone.
     for tpu_name, zone in idle_tpus:
         tpu_type = _extract_tpu_type(tpu_name)
-        # check if this tpu is in the data.json
-        data = data_io.read_data()
-        if tpu_name in data['all_tpus'][zone]:
+        if tpu_name in all_tpus.get(zone, []):
             continue
         if tpu_type == target_type and zone == target_zone:
-            return tpu_name
-    return None
+            return tpu_name, zone, "exact"
+
+    # Pass 2: fallback cross-type in same region.
+    fallback_pairs = {
+        "v5p-128": {"v6e-64"},
+        "v6e-64": {"v5p-128"},
+    }
+    compatible_types = fallback_pairs.get(target_type, set())
+    if not compatible_types:
+        return None, None, None
+
+    for tpu_name, zone in idle_tpus:
+        tpu_type = _extract_tpu_type(tpu_name)
+        if tpu_name in all_tpus.get(zone, []):
+            continue
+        if _zone_region(zone) != target_region:
+            continue
+        if tpu_type in compatible_types:
+            return tpu_name, zone, "cross_type_same_region"
+
+    return None, None, None
 
 def _pick_new_alias(target_type, zone):
     available_aliases = avilable_aliases(target_type, zone)
@@ -218,20 +324,20 @@ def _pick_new_alias(target_type, zone):
             return a
     return None
 
-def reapply_worker(ka, result_queue):
-    sys.stdout = open(os.devnull, 'w')
-    try:
-        result = operate.apply_and_set_env(ka, preemptible=True, delete=True)
-        if result == 'success':
-            print(f"{GOOD} reapply_worker: Reapply TPU {ka} done")
-            add_MONITOR_log(f"{GOOD} reapply_worker: Reapply TPU {ka} done")
-        else:
-            raise Exception(f"Reapply TPU {ka} failed, please contact the admin, result: {result}")
-        result_queue.put(result)
-    except Exception as e:
-        print(f"{FAIL} reapply_worker: Failed to reapply TPU {ka}: {e}")
-        add_MONITOR_log(f"{FAIL} reapply_worker: Failed to reapply TPU {ka}: {e}")
-        result_queue.put(e)
+# def reapply_worker(ka, result_queue):
+#     sys.stdout = open(os.devnull, 'w')
+#     try:
+#         result = operate.apply_and_set_env(ka, preemptible=True, delete=True)
+#         if result == 'success':
+#             print(f"{GOOD} reapply_worker: Reapply TPU {ka} done")
+#             add_MONITOR_log(f"{GOOD} reapply_worker: Reapply TPU {ka} done")
+#         else:
+#             raise Exception(f"Reapply TPU {ka} failed, please contact the admin, result: {result}")
+#         result_queue.put(result)
+#     except Exception as e:
+#         print(f"{FAIL} reapply_worker: Failed to reapply TPU {ka}: {e}")
+#         add_MONITOR_log(f"{FAIL} reapply_worker: Failed to reapply TPU {ka}: {e}")
+#         result_queue.put(e)
 
 def restart_worker(ka, result_queue):
     sys.stdout = open(os.devnull, 'w')
@@ -291,55 +397,76 @@ def restart_rerun(job, timeout=900):
             add_MONITOR_log(f"{FAIL} restart_rerun: Restart TPU {ka} failed, no result returned")
 
 
-def reapply_resume(job, timeout=900):
-    ka = job["tpu"]
-    add_MONITOR_log(f"{INFO} reapply_resume: Reapply TPU {ka}...")
-    result_queue = multiprocessing.Queue()
-    process = multiprocessing.Process(target=reapply_worker, args=(ka, result_queue))
-    running_processes.append(process)
-    process.start()
-    process.join(timeout)
-    if process.is_alive():
-        print(f"Reapply TPU {ka} timeout, killing the process")
-        process.terminate()
-        process.join()
-        running_processes.remove(process)
-        print(f"{WARNING} reapply_resume: Reapply TPU {ka} failed, process killed")
-    else:
-        if not result_queue.empty():
-            result = result_queue.get()
-            if isinstance(result, Exception):
-                print(f"{FAIL} reapply_resume: Reapply TPU {ka} failed: {result}")
-                add_MONITOR_log(f"{FAIL} reapply_resume: Reapply TPU {ka} failed: {result}")
-            else:
-                print(f"{GOOD} Reapply TPU {ka} success: {result}, start resume job")
-                jobs.resume_rerun_job(job, load_ckpt=True)
-        else:
-            print(f"{FAIL} reapply_resume: Reapply TPU {ka} failed, no result returned")
-            add_MONITOR_log(f"{FAIL} reapply_resume: Reapply TPU {ka} failed, no result returned")
+# def reapply_resume(job, timeout=900):
+#     ka = job["tpu"]
+#     add_MONITOR_log(f"{INFO} reapply_resume: Reapply TPU {ka}...")
+#     result_queue = multiprocessing.Queue()
+#     process = multiprocessing.Process(target=reapply_worker, args=(ka, result_queue))
+#     running_processes.append(process)
+#     process.start()
+#     process.join(timeout)
+#     if process.is_alive():
+#         print(f"Reapply TPU {ka} timeout, killing the process")
+#         process.terminate()
+#         process.join()
+#         running_processes.remove(process)
+#         print(f"{WARNING} reapply_resume: Reapply TPU {ka} failed, process killed")
+#     else:
+#         if not result_queue.empty():
+#             result = result_queue.get()
+#             if isinstance(result, Exception):
+#                 print(f"{FAIL} reapply_resume: Reapply TPU {ka} failed: {result}")
+#                 add_MONITOR_log(f"{FAIL} reapply_resume: Reapply TPU {ka} failed: {result}")
+#             else:
+#                 print(f"{GOOD} Reapply TPU {ka} success: {result}, start resume job")
+#                 jobs.resume_rerun_job(job, load_ckpt=True)
+#         else:
+#             print(f"{FAIL} reapply_resume: Reapply TPU {ka} failed, no result returned")
+#             add_MONITOR_log(f"{FAIL} reapply_resume: Reapply TPU {ka} failed, no result returned")
 
 def mainloop():
-    error_jobs = {'preempted': [], 'deleted': []}
+    error_jobs = {'preempted': [], 'deleted': [], 'tpu_still_exists': [], 'resume_next_round': []}
     data = data_io.read_data()
     sqa = read_sqa()
+    resume_next_round_set = set(sqa.get('resume_next_round', []))
     check_result = subprocess.run('python /home/jzc/zhichengjiang/working/xibo_tpu_manager/tpu.py check sqa', shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     add_MONITOR_log(f"{INFO} 我来看看job活着没")
     for job in data["users"]['sqa']["job_data"]:
         if job['windows_id'] in sqa['running'] or job['windows_id'] in sqa['finished']: continue # have tried this before
         if job['status'] in ['finished', 'rerunned', 'resumed', 'killed'] or not job['monitor']:
+            if job['windows_id'] in resume_next_round_set:
+                remove_resume_next_round(job['windows_id'])
             continue
         if f'Window {job["windows_id"]}' not in check_result.stdout:
-            add_MONITOR_log(f"{INFO} job {job['windows_id']}, 跳过这个窗口")
+            # add_MONITOR_log(f"{INFO} job {job['windows_id']}, 跳过这个窗口")
+            if job['windows_id'] in resume_next_round_set:
+                remove_resume_next_round(job['windows_id'])
             continue
         if job['status'] != 'error':
+            if job['windows_id'] in resume_next_round_set:
+                remove_resume_next_round(job['windows_id'])
+            continue
+        if job['windows_id'] in resume_next_round_set:
+            error_jobs['resume_next_round'].append(job)
             continue
         error_type = check_job_status(job)
         if error_type in error_jobs:
             error_jobs[error_type].append(job)
+        elif error_type is None:
+            if _has_retrying_ssh_error_in_recent_logs(job, recent_lines=40):
+                error_jobs['tpu_still_exists'].append(job)
+            else:
+                add_MONITOR_log(
+                    f"{WARNING} window {job['windows_id']} 卡还在，但最近40行没看到 `Retrying: SSH command error`，判定为误报error，先跳过"
+                )
 
     if len(error_jobs['deleted']) != 0:
         error_windows_list = [(job['user'], job['windows_id']) for job in error_jobs['deleted']]
         add_MONITOR_log(f"{INFO} 我找到了 {len(error_jobs['deleted'])} 个被删掉的卡, 窗口列表是: {error_windows_list}")
+
+    if len(error_jobs['resume_next_round']) != 0:
+        error_windows_list = [(job['user'], job['windows_id']) for job in error_jobs['resume_next_round']]
+        add_MONITOR_log(f"{INFO} 我找到了 {len(error_jobs['resume_next_round'])} 个下一轮直冲resume的job, 窗口列表是: {error_windows_list}")
     
     # if len(error_jobs['preempted']) != 0:
     #     error_windows_list = [(job['user'], job['windows_id']) for job in error_jobs['preempted']]
@@ -356,20 +483,109 @@ def mainloop():
     all_good = all(len(error_jobs[error_type]) == 0 for error_type in error_jobs)
 
     if all_good:
-        add_MONITOR_log(f"{INFO} 好像都没问题，睡大觉")
+        add_MONITOR_log(f"{GAOCHAO} 好像都没问题，睡大觉")
         
     if not all_good:
+        for job in error_jobs["resume_next_round"]:
+            # check whether the window still exists, and the tpu is still there
+
+            _window = job['windows_id']
+            _old_tpu = job['tpu']
+
+            if f'Window {_window}' not in check_result.stdout:
+                add_MONITOR_log(f'{WARNING} window {_window} 已不存在，移出 resume_next_round')
+                remove_resume_next_round(_window)
+                continue
+
+            tou_result = subprocess.run(
+                _tou,
+                shell=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
+            )
+            if tou_result.returncode != 0:
+                add_MONITOR_log(f'{MADE} _tou failed, skip resume_next_round for window {_window}\n')
+                continue
+
+            usage, busy_users = _get_tpu_usage_from_tou(tou_result.stdout, _old_tpu)
+            if usage != 'idle':
+                if usage == 'busy':
+                    add_MONITOR_log(
+                        f'{INFO} window {_window} 对应的卡 {_old_tpu} 当前 busy users={busy_users}，移出 resume_next_round'
+                    )
+                else:
+                    add_MONITOR_log(
+                        f'{INFO} window {_window} 对应的卡 {_old_tpu} 在 tou 中不可见/不确定，移出 resume_next_round'
+                    )
+                remove_resume_next_round(_window)
+                continue
+
+            write_sqa(_window)
+            try:
+                add_MONITOR_log(f'{INFO} 我在试着 resume window {_window}. 这是上一轮我就看见的，buffer命中，直接resume\n')
+                resume_cmd = f'{_tpu} resume sqa window={_window} tpu={_old_tpu}'
+                add_MONITOR_log(f'{INFO} 运行 resume 命令: {resume_cmd}\n')
+                resume_result = subprocess.run(
+                    resume_cmd,
+                    shell=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True
+                )
+                _append_resume_file_log(_window, "resume_next_round", resume_cmd, resume_result)
+                if resume_result.returncode != 0:
+                    add_MONITOR_log(f'{MADE} buffer resume failed, skip finish for window {_window}\n')
+                    remove_sqa(_window)
+                    continue
+                remove_resume_next_round(_window)
+                add_MONITOR_log(f'{GAOCHAO} buffer resume 上了，siuuuuuuuuuuuuuuu')
+                finish_sqa(_window)
+            except Exception as e:
+                add_MONITOR_log(f"{MADE} buffer resume 失败了: {e}")
+                remove_sqa(_window)
+            subprocess.run('sleep 2', shell=True)
+
+        force_deleted_jobs = []
+        for job in error_jobs["tpu_still_exists"]:
+            _window = job['windows_id']
+            _old_tpu = job['tpu']
+            try:
+                tou_result = subprocess.run(
+                    _tou,
+                    shell=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True
+                )
+                if tou_result.returncode != 0:
+                    add_MONITOR_log(f'{MADE} _tou failed, skip checking tpu usage for window {_window}\n')
+                    continue
+
+                usage, busy_users = _get_tpu_usage_from_tou(tou_result.stdout, _old_tpu)
+                if usage == 'idle':
+                    add_resume_next_round(_window)
+                    add_MONITOR_log(f'{INFO} window {_window} 对应的卡 {_old_tpu} 现在是空着的，已加入下一轮resume buffer\n')
+                elif usage == 'busy':
+                    add_MONITOR_log(f'{INFO} window {_window} 对应的卡 {_old_tpu} 被占用了 users={busy_users}，按卡没了处理\n')
+                    force_deleted_jobs.append(job)
+                else:
+                    add_MONITOR_log(f'{WARNING} window {_window} 对应的卡 {_old_tpu} 在tou里状态不确定，先跳过\n')
+            except Exception as e:
+                add_MONITOR_log(f"{MADE} 检查tpu使用状态失败了: {e}")
+
+        error_jobs["deleted"].extend(force_deleted_jobs)
         for job in error_jobs["deleted"]:
             
             _window = job['windows_id']
             _old_tpu = job['tpu']
             write_sqa(_window)
             try:
-                add_MONITOR_log(f'我在试着 resume window {_window}. 这卡没了\n')
+                add_MONITOR_log(f'{INFO} 我在试着 resume window {_window}. 这卡没了\n')
                 target_type, target_zone = _get_job_type_zone(_old_tpu)
-                add_MONITOR_log(f'这个老登的卡型号是 {target_type}, 所在区域是 {target_zone}\n')
+                add_MONITOR_log(f'{INFO} 这个老登的卡型号是 {target_type}, 所在区域是 {target_zone}\n')
                 if not target_type or not target_zone:
-                    add_MONITOR_log(f'{WARNING} 我无法确定这个老登的卡型号和所在区域, 跳过这个老登\n')
+                    add_MONITOR_log(f'{MADE} 我无法确定这个老登的卡型号和所在区域, 跳过这个老登\n')
                     remove_sqa(_window)
                     continue
 
@@ -382,25 +598,36 @@ def mainloop():
                 )
 
                 if tou_result.returncode != 0:
-                    add_MONITOR_log(f'{FAIL} _tou failed, skip this job\n')
+                    add_MONITOR_log(f'{MADE} _tou failed, skip this job\n')
                     continue
 
                 idle_tpus = _parse_idle_tpus_from_tou(tou_result.stdout)
-                new_tpu_name = _pick_idle_tpu(idle_tpus, target_type, target_zone)
+                new_tpu_name, new_tpu_zone, pick_mode = _pick_idle_tpu(idle_tpus, target_type, target_zone)
                 if not new_tpu_name:
-                    add_MONITOR_log(f'{WARNING} 我找不到可用的 IDLE 卡, 型号是 {target_type}, 所在区域是 {target_zone}\n')
+                    add_MONITOR_log(f'{MADE} 我找不到可用的 IDLE 卡, 型号是 {target_type}, 所在区域是 {target_zone}\n')
                     remove_sqa(_window)
                     continue
 
-                new_alias = _pick_new_alias(target_type, target_zone)
+                new_tpu_type = _extract_tpu_type(new_tpu_name)
+                if not new_tpu_type or not new_tpu_zone:
+                    add_MONITOR_log(f'{MADE} 我找到了卡 {new_tpu_name}，但无法确定类型/区域，跳过这个老登\n')
+                    remove_sqa(_window)
+                    continue
+
+                if pick_mode == "cross_type_same_region":
+                    add_MONITOR_log(
+                        f'{INFO} 未找到同type同zone空卡，启用同区跨类型兜底: {target_type}/{target_zone} -> {new_tpu_type}/{new_tpu_zone}'
+                    )
+
+                new_alias = _pick_new_alias(new_tpu_type, new_tpu_zone)
                 if not new_alias:
-                    add_MONITOR_log(f'{WARNING} 我找不到可用的 alias, 型号是 {target_type}, 跳过这个老登\n')
+                    add_MONITOR_log(f'{MADE} 我找不到可用的 alias, 型号是 {new_tpu_type}, 跳过这个老登\n')
                     remove_sqa(_window)
                     continue
                 
-                add_MONITOR_log(f'我找到了可用的 alias: {new_alias}, 和卡: {new_tpu_name}\n')
-                fmd_cmd = f'{_tpu} fmd {new_tpu_name} {new_alias}'
-                add_MONITOR_log(f'运行放他妈的命令: {fmd_cmd}\n')
+                add_MONITOR_log(f'{INFO} 我找到了可用的 alias: {new_alias}, 和卡: {new_tpu_name}\n')
+                fmd_cmd = f'{_tpu} fmd sqa {new_tpu_name} {new_alias}'
+                add_MONITOR_log(f'{INFO} 运行放他妈的命令: {fmd_cmd}\n')
                 fmd_result = subprocess.run(
                     fmd_cmd,
                     shell=True,
@@ -410,13 +637,13 @@ def mainloop():
                 )
                 _append_resume_file_log(_window, "ftmd", fmd_cmd, fmd_result)
                 if fmd_result.returncode != 0:
-                    add_MONITOR_log(f'{FAIL} fmd failed, skip resume for window {_window}\n')
+                    add_MONITOR_log(f'{MADE} fmd failed, skip resume for window {_window}\n')
                     remove_sqa(_window)
                     continue
-                add_MONITOR_log(f'放完了，哈哈')
+                add_MONITOR_log(f'{GAOCHAO} 放完了，哈哈')
 
                 resume_cmd = f'{_tpu} resume sqa window={_window} tpu={new_tpu_name}'
-                add_MONITOR_log(f'运行 resume 命令: {resume_cmd}\n')
+                add_MONITOR_log(f'{INFO} 运行 resume 命令: {resume_cmd}\n')
                 resume_result = subprocess.run(
                     resume_cmd,
                     shell=True,
@@ -426,13 +653,14 @@ def mainloop():
                 )
                 _append_resume_file_log(_window, "resume", resume_cmd, resume_result)
                 if resume_result.returncode != 0:
-                    add_MONITOR_log(f'{FAIL} resume failed, skip finish for window {_window}\n')
+                    add_MONITOR_log(f'{MADE} resume failed, skip finish for window {_window}\n')
                     remove_sqa(_window)
                     continue
-                add_MONITOR_log(f'resume 上了，siuuuuuuuuuuuuuuu')
+                add_MONITOR_log(f'{GAOCHAO} resume 上了，siuuuuuuuuuuuuuuu')
                 finish_sqa(_window)
             except Exception as e:
-                add_MONITOR_log(f"{FAIL} 我失败了: {e}")
+                add_MONITOR_log(f"{MADE} 我失败了: {e}")
+                raise e
                 # remove job from sqa.json
                 remove_sqa(_window)
             subprocess.run('sleep 2', shell=True)
@@ -472,7 +700,7 @@ if __name__ == "__main__":
     add_MONITOR_log(f"{GOOD} \n\n\n哈哈，我上线了。我是何凯明的狗")
 
     if data_io.check_code_lock():
-        print(f"{FAIL} Code is locked for developing, please unlock it first.")
+        print(f"{MADE} Code is locked for developing, please unlock it first.")
         sys.exit(1)
     try:
         while True:
@@ -484,7 +712,7 @@ if __name__ == "__main__":
             mainloop()
             time_used = time.time() - last_time # in seconds
 
-            add_MONITOR_log(f"{INFO} 我看完了。现在是第 {num_loops} 轮，用时 {time_used:.2f} 秒。现在的时间是 {convert_utcstr_to_edtstr(get_abs_time_str())}")
+            add_MONITOR_log(f"{GAOCHAO} 我看完了。现在是第 {num_loops} 轮，用时 {time_used:.2f} 秒。现在的时间是 {convert_utcstr_to_edtstr(get_abs_time_str())}")
             subprocess.run('sleep 900', shell=True)
 
             # while time.time() - last_time < checking_freq:

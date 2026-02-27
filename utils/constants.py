@@ -13,6 +13,7 @@ MAX_LEGACY_LENGTH = 500
 
 RED, GREEN, YELLOW, PURPLE, NC = "\033[1;31m", "\033[1;32m", "\033[1;33m", "\033[1;34m", "\033[0m"
 GOOD, INFO, WARNING, FAIL = f"{GREEN}[GOOD]{NC}", f"{PURPLE}[INFO]{NC}", f"{YELLOW}[WARNING]{NC}", f"{RED}[FAIL]{NC}"
+GAOCHAO, MADE = f"{GREEN}[高潮]{NC}", f"{RED}[妈的]{NC}"
 LOG = f"{PURPLE}[LOG]{NC}"
 
 NAME_TO_TYPE = {'v2-8':'v2-8','v2-32':'v2-32','v2-64':'v2-64','v2-128':'v2-128','v3-8':'v3-8','v3-32':'v3-32','v3-64':'v3-64','v3-128':'v3-128','v4-8':'v4-8','v4-16':'v4-16','v4-32':'v4-32','v4-64':'v4-64','v4-128':'v4-128','v4-256':'v4-256','v4-512':'v4-512','v5e-8':'v5litepod-8','v5e-16':'v5litepod-16','v5e-32':'v5litepod-32','v5e-64':'v5litepod-64','v5p-8':'v5p-8','v5p-16':'v5p-16','v5p-32':'v5p-32','v5p-64':'v5p-64','v5p-128':'v5p-128','v5p-256':'v5p-256','v5p-512':'v5p-512','v6e-8':'v6e-8','v6e-16':'v6e-16','v6e-32':'v6e-32','v6e-64':'v6e-64', 'v6e-128': 'v6e-128', 'v6e-256': 'v6e-256', 'v6e-512': 'v6e-512'} # acc_type for apply
