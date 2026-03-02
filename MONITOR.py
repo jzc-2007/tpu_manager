@@ -138,12 +138,23 @@ def check_job_status(job):
     if tpu == '':
         print(f"{MADE} check_job_status: tpu is empty")
         return None
-    tpu_status = operate.check_tpu_status(tpu)
-    if tpu_status == 'preempted':
-        return 'preempted'
-    if tpu_status == 'deleted':
+
+    log_dir = job["log_dir"]
+    zone_match = ZONE_RE.search(log_dir)
+    if zone_match is None:
+        print(f"{MADE} check_job_status: cannot parse zone from log_dir {log_dir}")
+        return None
+    zone = zone_match.group(0)
+
+    cmd = f"gcloud compute tpus tpu-vm describe {tpu} --zone={zone} --format='value(state)'"
+    try:
+        state = subprocess.check_output(cmd, shell=True, stderr=subprocess.DEVNULL).decode().strip().lower()
+    except subprocess.CalledProcessError:
         return 'deleted'
-    
+
+    if state == 'preempted':
+        return 'preempted'
+
     return None
 
 def _strip_ansi(text):
@@ -190,10 +201,12 @@ def _extract_zone(tpu_name):
             return zone
     return None
 
-def _get_job_type_zone(old_tpu):
+def _get_job_type_zone(job):
+    old_tpu = job["tpu"]
     target_type = _extract_tpu_type(old_tpu)
-    target_zone = _extract_zone(old_tpu)
-
+    log_dir = job.get("log_dir", "")
+    zone_match = ZONE_RE.search(log_dir or "")
+    target_zone = zone_match.group(0) if zone_match else None
     return target_type, target_zone
 
 def _zone_region(zone):
@@ -580,9 +593,10 @@ def mainloop():
             _window = job['windows_id']
             _old_tpu = job['tpu']
             write_sqa(_window)
+
             try:
                 add_MONITOR_log(f'{INFO} 我在试着 resume window {_window}. 这卡没了\n')
-                target_type, target_zone = _get_job_type_zone(_old_tpu)
+                target_type, target_zone = _get_job_type_zone(job)
                 add_MONITOR_log(f'{INFO} 这个老登的卡型号是 {target_type}, 所在区域是 {target_zone}\n')
                 if not target_type or not target_zone:
                     add_MONITOR_log(f'{MADE} 我无法确定这个老登的卡型号和所在区域, 跳过这个老登\n')
