@@ -647,10 +647,17 @@ def mainloop():
                     shell=True,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
-                    text=True
+                    text=True,
+                    timeout=900
                 )
+                if fmd_result.returncode == 124:
+                    add_MONITOR_log(f'{MADE} fmd timeout, skip resume for window {_window}\n')
+                    remove_sqa(_window)
+                    continue
                 _append_resume_file_log(_window, "ftmd", fmd_cmd, fmd_result)
-                if fmd_result.returncode != 0:
+                fail = (fmd_result.returncode != 0)
+                fail = fail or ("is already reserved by" in fmd_result.stdout.lower())
+                if fail:
                     add_MONITOR_log(f'{MADE} fmd failed, skip resume for window {_window}\n')
                     remove_sqa(_window)
                     continue
@@ -663,15 +670,25 @@ def mainloop():
                     shell=True,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
-                    text=True
+                    text=True,
+                    timeout=900
                 )
+                if resume_result.returncode == 124:
+                    add_MONITOR_log(f'{MADE} resume timeout, skip finish for window {_window}\n')
+                    remove_sqa(_window)
+                    continue
                 _append_resume_file_log(_window, "resume", resume_cmd, resume_result)
-                if resume_result.returncode != 0:
+                fail = (resume_result.returncode != 0)
+                fail = fail or ("is already reserved by" in resume_result.stdout.lower())
+                if fail:
                     add_MONITOR_log(f'{MADE} resume failed, skip finish for window {_window}\n')
                     remove_sqa(_window)
                     continue
                 add_MONITOR_log(f'{GAOCHAO} resume 上了，siuuuuuuuuuuuuuuu')
                 finish_sqa(_window)
+            except subprocess.TimeoutExpired as e:
+                add_MONITOR_log(f"{MADE} 我失败了(timeout): {e}\n")
+                remove_sqa(_window)
             except Exception as e:
                 add_MONITOR_log(f"{MADE} 我失败了: {e}")
                 raise e
