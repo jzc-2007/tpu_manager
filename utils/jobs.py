@@ -883,6 +883,20 @@ def run(user_obj, args, monitor_job = True):
             return
         print(f"{INFO} run: TPU {tpu} is not reserved by others.")
 
+        try:
+            with open(MOUNTED_FILE, "r") as _mf:
+                _mount_data = json.load(_mf)
+                _mounted_set = set(_mount_data.get("mounted", []))
+                _mounting_set = set(_mount_data.get("mounting", []))
+        except (OSError, json.JSONDecodeError):
+            _mounted_set, _mounting_set = set(), set()
+        if tpu in _mounted_set:
+            print(f"{GOOD} run: TPU {tpu} disk has been mounted")
+        elif tpu in _mounting_set:
+            print(f"{INFO} run: TPU {tpu} disk is currently mounting...")
+        else:
+            print(f"{WARNING} run: TPU {tpu} disk has NOT been mounted")
+
         tpu_status = check_tpu_status(tpu)
 
         if tpu_status == 'preempted':
