@@ -8,8 +8,6 @@ import os, yaml
 import gspread
 from google.oauth2.service_account import Credentials
 
-
-
 def get_monitor_config():
     data = read_data()
     for key, value in data['monitor_config'].items():
@@ -62,6 +60,8 @@ def register_tpu():
     try:
         if tpu_alias in data['tpu_aliases']:
             raise ValueError(f"TPU alias {tpu_alias} already exists")
+        if full_name in data['tpu_aliases'].values():
+            raise ValueError(f"TPU full name {full_name} already exists")
         data['tpu_aliases'][tpu_alias] = full_name
         data['tpu_aliases'][spreadsheet_name] = full_name
         if zone not in data['all_tpus']:
@@ -219,8 +219,20 @@ def fang_new_tpu(new_tpu_name, old_tpu_alias):
         print(f"{FAIL} Failed to fang new TPU: {e}")
         release_lock_data()
 
-def fang_new_tpu_and_mount_disk(new_tpu_name, old_tpu_alias):
+def fang_new_tpu_and_mount_disk(user_name, new_tpu_name, old_tpu_alias):
+    # check if the new tpu name is reserved by others
+    reserved_user = check_reserved_user(new_tpu_name)
+    if reserved_user is not None and reserved_user != user_name:
+        print(f'{WARNING} TPU {new_tpu_name} is already reserved by {reserved_user}')
+        return 'failed'
+    print(f"{INFO} fang_new_tpu_and_mount_disk: TPU {new_tpu_name} is not reserved by others.")
+
     fang_new_tpu(new_tpu_name, old_tpu_alias)
+
+    ret = zhan(user_name, new_tpu_name)
+    if ret != 'success':
+        return 'failed'
+
     mount_disk(new_tpu_name)
 
 def del_registered_tpu(alias):
@@ -315,6 +327,24 @@ def get_wandb_notes(dir):
         return None
     with open(config_path, 'r') as f:
         config = yaml.safe_load(f)
+    
+    # check if config has key 'finetune: True'
+    if 'finetune' in config and config['finetune'] == True:
+        config_path = os.path.join(dir, 'configs', 'finetune_config.yml')
+        with open(config_path, 'r') as f:
+            config = yaml.safe_load(f)
+        if 'wandb_notes' in config:
+            return config['wandb_notes']
+        elif 'logging' in config:
+            if 'wandb_notes' in config['logging']:
+                return config['logging']['wandb_notes']
+            else:
+                print(f"{WARNING} wandb_notes not found in logging config file")
+                return None
+        else:
+            print(f"{WARNING} wandb_notes not found in finetune config file")
+            return None
+    
     if 'wandb_notes' in config:
         return config['wandb_notes']
     elif 'logging' in config:
@@ -326,3 +356,103 @@ def get_wandb_notes(dir):
     else:
         print(f"{WARNING} wandb_notes not found in config file")
         return None
+
+def _parse_lock_filename(filename):
+    '''
+    解析锁文件名 {user}_{vm_name}_{YYYY-MM-DD_HH-MM-SS}。
+    返回 (user, vm_name, time_str) 或 None（格式不对时）。
+    '''
+    parts = filename.split('_')
+    if len(parts) < 4:
+        return None
+    # 时间为最后两段: YYYY-MM-DD, HH-MM-SS
+    time_str = f"{parts[-2]}_{parts[-1]}"
+    user = parts[0]
+    vm_name = '_'.join(parts[1:-2])
+    return user, vm_name, time_str
+
+
+def zhan(user, vm_name):
+    '''
+    write a file under /kmh-nfs-ssd-us-mount/code/qiao/tpu_lock,
+    with name {USER_VMNAME_TIME}. Time format: YYYY-MM-DD_HH-MM-SS (no space, underscores).
+    also support when the vm_name is an alias.
+    '''
+    if not vm_name.startswith('kmh-tpuvm-'):
+        # this is an alias.
+        data = read_data()
+        vm_name = data['tpu_aliases'][vm_name]
+    
+    # first check if the vm_name is already reserved by others
+    if check_reserved_user(vm_name) is not None and check_reserved_user(vm_name) != user:
+        print(f'{FAIL} TPU {vm_name} is already reserved by {check_reserved_user(vm_name)}')
+        return 'failed'
+
+    time_str = get_lock_time_str()
+    user_vm_name = f"{user}_{vm_name}_{time_str}"
+    lock_dir = "/kmh-nfs-ssd-us-mount/code/qiao/tpu_lock"
+    with open(f"{lock_dir}/{user_vm_name}", 'w') as f:
+        f.write(f"{user}_{vm_name}_{time_str}")
+    print(f'{GOOD} 成功创建了叫做{user_vm_name}的占卡锁')
+    return 'success'
+
+
+def check_reserved_user(tpu):
+    '''
+    Check the path /kmh-nfs-ssd-us-mount/code/qiao/tpu_lock, and see whether there is a file
+    named {USER_VMNAME_TIME} within 30 minutes. If a file is older than 30 minutes, delete it.
+    Return the reserved user name, otherwise return None.
+    Time format: YYYY-MM-DD_HH-MM-SS (no space, underscores).
+    '''
+    now = get_lock_time_str()
+    lock_dir = "/kmh-nfs-ssd-us-mount/code/qiao/tpu_lock"
+    for file in os.listdir(lock_dir):
+        parsed = _parse_lock_filename(file)
+        if parsed is None:
+            continue
+        user, vm_name, time_str = parsed
+        if vm_name != tpu:
+            continue
+        try:
+            seconds_ago = lock_time_seconds_between(time_str, now)
+        except (ValueError, TypeError):
+            # 旧格式或非法时间，视为过期并删除
+            try:
+                os.remove(f"{lock_dir}/{file}")
+            except OSError:
+                pass
+            continue
+        if seconds_ago > 30 * 60:
+            try:
+                os.remove(f"{lock_dir}/{file}")
+            except OSError:
+                pass
+            continue
+        return user
+    return None
+
+def remove_file_lock(vm_name):
+    '''
+    删除占卡锁文件，释放占卡。支持别名。
+    '''
+    if not vm_name.startswith('kmh-tpuvm-'):
+        # this is an alias.
+        data = read_data()
+        vm_name = data['tpu_aliases'][vm_name]
+
+    lock_dir = "/kmh-nfs-ssd-us-mount/code/qiao/tpu_lock"
+    for file in os.listdir(lock_dir):
+        parsed = _parse_lock_filename(file)
+        if parsed is None:
+            continue
+        file_user, file_vm_name, _ = parsed
+        if file_vm_name == vm_name:
+            try:
+                os.remove(f"{lock_dir}/{file}")
+                print(f"{GOOD} 成功删除占卡锁 {file}，释放了 {vm_name}")
+                return 'success'
+            except OSError as e:
+                print(f"{FAIL} 删除占卡锁 {file} 失败: {e}")
+                return 'failed'
+    print(f"{WARNING} 没有找到 {vm_name} 的锁文件")
+    return 'failed'

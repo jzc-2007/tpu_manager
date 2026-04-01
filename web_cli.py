@@ -1935,6 +1935,7 @@ TPU_PANEL_HTML = r"""
         <button class="btn" onclick="openFilterModal('user')">user</button>
         <button class="btn" onclick="openFilterModal('running_status')">running status</button>
         <button class="btn" onclick="loadPanel(true)">refresh</button>
+        <button class="btn" onclick="viewAllTPUStatus()" style="background:var(--accent);color:#05132b">查看所有TPU状态</button>
       </div>
     </div>
 
@@ -1953,6 +1954,74 @@ TPU_PANEL_HTML = r"""
         <div class="filter-modal-footer">
           <button class="btn" onclick="closeFilterModal()">取消</button>
           <button class="btn" onclick="applyFilter()" style="background:var(--accent);color:#05132b">确认</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- TPU Status Modal -->
+    <div class="modal" id="tpu-status-modal">
+      <div class="modal-content" style="max-width:1200px;width:95vw;">
+        <div class="modal-header">
+          <strong>所有 TPU 状态</strong>
+          <button class="btn modal-close-btn" onclick="closeTPUStatusModal()">✕</button>
+        </div>
+        <div class="modal-body">
+          <div id="tpu-status-loading" style="text-align:center;padding:20px;">
+            <div class="spinner" style="width:32px;height:32px;border-width:3px;"></div>
+            <div style="margin-top:12px;color:var(--muted);">加载中...</div>
+          </div>
+          <div id="tpu-status-content" style="display:none;">
+            <div style="margin-bottom:16px;display:flex;gap:8px;align-items:center;">
+              <input type="text" id="tpu-status-search" class="input" placeholder="搜索 TPU 名称、区域、用户..." style="flex:1;min-width:0;">
+              <button class="btn" onclick="filterTPUStatus()">搜索</button>
+              <button class="btn" onclick="clearTPUStatusFilter()">清除</button>
+            </div>
+            <div style="max-height:60vh;overflow-y:auto;border:1px solid var(--border);border-radius:8px;">
+              <table style="margin:0;">
+                <tbody id="tpu-status-table-body">
+                </tbody>
+              </table>
+            </div>
+            <div id="tpu-status-summary" style="margin-top:12px;padding:12px;background:#0e1a37;border:1px solid var(--border);border-radius:8px;">
+            </div>
+          </div>
+          <div id="tpu-status-error" style="display:none;color:#ff6b6b;padding:20px;text-align:center;">
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn" onclick="closeTPUStatusModal()">关闭</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Steal TPU (Keng) Modal -->
+    <div class="modal" id="steal-modal">
+      <div class="modal-content" style="max-width:800px;">
+        <div class="modal-header">
+          <strong>🥷 偷 TPU - 选择坑位</strong>
+          <button class="btn modal-close-btn" onclick="closeStealModal()">✕</button>
+        </div>
+        <div class="modal-body">
+          <div id="steal-info" style="margin-bottom:16px;padding:12px;background:#0e1a37;border:1px solid var(--border);border-radius:8px;">
+            <div><strong>目标 TPU:</strong> <span id="steal-tpu-name" class="mono"></span></div>
+            <div style="margin-top:4px;"><strong>区域:</strong> <span id="steal-tpu-zone" class="mono"></span></div>
+          </div>
+          <div id="steal-loading" style="text-align:center;padding:20px;">
+            <div class="spinner" style="width:24px;height:24px;border-width:3px;"></div>
+            <div style="margin-top:8px;color:var(--muted);">加载坑位中...</div>
+          </div>
+          <div id="steal-content" style="display:none;">
+            <div style="margin-bottom:12px;color:var(--muted);">
+              找到 <strong id="keng-count">0</strong> 个可用坑位，点击坑位按钮将目标 TPU 放入该坑位：
+            </div>
+            <div id="kengs-list" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px;max-height:50vh;overflow-y:auto;">
+            </div>
+          </div>
+          <div id="steal-error" style="display:none;color:#ff6b6b;padding:20px;text-align:center;">
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn" onclick="closeStealModal()">取消</button>
         </div>
       </div>
     </div>
@@ -3128,6 +3197,334 @@ async function pollApply(tid, alias){
   }
 }
 
+// TPU Status Modal Functions
+let allTPUStatusData = [];
+let filteredTPUStatusData = [];
+
+async function viewAllTPUStatus(){
+  const modal = document.getElementById('tpu-status-modal');
+  const loading = document.getElementById('tpu-status-loading');
+  const content = document.getElementById('tpu-status-content');
+  const error = document.getElementById('tpu-status-error');
+  
+  // Show modal and loading state
+  modal.classList.add('show');
+  loading.style.display = 'block';
+  content.style.display = 'none';
+  error.style.display = 'none';
+  
+  try {
+    const res = await fetch(`{{ url_for('api_tpu_status') }}`);
+    const data = await res.json();
+    
+    if(!data.ok){
+      throw new Error(data.msg || '加载失败');
+    }
+    
+    allTPUStatusData = data.tpus || [];
+    filteredTPUStatusData = [...allTPUStatusData];
+    
+    // Display data
+    renderTPUStatusTable();
+    updateTPUStatusSummary();
+    
+    loading.style.display = 'none';
+    content.style.display = 'block';
+    
+  } catch(e) {
+    loading.style.display = 'none';
+    error.style.display = 'block';
+    error.textContent = `加载失败: ${e.message}`;
+  }
+}
+
+function renderTPUStatusTable(){
+  const tbody = document.getElementById('tpu-status-table-body');
+  tbody.innerHTML = '';
+  
+  if(filteredTPUStatusData.length === 0){
+    const tr = document.createElement('tr');
+    tr.innerHTML = '<td colspan="6" style="text-align:center;color:var(--muted);padding:20px;">没有数据</td>';
+    tbody.appendChild(tr);
+    return;
+  }
+  
+  // Sort by status: IDLE first, then BUSY, then TIMEOUT, then BAD
+  const statusOrder = {
+    'IDLE': 1,
+    'BUSY': 2,
+    'TIMEOUT': 3,
+    'BAD': 4
+  };
+  
+  const sortedData = [...filteredTPUStatusData].sort((a, b) => {
+    const orderA = statusOrder[a.status] || 999;
+    const orderB = statusOrder[b.status] || 999;
+    return orderA - orderB;
+  });
+  
+  sortedData.forEach(tpu => {
+    const tr = document.createElement('tr');
+    
+    // Status color coding
+    let statusClass = '';
+    if(tpu.status === 'IDLE') statusClass = 'script-ready';
+    else if(tpu.status === 'BUSY') statusClass = 'script-creating';
+    else if(tpu.status === 'TIMEOUT') statusClass = 'script-preempted';
+    else if(tpu.status === 'BAD') statusClass = 'script-notfound';
+    
+    const usersDisplay = tpu.users && tpu.users.length > 0 
+      ? tpu.users.join(', ') 
+      : '—';
+    
+    // Add steal button for IDLE TPUs
+    let actionCell = '—';
+    if(tpu.status === 'IDLE' && tpu.zone) {
+      actionCell = `<button class="btn" onclick="showStealModal('${tpu.name}', '${tpu.zone}')" style="padding:4px 8px;font-size:12px;">🥷</button>`;
+    }
+    
+    tr.innerHTML = `
+      <td class="mono">${tpu.group || '—'}</td>
+      <td class="mono">${tpu.name || '—'}</td>
+      <td class="mono">${tpu.zone || '—'}</td>
+      <td class="mono ${statusClass}">${tpu.status || '—'}</td>
+      <td class="mono">${usersDisplay}</td>
+      <td>${actionCell}</td>
+    `;
+    
+    tbody.appendChild(tr);
+  });
+}
+
+function updateTPUStatusSummary(){
+  const summary = document.getElementById('tpu-status-summary');
+  
+  const total = filteredTPUStatusData.length;
+  const idle = filteredTPUStatusData.filter(t => t.status === 'IDLE').length;
+  const busy = filteredTPUStatusData.filter(t => t.status === 'BUSY').length;
+  const timeout = filteredTPUStatusData.filter(t => t.status === 'TIMEOUT').length;
+  const bad = filteredTPUStatusData.filter(t => t.status === 'BAD').length;
+  
+  // Group statistics
+  const groups = {};
+  filteredTPUStatusData.forEach(tpu => {
+    const group = tpu.group || 'unknown';
+    if(!groups[group]){
+      groups[group] = {total: 0, idle: 0, busy: 0, timeout: 0, bad: 0};
+    }
+    groups[group].total++;
+    if(tpu.status === 'IDLE') groups[group].idle++;
+    if(tpu.status === 'BUSY') groups[group].busy++;
+    if(tpu.status === 'TIMEOUT') groups[group].timeout++;
+    if(tpu.status === 'BAD') groups[group].bad++;
+  });
+  
+  let html = '<div style="display:flex;flex-wrap:wrap;gap:16px;justify-content:space-between;">';
+  html += '<div><strong>总计:</strong> ';
+  html += `<span style="color:var(--txt)">${total}</span> | `;
+  html += `<span style="color:#20c997">IDLE: ${idle}</span> | `;
+  html += `<span style="color:#66d9ef">BUSY: ${busy}</span>`;
+  if(timeout > 0) html += ` | <span style="color:#ffc107">TIMEOUT: ${timeout}</span>`;
+  if(bad > 0) html += ` | <span style="color:#ff6b6b">BAD: ${bad}</span>`;
+  html += '</div></div>';
+  
+  // Add group breakdown
+  if(Object.keys(groups).length > 0){
+    html += '<div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border);">';
+    html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px;">';
+    
+    Object.keys(groups).sort().forEach(group => {
+      const g = groups[group];
+      html += `<div style="padding:8px;background:#0c1630;border:1px solid var(--border);border-radius:6px;">`;
+      html += `<div style="font-weight:600;margin-bottom:4px;">[${group}]</div>`;
+      html += `<div style="font-size:12px;color:var(--muted);">`;
+      html += `总计: ${g.total} | `;
+      html += `<span style="color:#20c997">空闲: ${g.idle}</span> | `;
+      html += `<span style="color:#66d9ef">繁忙: ${g.busy}</span>`;
+      if(g.timeout > 0) html += ` | <span style="color:#ffc107">超时: ${g.timeout}</span>`;
+      if(g.bad > 0) html += ` | <span style="color:#ff6b6b">故障: ${g.bad}</span>`;
+      html += `</div></div>`;
+    });
+    
+    html += '</div></div>';
+  }
+  
+  summary.innerHTML = html;
+}
+
+function filterTPUStatus(){
+  const searchInput = document.getElementById('tpu-status-search');
+  const query = searchInput.value.toLowerCase().trim();
+  
+  if(!query){
+    filteredTPUStatusData = [...allTPUStatusData];
+  } else {
+    filteredTPUStatusData = allTPUStatusData.filter(tpu => {
+      return (tpu.name || '').toLowerCase().includes(query) ||
+             (tpu.zone || '').toLowerCase().includes(query) ||
+             (tpu.group || '').toLowerCase().includes(query) ||
+             (tpu.status || '').toLowerCase().includes(query) ||
+             (tpu.users || []).some(u => u.toLowerCase().includes(query));
+    });
+  }
+  
+  renderTPUStatusTable();
+  updateTPUStatusSummary();
+}
+
+function clearTPUStatusFilter(){
+  document.getElementById('tpu-status-search').value = '';
+  filteredTPUStatusData = [...allTPUStatusData];
+  renderTPUStatusTable();
+  updateTPUStatusSummary();
+}
+
+function closeTPUStatusModal(){
+  const modal = document.getElementById('tpu-status-modal');
+  modal.classList.remove('show');
+}
+
+// Steal TPU Functions
+let currentStealTPU = null;
+let currentStealZone = null;
+
+async function showStealModal(tpuName, zone){
+  currentStealTPU = tpuName;
+  currentStealZone = zone;
+  
+  const modal = document.getElementById('steal-modal');
+  const loading = document.getElementById('steal-loading');
+  const content = document.getElementById('steal-content');
+  const error = document.getElementById('steal-error');
+  
+  // Update info
+  document.getElementById('steal-tpu-name').textContent = tpuName;
+  document.getElementById('steal-tpu-zone').textContent = zone;
+  
+  // Show modal and loading
+  modal.classList.add('show');
+  loading.style.display = 'block';
+  content.style.display = 'none';
+  error.style.display = 'none';
+  
+  try {
+    // Extract type from TPU name (e.g., v5p-128 from kmh-tpuvm-v5p-128-spot-xxx)
+    const typeMatch = tpuName.match(/v(\d+)(e|p)?-(\d+)/i);
+    let typeFilter = '';
+    if(typeMatch){
+      const version = typeMatch[1];
+      const variant = typeMatch[2] || '';
+      const cards = typeMatch[3];
+      typeFilter = `v${version}${variant}-${cards}`;
+    }
+    
+    // Fetch kengs from API
+    const params = new URLSearchParams();
+    if(zone) params.append('zone', zone);
+    if(typeFilter) params.append('type', typeFilter);
+    
+    const res = await fetch(`{{ url_for('api_tpu_keng') }}?${params.toString()}`);
+    const data = await res.json();
+    
+    if(!data.ok){
+      throw new Error(data.msg || '获取坑位失败');
+    }
+    
+    // Display kengs
+    const kengsList = document.getElementById('kengs-list');
+    kengsList.innerHTML = '';
+    
+    document.getElementById('keng-count').textContent = data.count;
+    
+    if(data.kengs.length === 0){
+      kengsList.innerHTML = '<div style="grid-column:1/-1;text-align:center;color:var(--muted);padding:20px;">没有找到可用的坑位</div>';
+    } else {
+      data.kengs.forEach(keng => {
+        const kengBtn = document.createElement('button');
+        kengBtn.className = 'btn';
+        kengBtn.style.cssText = 'padding:12px;text-align:left;display:flex;flex-direction:column;gap:4px;';
+        kengBtn.innerHTML = `
+          <div style="font-weight:600;color:var(--accent);">${keng.alias}</div>
+          <div style="font-size:11px;color:var(--muted);">${keng.zone}</div>
+          ${keng.user_note ? `<div style="font-size:10px;color:#9fb0d1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${keng.user_note}">${keng.user_note}</div>` : ''}
+        `;
+        kengBtn.onclick = () => executeSteal(keng.alias);
+        kengsList.appendChild(kengBtn);
+      });
+    }
+    
+    loading.style.display = 'none';
+    content.style.display = 'block';
+    
+  } catch(e) {
+    loading.style.display = 'none';
+    error.style.display = 'block';
+    error.textContent = `加载失败: ${e.message}`;
+  }
+}
+
+async function executeSteal(kengAlias){
+  if(!currentStealTPU || !kengAlias){
+    alert('参数错误');
+    return;
+  }
+  
+  // Confirm action
+  if(!confirm(`确认要将 ${currentStealTPU} 放入坑位 ${kengAlias} 吗？`)){
+    return;
+  }
+  
+  try {
+    const res = await fetch(`{{ url_for('api_tpu_fang') }}`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        new_tpu_name: currentStealTPU,
+        old_tpu_alias: kengAlias
+      })
+    });
+    
+    const data = await res.json();
+    
+    if(data.ok){
+      alert(`✅ 成功！\n\n${data.msg}`);
+      closeStealModal();
+      // Optionally refresh the TPU status
+    } else {
+      alert(`❌ 失败！\n\n${data.msg}`);
+    }
+    
+  } catch(e) {
+    alert(`❌ 操作失败: ${e.message}`);
+  }
+}
+
+function closeStealModal(){
+  const modal = document.getElementById('steal-modal');
+  modal.classList.remove('show');
+  currentStealTPU = null;
+  currentStealZone = null;
+}
+
+// Close modal when clicking outside
+document.getElementById('tpu-status-modal').addEventListener('click', (e) => {
+  if(e.target && e.target.id === 'tpu-status-modal') closeTPUStatusModal();
+});
+
+document.getElementById('steal-modal').addEventListener('click', (e) => {
+  if(e.target && e.target.id === 'steal-modal') closeStealModal();
+});
+
+// Add Enter key support for search
+document.addEventListener('DOMContentLoaded', function(){
+  const searchInput = document.getElementById('tpu-status-search');
+  if(searchInput){
+    searchInput.addEventListener('keypress', function(e){
+      if(e.key === 'Enter') filterTPUStatus();
+    });
+  }
+});
+
 window.addEventListener('load', () => loadPanel(true)); // Force initial load
 
 </script>
@@ -3497,6 +3894,239 @@ def api_reapply_async():
     tid = _register_task("reapply", {"alias": alias, "times": times, "wait": wait, "pre": pre})
     start_thread(_run_reapply, alias, times, wait, tid)
     return jsonify({"ok": True, "tid": tid})
+
+@app.route("/api/tpu-status")
+@require_auth
+def api_tpu_status():
+    """Get all TPU status by running 'tou' command"""
+    try:
+        # Run the 'tou' command (full path)
+        result = subprocess.run(
+            ["python", "/kmh-nfs-ssd-us-mount/code/qiao/work/tpu_dls/wrap_master.py"],
+            capture_output=True,
+            text=True,
+            timeout=120,  # 2 minutes timeout
+            cwd=HERE
+        )
+        
+        if result.returncode != 0:
+            return jsonify({
+                "ok": False,
+                "msg": f"Command failed: {result.stderr}",
+                "tpus": []
+            })
+        
+        # Parse the output
+        # First, strip ANSI color codes from the output
+        output = strip_ansi(result.stdout)
+        tpus = []
+        
+        # Merge wrapped lines (lines that start with whitespace)
+        lines = output.split('\n')
+        merged_lines = []
+        current_line = ""
+        
+        for line in lines:
+            # If line starts with whitespace and current_line has content, it's a continuation
+            if line and line[0] in (' ', '\t') and current_line:
+                # Remove leading/trailing whitespace and append
+                current_line += line.strip()
+            else:
+                # Save previous line if it exists
+                if current_line:
+                    merged_lines.append(current_line)
+                current_line = line
+        
+        # Don't forget the last line
+        if current_line:
+            merged_lines.append(current_line)
+        
+        # Parse lines with TPU information
+        # Format: [INFO] [group] [STATUS] tpu_name (zone) [users=['user1', 'user2']]
+        # Note: zone is optional (TIMEOUT status may not have zone)
+        import re
+        pattern = r'\[INFO\]\s+\[([^\]]+)\]\s+\[(IDLE|BUSY|TIMEOUT|BAD)\]\s+([^\s\(]+)\s*(?:\(([^)]+)\))?(?:\s+users=\[([^\]]*)\])?'
+        
+        for line in merged_lines:
+            match = re.search(pattern, line)
+            if match:
+                group = match.group(1)
+                status = match.group(2)
+                tpu_name = match.group(3)
+                zone = match.group(4) if match.group(4) else ""
+                users_str = match.group(5) if match.group(5) else ""
+                
+                # Parse users list
+                users = []
+                if users_str:
+                    # Remove quotes and split by comma
+                    users = [u.strip().strip("'\"") for u in users_str.split(',')]
+                    users = [u for u in users if u]  # Remove empty strings
+                
+                tpus.append({
+                    "group": group,
+                    "status": status,
+                    "name": tpu_name,
+                    "zone": zone,
+                    "users": users
+                })
+        
+        return jsonify({
+            "ok": True,
+            "tpus": tpus,
+            "raw_output": output
+        })
+        
+    except subprocess.TimeoutExpired:
+        return jsonify({
+            "ok": False,
+            "msg": "Command timed out",
+            "tpus": []
+        })
+    except Exception as e:
+        return jsonify({
+            "ok": False,
+            "msg": str(e),
+            "tpus": []
+        })
+
+@app.route("/api/tpu-keng")
+@require_auth
+def api_tpu_keng():
+    """Get available keng (坑位) for stealing TPUs"""
+    try:
+        import re
+        
+        # Get zone and type from query parameters
+        zone_filter = request.args.get('zone', '').strip()
+        type_filter = request.args.get('type', '').strip()
+        
+        # Normalize type filter (v6e-32 -> v6-32, v5p-32 -> v5-32)
+        if type_filter:
+            type_filter = re.sub(r'v(\d+)(e|p)(-\d+)?', r'v\1\3', type_filter)
+        
+        # Read all TPU information from spreadsheet
+        if not SHEET_MODULE_OK or not hasattr(sheet_mod, 'read_sheet_info'):
+            return jsonify({"ok": False, "msg": "Sheet module not available", "kengs": []})
+        
+        tpu_information = sheet_mod.read_sheet_info()  # type: ignore
+        
+        # Filter for deleted TPUs with tmp pattern
+        kengs = []
+        tmp_pattern = re.compile(r'^v\d+(e|p)?-\d+-tmp', re.IGNORECASE)
+        
+        for tpu_name, info in tpu_information.items():
+            alias = info.get('alias', '')
+            
+            # Check if alias matches v*-*-tmp* pattern
+            if not tmp_pattern.match(alias):
+                continue
+            
+            # Check if TPU is deleted (script_note is 'not found' or 'preempted', OR running_status is '没了!')
+            script_note = info.get('script_note', '').lower()
+            running_status = info.get('running_status', '')
+            if not (script_note in ['not found', 'preempted'] or running_status == '没了!'):
+                continue
+            
+            # Apply zone filter if specified
+            if zone_filter and info.get('zone') != zone_filter:
+                continue
+            
+            # Apply type filter if specified
+            if type_filter:
+                # Extract type from alias (e.g., v6-32 from v6-32-tmp1, v6e-64 from v6e-64-tmp2)
+                alias_match = re.match(r'(v\d+(e|p)?-\d+)', alias, re.IGNORECASE)
+                if alias_match:
+                    alias_type = alias_match.group(1)
+                    # Normalize alias type (v6e-64 -> v6-64, v5p-32 -> v5-32)
+                    alias_type = re.sub(r'v(\d+)(e|p)(-\d+)', r'v\1\3', alias_type)
+                    
+                    # Check if it matches the type filter
+                    if type_filter.count('-') == 0:
+                        # Filter is like 'v6', match all v6-* types
+                        if not alias_type.startswith(type_filter):
+                            continue
+                    else:
+                        # Filter is like 'v6-32', exact match
+                        if alias_type != type_filter:
+                            continue
+                else:
+                    # Could not extract type from alias, skip
+                    continue
+            
+            kengs.append({
+                "alias": alias,
+                "zone": info.get('zone', ''),
+                "user": info.get('user', ''),
+                "user_note": info.get('user_note', ''),
+                "full_name": tpu_name
+            })
+        
+        # Sort by alias
+        kengs.sort(key=lambda x: x['alias'])
+        
+        return jsonify({
+            "ok": True,
+            "kengs": kengs,
+            "count": len(kengs)
+        })
+        
+    except Exception as e:
+        return jsonify({
+            "ok": False,
+            "msg": str(e),
+            "kengs": []
+        })
+
+@app.route("/api/tpu-fang", methods=["POST"])
+@require_auth
+def api_tpu_fang():
+    """Execute tpu fang command to replace old TPU with new TPU"""
+    try:
+        p = request.get_json(silent=True) or {}
+        new_tpu_name = str(p.get("new_tpu_name", "")).strip()
+        old_tpu_alias = str(p.get("old_tpu_alias", "")).strip()
+        
+        if not new_tpu_name:
+            return jsonify({"ok": False, "msg": "缺少 new_tpu_name 参数"})
+        if not old_tpu_alias:
+            return jsonify({"ok": False, "msg": "缺少 old_tpu_alias 参数"})
+        
+        # Run tpu fang command
+        result = subprocess.run(
+            ["python", TPU_PY_PATH, "fang", new_tpu_name, old_tpu_alias],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            cwd=HERE
+        )
+        
+        output = result.stdout + result.stderr
+        
+        # Check if successful (look for success message)
+        if result.returncode == 0 and "Successfully fanged" in output:
+            return jsonify({
+                "ok": True,
+                "msg": f"成功将 {new_tpu_name} 放入坑位 {old_tpu_alias}",
+                "output": output
+            })
+        else:
+            return jsonify({
+                "ok": False,
+                "msg": f"Fang 失败: {output}",
+                "output": output
+            })
+        
+    except subprocess.TimeoutExpired:
+        return jsonify({
+            "ok": False,
+            "msg": "命令超时"
+        })
+    except Exception as e:
+        return jsonify({
+            "ok": False,
+            "msg": str(e)
+        })
 
 # 申请并 Resume/Rerun
 @app.route("/api/user/<username>/apply-resume-async", methods=["POST"])

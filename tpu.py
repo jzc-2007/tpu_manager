@@ -142,7 +142,8 @@ if __name__ == '__main__':
 
         # ------------ Locking and unlocking ------------
         elif cmd == 'lock-data': data_io.lock_data()
-        elif cmd == 'unlock-data': data_io.release_lock_data()
+        elif cmd == 'unlock-data': data_io.release_lock_data()           
+        elif cmd == 'rm-lock': logger.remove_file_lock(args[2])
 
         # ------------ Scripts Acknowledgment ------------
         elif cmd == 'upd-log': jobs.upd_log(args[2], args[3], args[4], args[5], args[6]) #windows, log_dir, stage_dir, ka, time
@@ -165,7 +166,6 @@ if __name__ == '__main__':
         elif cmd == 'cc': gs_buckets.copy_checkpoint(args[2], args[3], src_zone=args[4]) if len(args) == 5 else gs_buckets.copy_checkpoint(args[2], args[3]) # copy checkpoint
         elif cmd == 'cca': gs_buckets.copy_checkpoint(args[2], args[3], src_zone=args[4], all=True) if len(args) == 5 else gs_buckets.copy_checkpoint(args[2], args[3], all=True) # copy checkpoint
         elif cmd == 'fang': logger.fang_new_tpu(args[2], args[3])
-        elif cmd == 'fmd': logger.fang_new_tpu_and_mount_disk(args[2], args[3])
 
         else: 
         ############### JOBS that require a user ###############
@@ -204,6 +204,8 @@ if __name__ == '__main__':
             elif cmd == 'rerun': jobs.rerun(user_object, args[2:])
             elif cmd == 'get-stage-dir': print(dirs.get_job_stage_dir(user_object, args[2]))
             elif cmd == 'kill-window' or cmd == '-kw': jobs.kill_window(user_object, args[2:])
+            elif cmd == 'zhan': logger.zhan(user_object.name, args[2])
+            elif cmd == 'fmd': logger.fang_new_tpu_and_mount_disk(args[2], args[3], args[4]) # user, vm_name, alias
 
             # ------------ Queue Operations ------------
             elif cmd == 'queue': queue.Queue(user_object, args[2:])

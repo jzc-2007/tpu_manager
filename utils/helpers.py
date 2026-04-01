@@ -35,6 +35,7 @@ def get_zone_pre_spot(tpu):
     If the input is alias, it will be replaced with the real TPU name.
     Return zone, pre, spot, tpu_full_name
     """
+    # print(f"{INFO} get_zone_pre_spot: Getting zone, preemptible and spot information for TPU {tpu}")
     data = read_data()
     tpu_aliases = data['tpu_aliases']
     all_tpus = []
@@ -55,11 +56,35 @@ def get_zone_pre_spot(tpu):
     return zone, tpu in data['pre_info']['preemptible'], tpu in data['pre_info']['spot'], tpu
 
 
+# 锁文件用时间格式：无空格，统一下划线，可字符串排序、可解析比较
+LOCK_TIME_FMT = "%Y-%m-%d_%H-%M-%S"
+
 def get_abs_time_str():
     """
     Get the current time in UTC in the format YYYY-MM-DD HH:MM:SS.
     """
     return datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+def get_lock_time_str():
+    """
+    锁文件用时间字符串：UTC，格式 YYYY-MM-DD_HH-MM-SS（无空格、统一下划线）。
+    """
+    return datetime.datetime.utcnow().strftime(LOCK_TIME_FMT)
+
+def parse_lock_time_str(s):
+    """
+    解析 get_lock_time_str 返回的字符串为 datetime（UTC）。
+    """
+    return datetime.datetime.strptime(s, LOCK_TIME_FMT)
+
+def lock_time_seconds_between(time_str_earlier, time_str_later):
+    """
+    计算两个锁格式时间字符串之间的间隔秒数（time_str_later - time_str_earlier）。
+    返回浮点数秒，若 later 更早则返回负数。
+    """
+    t1 = parse_lock_time_str(time_str_earlier)
+    t2 = parse_lock_time_str(time_str_later)
+    return (t2 - t1).total_seconds()
 
 def get_chn_time_str():
     return convert_utcstr_to_chnstr(get_abs_time_str())

@@ -188,8 +188,11 @@ def get_tpu_info_sheet(tpu):
     Args: TPU name or alias
     Return: a dictionary with keys ['zone', 'pre', 'belong', 'running_status', 'user', 'user_note', 'script_note', 'alias', 'version', 'type', 'line']
     """
+    # print(f"{INFO} get_tpu_info_sheet: Getting information for TPU {tpu} from the sheet...")
     tpu_information = read_sheet_info()
+    # print(f"{INFO} get_tpu_info_sheet: Looking for TPU {tpu} in the sheet information...")
     _, _, _, full_name = get_zone_pre_spot(tpu)
+    # print(f"{INFO} get_tpu_info_sheet: Full name for TPU {tpu} is {full_name}")
     if full_name in tpu_information:
         return tpu_information[full_name]
     else:

@@ -3,9 +3,9 @@ from .helpers import *
 from .constants import *
 from . import users
 from .data_io import read_and_lock_data, write_and_unlock_data, release_lock_data, read_data, read_and_lock_legacy, write_legacy, write_and_unlock_legacy, release_lock_legacy
-from .operate import check_tpu_status, apply_and_set_env, kill_jobs_tpu, restart, check_tpu_running
+from .operate import check_tpu_status, apply_and_set_env, kill_jobs_tpu, restart, check_tpu_running, mount_disk
 from .sheet import get_tpu_info_sheet, write_sheet_info, read_tpu_info_from_type, find_tpu_from_type
-from .logger import get_wandb_notes, register_tpu_and_write_spreadsheet
+from .logger import get_wandb_notes, register_tpu_and_write_spreadsheet, check_reserved_user
 from .autenticate import autenticate
 from .gs_buckets import check_gs_logdir_exists
 
@@ -818,6 +818,8 @@ def parse_config_args(user_obj, args):
 
     return dir_id, dir_path, tpu, tag, rule, monitor, config_args, customized_settings, spreadsheet_notes  
 
+
+
 def run(user_obj, args, monitor_job = True):
     # print('args:', args)
     data = read_data()
@@ -853,6 +855,18 @@ def run(user_obj, args, monitor_job = True):
         print(f"{INFO} run: Registering TPU {tpu} in zone {zone} with alias {alias} and spreadsheet name {spreadsheet_name}, Default pre=False, spot=True")
         register_tpu_and_write_spreadsheet(tpu, zone, tpu_alias=alias, spreadsheet_name=spreadsheet_name)
         time.sleep(3)
+
+        print(f"{GOOD} run: Registered TPU {tpu} successfully")
+
+        print(f"{INFO} run: Mounting disk for this TPU...")
+        try: mount_disk(tpu, zone)
+        except Exception as e:
+            print(f"{FAIL} run: Failed to mount disk for TPU {tpu}: {e}")
+            return
+        except KeyboardInterrupt:
+            print(f"{INFO} run: Stopping mounting disk...")
+            return
+        print(f"{GOOD} run: Mounted disk for TPU {tpu} successfully")
     
     dir_id, dir_path, tpu, tag, rule, monitor, config_args, customized_settings, spreadsheet_notes = parse_config_args(user_obj, args)
 
@@ -860,6 +874,15 @@ def run(user_obj, args, monitor_job = True):
     if tpu is not None:
         zone, _, _, _ = get_zone_pre_spot(tpu)
         print(f"{INFO} Checking the status of TPU {tpu} in zone {zone}...")
+
+        # Check if the TPU is reserved by others
+        reserved_user = check_reserved_user(tpu)
+        if reserved_user is not None and reserved_user != user_obj.name:
+            print(f"{WARNING} run: TPU {tpu} is reserved by {reserved_user}")
+            print(f"{INFO} run: Quiting... {tpu}")
+            return
+        print(f"{INFO} run: TPU {tpu} is not reserved by others.")
+
         tpu_status = check_tpu_status(tpu)
 
         if tpu_status == 'preempted':
@@ -920,8 +943,9 @@ def run(user_obj, args, monitor_job = True):
             return
 
     # Check the spreadsheet for the TPU information
-    print(f"{INFO} run: Checking the TPU information in the spreadsheet...")
+    print(f"{INFO} run: Checking the TPU information in the spreadsheet..., tpu: {tpu}")
     tpu_info = get_tpu_info_sheet(tpu)
+    print(f"{INFO} run: TPU {tpu} information in the spreadsheet: {tpu_info}")
     running_status, running_user, notes = tpu_info['running_status'], tpu_info['user'], tpu_info['user_note']
     if running_user != user_obj.spreadsheet_name and (running_status == 'running' or running_status == 'reserved') and (not '--auto' in args):
         print(f"{WARNING} run: TPU {tpu} is already {RED}{running_status}{NC} by {running_user} in the spreadsheet")
@@ -949,6 +973,8 @@ def run(user_obj, args, monitor_job = True):
         tpu_info['user_note'] = ''
     write_sheet_info(tpu_info)
     # print(f"{GOOD} run: TPU {tpu} information updated in the spreadsheet")
+
+    print(f"{INFO} run: Checking if there are jobs running in the TPU {tpu}...")
 
     # Check if there are jobs running in the tpu
     if tpu is not None:
@@ -1817,3 +1843,4 @@ def read_head_tail(path, n=1000, encoding="utf-8"):
     with open(path, 'r') as f:
         x = f.read()
     return x
+

@@ -119,7 +119,7 @@ def kill_jobs_tpu(tpu, username = None, ignore_window = None):
         print(f"{INFO} Cleaning /tmp/tpu_logs occupation...")
         kill_accel_cmd = (
             f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --project {PROJECT} --worker=all "
-            "--command \"sudo rm -rf /tmp/tpu_logs ; sudo rm /tmp/libtpu_lockfile\""
+            "--command \"sudo rm -rf /tmp/tpu_logs ; sudo rm /tmp/libtpu_lockfile; sudo rm -rf /tmp/* \""
         )
         subprocess.run(kill_accel_cmd, shell=True, timeout=60, check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
@@ -614,8 +614,8 @@ def mount_disk(tpu, quiet = False):
     """
     zone, pre, spot, tpu = get_zone_pre_spot(tpu)
 
-    if 'v5p' in tpu: # use mount disk new
-        return mount_disk_v5(tpu, quiet=quiet)
+    # if 'v5p' in tpu: # use mount disk new
+    #     return mount_disk_v5(tpu, quiet=quiet)
 
     if zone is None: return
     print(f"{INFO} Mounting disk in TPU {tpu}...")
@@ -644,11 +644,6 @@ def mount_disk(tpu, quiet = False):
       "
     '''
 
-    # sudo mkdir -p /kmh-nfs-ssd-eu-mount
-    # sudo mount -t nfs -o vers=3 10.150.179.250:/kmh_nfs_ssd_eu /kmh-nfs-ssd-eu-mount
-    # sudo chmod go+rw /kmh-nfs-ssd-eu-mount
-    # ls /kmh-nfs-ssd-eu-mount
-
     cmd2 = f"""
     gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --project {PROJECT} --worker=all --command "
     sudo mkdir -p /kmh-nfs-us-mount
@@ -665,26 +660,6 @@ def mount_disk(tpu, quiet = False):
     """
 
     if 'v6' in tpu or 'v5p' in tpu:
-    #     cmd2 += f'''
-    # gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} \
-    # --worker=all --command "
-    # sudo rm -rf /home/\$(whoami)/.local
-    # echo 'Current dir: '
-    # pwd
-    # conda create -n NNX python==3.10.14 -y
-    # conda activate NNX # These two lines are very smart. If on a device there is no conda, then these two lines error out, but the remaining can still be run.
-    # pip install 'setuptools==69.5.1'
-    # pip install jax[tpu]==0.4.37 -f https://storage.googleapis.com/jax-releases/libtpu_releases.html
-    # pip install jaxlib==0.4.37 flax==0.10.2
-    # # pip install -r requirements.txt # other tang dependencies
-    # pip install pillow clu tensorflow==2.15.0 'keras<3' 'torch<=2.4' torchvision tensorflow_datasets matplotlib==3.9.2
-    # pip install orbax-checkpoint==0.6.4 ml-dtypes==0.5.0 tensorstore==0.1.67
-    # pip install diffusers dm-tree cached_property ml-collections
-    # pip install 'wandb==0.19.9'
-    # pip install gcsfs
-    # pip install lpips-j==0.0.6
-    # "
-    # '''
         # get bucket name by zone
         if 'us-east1' in zone: bucket = 'gs://kmh-gcp-us-east1'
         elif 'us-east5' in zone: bucket = 'gs://kmh-gcp-us-east5'
@@ -704,11 +679,14 @@ def mount_disk(tpu, quiet = False):
     pwd
     cd
     gcloud auth activate-service-account --key-file=/kmh-nfs-ssd-us-mount/code/qiao/{zone[:-2]}.json
-    gsutil -m cp -r {bucket}/hanhong/{v}_wheels.tar.gz ./wheels.tar.gz
+    gsutil -m cp -r {bucket}/hanhong/v5_wheels_xin.tar.gz ./wheels.tar.gz
     tar -xvf wheels.tar.gz
     rm -rf .local || true
     pip install --no-index --find-links=wheels wheels/*.whl --no-deps --force-reinstall
     rm -rf wheels wheels.tar.gz
+    pip install numpy==1.26.4
+    pip install datasets==4.4.2
+    echo 补 > ~/sqa冲
     "
     '''
 
@@ -735,36 +713,36 @@ def mount_disk(tpu, quiet = False):
         print(f"stdout: {e.stdout}")
         return 'mounting failed'
 
-    v5_cmd = f"""
-    gcloud compute tpus tpu-vm ssh {tpu} \
-  --zone {zone} \
-  --worker=all \
-  --command='
-    rm -rf ~/.local && \
-    export PIP_DEFAULT_TIMEOUT=120 && \
-    pip install setuptools==65.5.1 && \
-    pip install jax[tpu]==0.4.37 jaxlib -f https://storage.googleapis.com/jax-releases/libtpu_releases.html && \
-    pip install flax>=0.8 && \
-    pip install pillow clu tensorflow==2.15.0 "keras<3" "torch<=2.4" torchvision tensorflow_datasets matplotlib==3.9.2 && \
-    pip install orbax-checkpoint==0.4.4 ml-dtypes==0.5.0 tensorstore==0.1.67 && \
-    pip install diffusers dm-tree cached_property ml-collections transformers==4.38.2 lpips_j && \
-    pip install wandb
-    pip install gcsfs
-  '
-  """
-    if 'v5' in tpu:
-        print(f"{INFO} Running birdy v5 command for {tpu}...")
-        try:
-            subprocess.run(v5_cmd, shell=True, timeout=600, check=True,
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        except subprocess.TimeoutExpired:
-            print(f"{FAIL} mount_disk: v5 mounting timed out")
-            return 'v5 mounting timeout'
-        except subprocess.CalledProcessError as e:
-            print(f"{FAIL} mount_disk: v5 mounting failed: {e}")
-            print(f"stderr: {e.stderr}")
-            print(f"stdout: {e.stdout}")
-            return 'v5 mounting failed'
+#     v5_cmd = f"""
+#     gcloud compute tpus tpu-vm ssh {tpu} \
+#   --zone {zone} \
+#   --worker=all \
+#   --command='
+#     rm -rf ~/.local && \
+#     export PIP_DEFAULT_TIMEOUT=120 && \
+#     pip install setuptools==65.5.1 && \
+#     pip install jax[tpu]==0.4.37 jaxlib -f https://storage.googleapis.com/jax-releases/libtpu_releases.html && \
+#     pip install flax>=0.8 && \
+#     pip install pillow clu tensorflow==2.15.0 "keras<3" "torch<=2.4" torchvision tensorflow_datasets matplotlib==3.9.2 && \
+#     pip install orbax-checkpoint==0.4.4 ml-dtypes==0.5.0 tensorstore==0.1.67 && \
+#     pip install diffusers dm-tree cached_property ml-collections transformers==4.38.2 lpips_j && \
+#     pip install wandb
+#     pip install gcsfs
+#   '
+#   """
+#     if 'v5' in tpu:
+#         print(f"{INFO} Running birdy v5 command for {tpu}...")
+#         try:
+#             subprocess.run(v5_cmd, shell=True, timeout=600, check=True,
+#                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+#         except subprocess.TimeoutExpired:
+#             print(f"{FAIL} mount_disk: v5 mounting timed out")
+#             return 'v5 mounting timeout'
+#         except subprocess.CalledProcessError as e:
+#             print(f"{FAIL} mount_disk: v5 mounting failed: {e}")
+#             print(f"stderr: {e.stderr}")
+#             print(f"stdout: {e.stdout}")
+#             return 'v5 mounting failed'
     
     print(f"{INFO} Mounting disk in TPU {tpu} done")
     print(f"{INFO} Checking environment in TPU {tpu}...")

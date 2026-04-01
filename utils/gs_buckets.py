@@ -88,6 +88,7 @@ def check_gs_logdir_exists(logdir, zone, quiet=True, all=False):
         logdir = logdir.replace('/kmh-nfs-us-mount/logs/sqa', '/kmh-nfs-ssd-us-mount/logs/sqa')
     
     for z in [zone] + zones_list:
+        if z == 'code/qiao/work': continue
         converted = convert_to_gs_by_zone(logdir, z)
         if converted is not None and check_gs_dir_exists(converted):
             # find correct ckpt path
