@@ -22,6 +22,7 @@ _tpu = 'python /home/jzc/zhichengjiang/working/xibo_tpu_manager/tpu.py'
 _tou = 'python /kmh-nfs-ssd-us-mount/code/qiao/work/tpu_dls/wrap_master.py'
 
 def read_sqa():
+    """读取 sqa.json，返回包含 running / finished / resume_next_round 三个列表的 dict。"""
     with open(f'/kmh-nfs-ssd-us-mount/code/qiao/work/tpu_manager/sqa.json', 'r') as file:
         x = file.read()
         x = json.loads(x)
@@ -31,6 +32,7 @@ def read_sqa():
     return x
 
 def _write_sqa_content(x):
+    """将 sqa dict 写回 sqa.json（内部使用，调用前请先填充三个列表字段）。"""
     x.setdefault('running', [])
     x.setdefault('finished', [])
     x.setdefault('resume_next_round', [])
@@ -39,6 +41,7 @@ def _write_sqa_content(x):
         file.write('\n')
 
 def write_sqa(window_id):
+    """将 window_id 加入 sqa.running（表示 MONITOR 正在处理该窗口，防止重入）。"""
     x = read_sqa()
     if window_id not in x['running']:
         x['running'].append(window_id)
@@ -46,6 +49,7 @@ def write_sqa(window_id):
     return
 
 def remove_sqa(window_id):
+    """将 window_id 从 sqa.running 移除（resume 失败/跳过时调用，解除锁定）。"""
     x = read_sqa()
     if window_id in x['running']:
         x['running'].remove(window_id)
@@ -53,6 +57,7 @@ def remove_sqa(window_id):
     return
 
 def finish_sqa(window_id):
+    """将 window_id 从 running 移入 finished（resume 成功后调用）。"""
     x = read_sqa()
     if window_id in x['running']:
         x['running'].remove(window_id)
@@ -62,6 +67,7 @@ def finish_sqa(window_id):
     return
 
 def add_resume_next_round(window_id):
+    """将 window_id 加入 resume_next_round 缓冲区：TPU 仍存在但空闲，下一轮再 resume。"""
     x = read_sqa()
     if window_id not in x['resume_next_round']:
         x['resume_next_round'].append(window_id)
@@ -69,6 +75,7 @@ def add_resume_next_round(window_id):
     return
 
 def remove_resume_next_round(window_id):
+    """将 window_id 从 resume_next_round 缓冲区移除。"""
     x = read_sqa()
     if window_id in x['resume_next_round']:
         x['resume_next_round'].remove(window_id)
@@ -76,6 +83,7 @@ def remove_resume_next_round(window_id):
     return
 
 def add_MONITOR_log(log):
+    """将日志同时追加写入 output.log 并打印到 stdout（带 UTC 时间戳）。"""
     # data = data_io.read_and_lock_data()
     # try:
     #     data["MONITOR_logs"].append({
@@ -92,6 +100,8 @@ def add_MONITOR_log(log):
     return
 
 def _append_resume_file_log(window_id, command_name, command, result):
+    """将某次 resume/fmd 命令的完整执行结果（cmd、returncode、stdout、stderr）追加写入
+    logs/<window_id>/<command_name>.txt，便于事后排查。"""
     log_dir = os.path.join("logs", str(window_id))
     os.makedirs(log_dir, exist_ok=True)
     log_path = os.path.join(log_dir, f"{command_name}.txt")
@@ -107,6 +117,7 @@ def _append_resume_file_log(window_id, command_name, command, result):
         log_file.write("-" * 80 + "\n")
 
 def show_MONITOR_log(timezone = 'us'):
+    """从 data.json 读取历史 MONITOR 日志并按指定时区（'us'=EDT / 'cn'=CHN）打印。"""
     data = data_io.read_data()
     for log in data["MONITOR_logs"]:
         cur_time = log["time"]
@@ -121,6 +132,7 @@ def show_MONITOR_log(timezone = 'us'):
         print(f"{LOG} {show_time}: {msg}")
     
 def avilable_aliases(tpu_type: str, zone):
+    """根据 TPU 类型和 zone 返回该区域可用的临时 alias 列表（如 v6e-64-tmp51 … v6e-64-tmp58）。"""
     if zone.startswith('us-central1'):
         return [tpu_type + '-tmp' + str(i) for i in range(2, 9)]
     elif zone.startswith('us-east5'):
@@ -128,10 +140,15 @@ def avilable_aliases(tpu_type: str, zone):
             return [tpu_type + '-tmp' + str(i) for i in range(201, 209)]
         if tpu_type.startswith('v6e'):
             return [tpu_type + '-tmp' + str(i) for i in range(51, 59)]
+    elif zone.startswith('asia-northeast1-b'):
+        assert tpu_type.startswith('v6e')
+        return [tpu_type + '-tmp' + str(i) for i in range(201, 209)]
     else:
         raise ValueError(f"Invalid zone: {zone}")
 
 def check_job_status(job):
+    """通过 gcloud 查询 job 对应 TPU 的状态，返回 'preempted' / 'deleted' / None。
+    None 表示 TPU 仍然存活（非抢占）。"""
     if job["log_dir"] == '' or job["log_dir"] is None:
         return None
     tpu = job["tpu"]
@@ -202,6 +219,7 @@ def _extract_zone(tpu_name):
     return None
 
 def _get_job_type_zone(job):
+    """从 job dict 中提取 (tpu_type, zone)，类型来自 TPU 名称，zone 来自 log_dir 路径。"""
     old_tpu = job["tpu"]
     target_type = _extract_tpu_type(old_tpu)
     log_dir = job.get("log_dir", "")
@@ -224,6 +242,7 @@ def _zone_region(zone):
     return '-'.join(parts[:-1])
 
 def _parse_idle_tpus_from_tou(stdout):
+    """解析 tou 输出，返回所有 [IDLE] TPU 的 (tpu_name, zone) 列表。"""
     idle_tpus = []
     clean_stdout = _strip_ansi(stdout)
     for line in clean_stdout.splitlines():
@@ -235,6 +254,8 @@ def _parse_idle_tpus_from_tou(stdout):
     return idle_tpus
 
 def _get_tpu_usage_from_tou(stdout, tpu_name):
+    """在 tou 输出中查找指定 TPU 的占用状态。
+    返回 ('idle', []) / ('busy', [user, ...]) / ('unknown', [])。"""
     clean_stdout = _strip_ansi(stdout)
     for line in clean_stdout.splitlines():
         idle_match = re.search(r"\[IDLE\]\s+([^\s]+)\s+\(([^)]+)\)", line)
@@ -256,6 +277,8 @@ def _get_tpu_usage_from_tou(stdout, tpu_name):
     return 'unknown', []
 
 def _has_retrying_ssh_error_in_recent_logs(job, recent_lines=40):
+    """检查 job 的 output.log 末尾 recent_lines 行中是否包含 SSH 重试错误，
+    用于区分「TPU 还活着但 SSH 卡住」和「TPU 已消失」两种 error 情形。"""
     log_dir = job.get('log_dir')
     if not log_dir:
         return False
@@ -272,6 +295,43 @@ def _has_retrying_ssh_error_in_recent_logs(job, recent_lines=40):
 
     tail_text = ''.join(tail_lines)
     return "Retrying: SSH command error" in tail_text
+
+_FS_SCRIPT = "/kmh-nfs-ssd-us-mount/code/qiao/work/tpu_manager/find_saving_window.py"
+
+def _get_saving_window(window_id):
+    """
+    Run find_saving_window.py to walk up the father chain and find the most
+    recent ancestor whose output.log contains a "saving" line.
+    Returns the actual window id (int) to resume; falls back to window_id on any error.
+    """
+    try:
+        result = subprocess.run(
+            ["python3", _FS_SCRIPT, str(window_id)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=30
+        )
+        if result.returncode == 0:
+            actual = int(result.stdout.strip())
+            if actual != window_id:
+                add_MONITOR_log(
+                    f"{INFO} _get_saving_window: window {window_id} 没有saving，"
+                    f"找到有saving的祖先 window {actual}，改为resume它\n"
+                )
+            return actual
+        else:
+            add_MONITOR_log(
+                f"{WARNING} _get_saving_window: fs {window_id} 失败: "
+                f"{result.stderr.strip()}, 保持原窗口 {window_id}\n"
+            )
+            return window_id
+    except Exception as e:
+        add_MONITOR_log(
+            f"{WARNING} _get_saving_window: fs {window_id} 异常: {e}, 保持原窗口 {window_id}\n"
+        )
+        return window_id
+
 
 def _pick_idle_tpu(idle_tpus, target_type, target_zone):
     """
@@ -317,6 +377,8 @@ def _pick_idle_tpu(idle_tpus, target_type, target_zone):
     return None, None, None
 
 def _pick_new_alias(target_type, zone):
+    """从该 zone 的候选 alias 列表中，找出全名不出现在 tou 输出里的第一个 alias
+    （即当前没有被任何人用到的 alias），用于 fmd 放卡。返回 alias 字符串或 None。"""
     available_aliases = avilable_aliases(target_type, zone)
     # do tou
     tou_result = subprocess.run(
@@ -440,6 +502,7 @@ def restart_rerun(job, timeout=900):
 def mainloop():
     error_jobs = {'preempted': [], 'deleted': [], 'tpu_still_exists': [], 'resume_next_round': []}
     data = data_io.read_data()
+    sqa_session_name = data['users']['sqa']['tmux_name']
     sqa = read_sqa()
     resume_next_round_set = set(sqa.get('resume_next_round', []))
     check_result = subprocess.run('python /home/jzc/zhichengjiang/working/xibo_tpu_manager/tpu.py check sqa', shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
@@ -534,11 +597,12 @@ def mainloop():
                 remove_resume_next_round(_window)
                 continue
 
+            actual_window = _get_saving_window(_window)
             write_sqa(_window)
             try:
                 add_MONITOR_log(f'{INFO} 我在试着 resume window {_window}. 这是上一轮我就看见的，buffer命中，直接resume\n')
-                resume_cmd = f'{_tpu} resume sqa window={_window} tpu={_old_tpu}'
-                add_MONITOR_log(f'{INFO} 运行 resume 命令: {resume_cmd}\n')
+                resume_cmd = f'{_tpu} resume sqa window={actual_window} tpu={_old_tpu}'
+                add_MONITOR_log(f'{INFO} 运行 resume 命令 (actual_window={actual_window}): {resume_cmd}\n')
                 resume_result = subprocess.run(
                     resume_cmd,
                     shell=True,
@@ -554,6 +618,9 @@ def mainloop():
                 remove_resume_next_round(_window)
                 add_MONITOR_log(f'{GAOCHAO} buffer resume 上了，siuuuuuuuuuuuuuuu')
                 finish_sqa(_window)
+                if actual_window != _window:
+                    add_MONITOR_log(f'{INFO} 关掉无saving的窗口 {_window}\n')
+                    os.system(f"tmux kill-window -t {sqa_session_name}:{_window}")
             except Exception as e:
                 add_MONITOR_log(f"{MADE} buffer resume 失败了: {e}")
                 remove_sqa(_window)
@@ -663,8 +730,9 @@ def mainloop():
                     continue
                 add_MONITOR_log(f'{GAOCHAO} 放完了，哈哈')
 
-                resume_cmd = f'{_tpu} resume sqa window={_window} tpu={new_tpu_name}'
-                add_MONITOR_log(f'{INFO} 运行 resume 命令: {resume_cmd}\n')
+                actual_window = _get_saving_window(_window)
+                resume_cmd = f'{_tpu} resume sqa window={actual_window} tpu={new_tpu_name}'
+                add_MONITOR_log(f'{INFO} 运行 resume 命令 (actual_window={actual_window}): {resume_cmd}\n')
                 resume_result = subprocess.run(
                     resume_cmd,
                     shell=True,
@@ -686,6 +754,9 @@ def mainloop():
                     continue
                 add_MONITOR_log(f'{GAOCHAO} resume 上了，siuuuuuuuuuuuuuuu')
                 finish_sqa(_window)
+                if actual_window != _window:
+                    add_MONITOR_log(f'{INFO} 关掉无saving的窗口 {_window}\n')
+                    os.system(f"tmux kill-window -t {sqa_session_name}:{_window}")
             except subprocess.TimeoutExpired as e:
                 add_MONITOR_log(f"{MADE} 我失败了(timeout): {e}\n")
                 remove_sqa(_window)
