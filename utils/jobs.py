@@ -5,7 +5,7 @@ from . import users
 from .data_io import read_and_lock_data, write_and_unlock_data, release_lock_data, read_data, read_and_lock_legacy, write_legacy, write_and_unlock_legacy, release_lock_legacy
 from .operate import check_tpu_status, apply_and_set_env, kill_jobs_tpu, restart, check_tpu_running, mount_disk
 from .sheet import get_tpu_info_sheet, write_sheet_info, read_tpu_info_from_type, find_tpu_from_type
-from .logger import get_wandb_notes, register_tpu_and_write_spreadsheet, check_reserved_user
+from .logger import get_wandb_notes, register_tpu_and_write_spreadsheet, check_reserved_user, zhan
 from .autenticate import autenticate
 from .gs_buckets import check_gs_logdir_exists
 
@@ -445,6 +445,13 @@ def resume_rerun_job(job, new_tpu = None, load_ckpt = True):
     tpu = job["tpu"] if new_tpu is None else new_tpu
     zone, _, _, _ = get_zone_pre_spot(tpu)
 
+    # first zhan the tpu
+    ret = zhan(job["user"], tpu)
+    if ret != 'success':
+        print(f"{FAIL} {operation}_job: Failed to zhan tpu {tpu}, error: {ret}")
+        release_lock_data()
+        return
+
     # make sure that the tpu is ready
     if tpu is not None:
         tpu_status = check_tpu_status(tpu)
@@ -882,20 +889,23 @@ def run(user_obj, args, monitor_job = True):
             print(f"{INFO} run: Quiting... {tpu}")
             return
         print(f"{INFO} run: TPU {tpu} is not reserved by others.")
-
+        
         try:
-            with open(MOUNTED_FILE, "r") as _mf:
-                _mount_data = json.load(_mf)
-                _mounted_set = set(_mount_data.get("mounted", []))
-                _mounting_set = set(_mount_data.get("mounting", []))
-        except (OSError, json.JSONDecodeError):
-            _mounted_set, _mounting_set = set(), set()
-        if tpu in _mounted_set:
-            print(f"{GOOD} run: TPU {tpu} disk has been mounted")
-        elif tpu in _mounting_set:
-            print(f"{INFO} run: TPU {tpu} disk is currently mounting...")
-        else:
-            print(f"{WARNING} run: TPU {tpu} disk has NOT been mounted")
+            _ssh_check_cmd = (
+                f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} "
+                f"--project {PROJECT} --worker=0 "
+                f'--command "test -f /home/sqa/.disk_mounted && echo DISK_MOUNTED || echo DISK_NOT_MOUNTED"'
+            )
+            _ssh_result = subprocess.run(
+                _ssh_check_cmd, shell=True, capture_output=True, text=True, timeout=30
+            )
+            _ssh_output = _ssh_result.stdout + _ssh_result.stderr
+            if "DISK_MOUNTED" in _ssh_output:
+                print(f"{GOOD} run: TPU {tpu} disk has been mounted")
+            else:
+                print(f"{WARNING} run: TPU {tpu} disk has NOT been mounted")
+        except Exception as _e:
+            print(f"{WARNING} run: Could not check mount status for TPU {tpu}: {_e}")
 
         tpu_status = check_tpu_status(tpu)
 

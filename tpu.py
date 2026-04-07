@@ -124,7 +124,9 @@ if __name__ == '__main__':
         elif cmd == 'restart': operate.restart(args[2])
         elif cmd == 'apply-norm': operate.apply_and_set_env(args[2], preemptible=False, delete=False)
         elif cmd == 'reapply-norm': operate.apply_and_set_env(args[2], preemptible=False, delete=True)
-        elif cmd == 'mount-disk': operate.mount_disk(args[2])
+        elif cmd == 'mount-disk':
+            zone_arg = next((a.split('=', 1)[1] for a in args if a.startswith('--zone=')), None)
+            operate.mount_disk(args[2], force='--force' in args, zone=zone_arg)
         elif cmd == 'mount-disk-new': operate.sqa_new_env(args[2])
         elif cmd == 'set-wandb': operate.set_wandb(args[2])
         elif cmd == 'kill-remote': operate.kill_jobs_tpu(args[2])

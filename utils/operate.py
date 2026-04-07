@@ -1,4 +1,4 @@
-import os, random, time
+import os, random, time, fcntl
 import subprocess
 from .data_io import read_and_lock_data, write_and_unlock_data, release_lock_data, read_data
 from .helpers import *
@@ -172,8 +172,15 @@ def kill_jobs_tpu_old(tpu):
     print(f"{GOOD} kill_jobs_tpu: Killing jobs done")
     return 'success'
 
-def set_wandb(tpu):
-    zone, pre, spot, tpu = get_zone_pre_spot(tpu)
+def set_wandb(tpu, zone=None):
+    '''
+    if zone is not Zone, we support set wandb for a tpu that has not been registered yet.
+    '''
+    if zone is None:
+        zone, pre, spot, tpu = get_zone_pre_spot(tpu)
+    else:
+        tpu = tpu.strip()
+    
     if zone is None:
         print(f"{FAIL} set_wandb: TPU {tpu} not found")
         return
@@ -181,13 +188,10 @@ def set_wandb(tpu):
     print(f"{INFO} Setting up remote wandb in TPU {tpu}...")
 
     data = read_data()
-    wandb_key, conda_env = data["wandb_api_key"], data["conda_env_name"]
-    data_root = "kmh-nfs-ssd-eu-mount" if 'eu' in zone else "kmh-nfs-ssd-us-mount"
+    wandb_key = data["wandb_api_key"]
     conda_path = '/kmh-nfs-ssd-us-mount/code/hanhong/miniforge3/bin/python' if 'us-central2' in zone else 'python'
 
     remote_cmd = f'{conda_path} -m wandb login {wandb_key}'
-    # remote_cmd = f'python -m wandb login {wandb_key}'
-
 
     cmd = f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --project {PROJECT} --worker=all --command \"{remote_cmd}\" "
 
@@ -608,21 +612,55 @@ def sqa_new_env(tpu):
     print(f"{GOOD} sqa_new_env: running command 新 done")
     return 'success'
 
-def mount_disk(tpu, quiet = False):
+def _write_disk_mounted(tpu, zone):
+    cmd = f'gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --project {PROJECT} --worker=all --command "touch /home/sqa/.disk_mounted"'
+    try:
+        subprocess.run(cmd, shell=True, timeout=60, check=True)
+        print(f"{GOOD} _write_disk_mounted: wrote /home/sqa/.disk_mounted on {tpu}")
+    except Exception as e:
+        print(f"{FAIL} _write_disk_mounted: failed to write .disk_mounted: {e}")
+
+def mount_disk(tpu, quiet=False, force=False, zone=None):
     """
     Mount the disk and setup remote wandb.
+    If force=False, skip mounting when /home/sqa/.disk_mounted already exists on the TPU.
+    If zone is provided directly, skip the data.json lookup so the TPU does not need to be
+    registered first.
+    A per-TPU local lock prevents concurrent mount_disk calls for the same TPU from racing.
     """
-    zone, pre, spot, tpu = get_zone_pre_spot(tpu)
-
-    # if 'v5p' in tpu: # use mount disk new
-    #     return mount_disk_v5(tpu, quiet=quiet)
+    if zone is None:
+        zone, pre, spot, tpu = get_zone_pre_spot(tpu)
+    else:
+        tpu = tpu.strip()
 
     if zone is None: return
+
+    lock_path = f'/tmp/xibo_mount_{tpu}.lock'
+    lock_file = open(lock_path, 'w')
+    try:
+        fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        print(f"{FAIL} mount_disk: another process is already mounting {tpu}, aborting.")
+        lock_file.close()
+        return 'already mounting'
+
+    try:
+        return _mount_disk_locked(tpu, quiet=quiet, force=force, zone=zone)
+    finally:
+        fcntl.flock(lock_file, fcntl.LOCK_UN)
+        lock_file.close()
+
+def _mount_disk_locked(tpu, quiet=False, force=False, zone=None):
+
+    _guard_open  = '' if force else 'if [ ! -f /home/sqa/.disk_mounted ]; then'
+    _guard_close = '' if force else 'fi'
+
     print(f"{INFO} Mounting disk in TPU {tpu}...")
 
     cmd1 = f'''
     gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --project {PROJECT} --worker=all \
       --command "
+        {_guard_open}
         systemctl status unattended-upgrades.service || true
         ps -ef | grep unattended-upgrade | grep -v grep || true
         systemctl stop unattended-upgrades || true
@@ -641,11 +679,13 @@ def mount_disk(tpu, quiet = False):
         sudo rm -rf /home/dmy 2>/dev/null || true
         sudo rm -rf /mnt/zhhm 2>/dev/null || true
         sudo rm -rf /home/linluqiu 2>/dev/null || true
+        {_guard_close}
       "
     '''
 
     cmd2 = f"""
     gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --project {PROJECT} --worker=all --command "
+    {_guard_open}
     sudo mkdir -p /kmh-nfs-us-mount
     sudo mount -t nfs -o vers=3 10.26.72.146:/kmh_nfs_us /kmh-nfs-us-mount
     sudo chmod go+rw /kmh-nfs-us-mount
@@ -655,6 +695,8 @@ def mount_disk(tpu, quiet = False):
     sudo mount -o vers=3 10.97.81.98:/kmh_nfs_ssd_us /kmh-nfs-ssd-us-mount
     sudo chmod go+rw /kmh-nfs-ssd-us-mount
     ls /kmh-nfs-ssd-us-mount
+
+    {_guard_close}
     "
 
     """
@@ -674,6 +716,7 @@ def mount_disk(tpu, quiet = False):
         cmd2 += f'''
     gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --project {PROJECT} \
     --worker=all --command "
+    {_guard_open}
     sudo rm -rf /home/\$(whoami)/.local
     echo 'Current dir: '
     pwd
@@ -687,6 +730,7 @@ def mount_disk(tpu, quiet = False):
     pip install numpy==1.26.4
     pip install datasets==4.4.2
     echo 补 > ~/sqa冲
+    {_guard_close}
     "
     '''
 
@@ -748,19 +792,21 @@ def mount_disk(tpu, quiet = False):
     print(f"{INFO} Checking environment in TPU {tpu}...")
 
     print(f"{INFO} Setting wandb again to make sure it works...")
-    res = set_wandb(tpu)
+    res = set_wandb(tpu, zone=zone)
     if res != 'success':
         print(f"{FAIL} mount_disk: setting wandb failed")
         return 'wandb failed'
 
     if 'v5p' in tpu:
         print(f'skip checking env for v5p')
+        _write_disk_mounted(tpu, zone)
         return 'success'
     
     state = check_env(tpu)
 
     if state == 'success':
         print(f"{GOOD} Environment in TPU {tpu} is good, done mounting disk")
+        _write_disk_mounted(tpu, zone)
         return 'success'
     else:
         print(f"{FAIL} Environment in TPU {tpu} is not good")
@@ -816,6 +862,8 @@ def mount_disk_v5(tpu, quiet = False):
     sudo mount -o vers=3 10.97.81.98:/kmh_nfs_ssd_us /kmh-nfs-ssd-us-mount
     sudo chmod go+rw /kmh-nfs-ssd-us-mount
     ls /kmh-nfs-ssd-us-mount
+
+    touch /home/sqa/.disk_mounted
     "
 
     """

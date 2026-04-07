@@ -143,7 +143,8 @@ def explain(cmd):
 
         case 'mount-disk':
             print("Mount NFS disk in the TPU.")
-            print("Usage: tpu mount-disk <tpu_name>")
+            print("Usage: tpu mount-disk <tpu_name> [--force]")
+            print("  --force  Re-mount even if the disk is already mounted")
 
         case 'solve' | 'solve-env':
             print("Solve TPU environment issues (auto check and mount).")
