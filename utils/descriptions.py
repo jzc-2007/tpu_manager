@@ -1,175 +1,192 @@
 from .constants import *
 
+
 def explain(cmd):
     print(f"{INFO} Help for command: {cmd}")
-    
+
     match cmd:
         # ========== Core Job Commands ==========
-        case 'run':
+        case "run":
             print("Run a job in the specified working directory on a TPU.")
-            print("Usage: tpu run <tpu> dir=<dir_num> <username> [tag=<tag>] [config1=val1 ...]")
+            print(
+                "Usage: tpu run <tpu> dir=<dir_num> <username> [tag=<tag>] [config1=val1 ...]"
+            )
 
-        case 'monitor':
+        case "monitor":
             print("Continuously monitor the jobs of a user.")
             print("Usage: tpu monitor <username> [-flag]")
 
-        case 'check':
+        case "check":
             print("Check the status of all tmux windows and jobs of a user.")
             print("Usage: tpu check <username> [-flag]")
 
         # ========== Directory Management ==========
-        case 'set-dir':
+        case "set-dir":
             print("Manually set a working directory to a specific number.")
             print("Usage: tpu set-dir <abs_path> <number> <username>")
 
-        case 'set-cur':
-            print("Set the current directory (current pwd) to <number> in user's directory map.")
+        case "set-cur":
+            print(
+                "Set the current directory (current pwd) to <number> in user's directory map."
+            )
             print("Usage: tpu set-cur <number> <username>")
 
-        case 'get-dir':
+        case "get-dir":
             print("Get the path of the <number>th working directory of the user.")
             print("Usage: tpu get-dir <number> <username>")
 
-        case 'ls' | 'list-dir':
+        case "ls" | "list-dir":
             print("List all working directories of the user.")
             print("Usage: tpu ls <username>")
 
         # ========== Config Alias ==========
-        case 'add-config-alias' | '-a' | '-alias':
+        case "add-config-alias" | "-a" | "-alias":
             print("Add a config alias for the user (e.g., lr -> config.train.lr).")
             print("Usage: tpu -a <alias> <full_config_key> <username>")
 
-        case 'show-config-alias' | '-sa':
+        case "show-config-alias" | "-sa":
             print("Show all config aliases of the user.")
             print("Usage: tpu -sa <username>")
 
-        case 'del-config-alias':
+        case "del-config-alias":
             print("Delete a config alias from the user.")
             print("Usage: tpu del-config-alias <alias> <username>")
 
         # ========== Job Metadata ==========
-        case 'add-tag':
+        case "add-tag":
             print("Add a tag to a job window for easier tracking.")
             print("Usage: tpu add-tag <window_id> <tag> <username>")
 
-        case 'kill-window' | '-kw':
+        case "kill-window" | "-kw":
             print("Kill a specific tmux window of the user.")
             print("Usage: tpu -kw <window_id> <username>")
 
-        case 'upd-log':
+        case "upd-log":
             print("Update the log_dir, tpu, and start_time of a running job.")
             print("Usage: tpu upd-log <window> <log_dir> <tpu> <start_time>")
 
-        case 'finish-job':
+        case "finish-job":
             print("Mark a job as finished in the job tracker.")
             print("Usage: tpu finish-job <tmux_window>")
 
         # ========== User Settings ==========
-        case 'get-settings':
+        case "get-settings":
             print("Get all user-level settings.")
             print("Usage: tpu get-settings <username>")
 
-        case 'set-settings':
+        case "set-settings":
             print("Set a user-level setting.")
             print("Usage: tpu set-settings <key> <value> <username>")
 
         # ========== User Management ==========
-        case 'add-user':
+        case "add-user":
             print("Interactively create a new user and associated tmux session.")
             print("Usage: tpu add-user")
 
-        case 'del-user':
+        case "del-user":
             print("Delete a user and associated job data.")
             print("Usage: tpu del-user")
 
-        case 'list-users' | '-lu':
+        case "list-users" | "-lu":
             print("List all users currently registered.")
             print("Usage: tpu list-users")
 
         # ========== TPU Alias ==========
-        case 'add-tpu-alias' | '-ta':
+        case "add-tpu-alias" | "-ta":
             print("Add a TPU alias (e.g., alias = real_tpu_name).")
             print("Usage: tpu -ta <alias> <tpu_name>")
 
-        case 'list-tpu-alias' | '-lta':
+        case "list-tpu-alias" | "-lta":
             print("List all TPU aliases.")
             print("Usage: tpu -lta")
 
+        case "register" | "add-applied-tpu" | "add-applied" | "-atpu":
+            print("Register a TPU into local data + spreadsheet.")
+            print("Usage: tpu register")
+            print("       tpu register <full_tpu_name> [--fresh]")
+            print("- No args: interactive register.")
+            print(
+                "- With <full_tpu_name>: quick register, zone is parsed from wrap_master.py output."
+            )
+            print("- If wrap_master.py has no output, quick register is unavailable.")
+            print("- --fresh: run wrap_master.py with cache disabled.")
+
         # ========== System Maintenance ==========
-        case 'clear-finished':
+        case "clear-finished":
             print("Clear all finished jobs from the user's job list.")
             print("Usage: tpu clear-finished <username>")
 
-        case 'clear-error':
+        case "clear-error":
             print("Clear all error/killed jobs from the user's job list.")
             print("Usage: tpu clear-error <username>")
 
-        case 'clear' | 'clear-all':
+        case "clear" | "clear-all":
             print("Clear all finished and error jobs.")
             print("Usage: tpu clear <username>")
 
-        case '-czw':
+        case "-czw":
             print("Clear zombie tmux windows (no corresponding job data).")
             print("Usage: tpu -czw <username>")
 
-        case '-czj':
+        case "-czj":
             print("Clear zombie jobs (job entries with no tmux window).")
             print("Usage: tpu -czj <username>")
 
-        case 'clean':
+        case "clean":
             print("Clear all job states and zombie windows.")
             print("Usage: tpu clean <username>")
 
         # ========== TPU Environment ==========
-        case 'check-status' | '-cktpu':
+        case "check-status" | "-cktpu":
             print("Check the current status (READY, PREEMPTED, etc.) of the TPU.")
             print("Usage: tpu -cktpu <tpu_name>")
 
-        case 'describe' | '-dtpu':
+        case "describe" | "-dtpu":
             print("Describe the TPU state and environment sanity.")
             print("Usage: tpu -dtpu <tpu_name>")
 
-        case 'check-env':
+        case "check-env":
             print("Check the python env (e.g. JAX visibility) of the TPU.")
             print("Usage: tpu check-env <tpu_name>")
 
-        case 'apply':
+        case "apply":
             print("Apply a new TPU VM (non-preemptible).")
             print("Usage: tpu apply <tpu_name>")
 
-        case 'reapply':
+        case "reapply":
             print("Delete and re-apply a preemptible TPU.")
             print("Usage: tpu reapply <tpu_name>")
 
-        case 'mount-disk':
+        case "mount-disk":
             print("Mount NFS disk in the TPU.")
             print("Usage: tpu mount-disk <tpu_name> [--force]")
             print("  --force  Re-mount even if the disk is already mounted")
 
-        case 'solve' | 'solve-env':
+        case "solve" | "solve-env":
             print("Solve TPU environment issues (auto check and mount).")
             print("Usage: tpu solve <tpu_name>")
 
-        case 'set-wandb':
+        case "set-wandb":
             print("Setup wandb key on remote TPU.")
             print("Usage: tpu set-wandb <tpu_name>")
 
-        case 'kill-jobs' | '-kj':
+        case "kill-jobs" | "-kj":
             print("Kill all jobs on a TPU across all workers.")
             print("Usage: tpu -kj <tpu_name>")
 
         # ========== Locks ==========
-        case 'lock-code' | '-lc':
+        case "lock-code" | "-lc":
             print("Lock the entire system (no new jobs).")
             print("Usage: tpu -lc [username]")
 
-        case 'unlock-code' | '-ulc':
+        case "unlock-code" | "-ulc":
             print("Unlock the system.")
             print("Usage: tpu -ulc [username]")
 
         # ========== Unknown ==========
         case _:
             print(f"{FAIL} Unknown command '{cmd}'. Try `tpu tldr` for summary.")
+
 
 def tldr():
     Usage = f"""
@@ -191,6 +208,7 @@ e.g. `tpu run v2-32 --auto xibo`
 - `tpu tldr`: Show this summary.
     """
     print(Usage)
+
 
 def full_doc():
     raise NotImplementedError
