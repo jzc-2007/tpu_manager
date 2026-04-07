@@ -5,7 +5,7 @@ from . import users
 from .data_io import read_and_lock_data, write_and_unlock_data, release_lock_data, read_data, read_and_lock_legacy, write_legacy, write_and_unlock_legacy, release_lock_legacy
 from .operate import check_tpu_status, apply_and_set_env, kill_jobs_tpu, restart, check_tpu_running, mount_disk
 from .sheet import get_tpu_info_sheet, write_sheet_info, read_tpu_info_from_type, find_tpu_from_type
-from .logger import get_wandb_notes, register_tpu_and_write_spreadsheet, check_reserved_user, zhan
+from .logger import get_wandb_notes, register_tpu_and_write_spreadsheet, register_tpu_quick, check_reserved_user, zhan
 from .autenticate import autenticate
 from .gs_buckets import check_gs_logdir_exists
 
@@ -344,6 +344,50 @@ def check_rules():
     for rule in RULE_DICT:
         print(f"-> {rule}:".ljust(13) + f"{RULE_DICT[rule]}")
 
+
+def _resolve_tpu_for_run_or_resume(tpu, operation='run'):
+    """
+    Resolve TPU full name for run/resume.
+    Fallback order:
+    1) use given name directly
+    2) try prepending "kmh-tpuvm-"
+    3) if still missing, try quick-register and resolve again
+    """
+    if tpu is None:
+        return None
+
+    tpu = str(tpu).strip()
+    if tpu == '':
+        return None
+
+    zone, _, _, full_tpu = get_zone_pre_spot(tpu)
+    if zone is not None:
+        return full_tpu
+
+    prefixed_tpu = tpu if tpu.startswith('kmh-tpuvm-') else f"kmh-tpuvm-{tpu}"
+    if prefixed_tpu != tpu:
+        print(f"{WARNING} {operation}: TPU {tpu} not found, trying {prefixed_tpu}...")
+
+    zone, _, _, full_tpu = get_zone_pre_spot(prefixed_tpu)
+    if zone is not None:
+        if prefixed_tpu != tpu:
+            print(f"{GOOD} {operation}: Found TPU as {full_tpu}")
+        return full_tpu
+
+    print(f"{WARNING} {operation}: TPU {prefixed_tpu} seems unregistered, trying quick register...")
+    try:
+        register_tpu_quick(prefixed_tpu)
+    except Exception as e:
+        print(f"{WARNING} {operation}: quick register failed: {e}")
+
+    zone, _, _, full_tpu = get_zone_pre_spot(prefixed_tpu)
+    if zone is not None:
+        print(f"{GOOD} {operation}: quick register succeeded, using TPU {full_tpu}")
+        return full_tpu
+
+    print(f"{FAIL} {operation}: TPU {tpu} not found (also tried {prefixed_tpu})")
+    return None
+
 def parse_args_resume_rerun(args):
     """
     Parse the arguments for resume and rerun commands.
@@ -352,9 +396,9 @@ def parse_args_resume_rerun(args):
     new_tpu = None
     for arg in args:
         if arg.startswith('tpu=') or arg.startswith('ka='):
-            new_tpu = arg.split('=')[1]
+            new_tpu = arg.split('=', 1)[1]
         if arg.startswith('window=') or arg.startswith('-w='):
-            windows_id = arg.split('=')[1]
+            windows_id = arg.split('=', 1)[1]
     if windows_id is None:
         print(f"{FAIL} No window id provided")
         return None, None
@@ -437,6 +481,10 @@ def resume_rerun_job(job, new_tpu = None, load_ckpt = True):
     operation = 'resume' if load_ckpt else 'rerun'
     operationing = 'Resuming' if load_ckpt else 'Rerunning'
     if new_tpu is not None:
+        new_tpu = _resolve_tpu_for_run_or_resume(new_tpu, operation=operation)
+        if new_tpu is None:
+            print(f"{FAIL} {operation}_job: Failed to resolve new TPU")
+            return
         print(f"{INFO} {operation}_job: Using new tpu {new_tpu}")
         zone, _, _, new_tpu = get_zone_pre_spot(new_tpu)
         if zone is None:
@@ -727,6 +775,8 @@ def parse_config_args(user_obj, args):
     customized_settings = {}
     dir_id = '1'
     spreadsheet_notes = None
+    candidate_tpu = None
+    user_list = set(data.get('user_list', []))
     all_tpu_list = []
     for alias, tpu_name in data['tpu_aliases'].items():
         all_tpu_list.append(alias)
@@ -774,6 +824,12 @@ def parse_config_args(user_obj, args):
             tpu = data['tpu_aliases'].get(tpu, tpu)
             print(f"{INFO} run: Using tpu {tpu}")
 
+        # If user passes an explicit TPU name not in aliases (e.g. v4-32-foo),
+        # keep it as a candidate and resolve later with prefix fallback.
+        if tpu is None and ('=' not in arg) and (not arg.startswith('-')) and (not is_integer(arg)) and (arg not in user_list):
+            if arg.startswith('v') or arg.startswith('kmh-tpuvm-'):
+                candidate_tpu = arg
+
         if is_integer(arg):
             dir_id = arg
             if dir_id not in user_obj.working_dir:
@@ -808,12 +864,20 @@ def parse_config_args(user_obj, args):
     if (tag is None) and (spreadsheet_notes is not None) and ('-no-tag' not in args):
         tag = spreadsheet_notes
 
+    if tpu is None and candidate_tpu is not None:
+        tpu = candidate_tpu
+        print(f"{INFO} run: Trying explicit TPU name {tpu}")
 
     if tpu is None:
         print(f'{INFO} run: No TPU Specified, use the TPU in ka.sh instead')
-
-    _, pre, spot, tpu = get_zone_pre_spot(tpu)
-    preemptible = pre or spot
+        preemptible = False
+    else:
+        raw_tpu = tpu
+        tpu = _resolve_tpu_for_run_or_resume(tpu, operation='run')
+        if tpu is None:
+            raise ValueError(f"TPU {raw_tpu} not found")
+        _, pre, spot, tpu = get_zone_pre_spot(tpu)
+        preemptible = pre or spot
 
     if rule is None:
         rule = 'pass' if not preemptible else 'pre'
