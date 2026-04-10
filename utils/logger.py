@@ -597,7 +597,7 @@ def check_reserved_user(tpu):
 
 def remove_file_lock(vm_name):
     """
-    删除占卡锁文件，释放占卡。支持别名。
+    删除与指定卡相关的所有占卡锁文件，释放占卡。支持别名。
     """
     if not vm_name.startswith("kmh-tpuvm-"):
         # this is an alias.
@@ -605,6 +605,7 @@ def remove_file_lock(vm_name):
         vm_name = data["tpu_aliases"][vm_name]
 
     lock_dir = "/kmh-nfs-ssd-us-mount/code/qiao/tpu_lock"
+    removed = 0
     for file in os.listdir(lock_dir):
         parsed = _parse_lock_filename(file)
         if parsed is None:
@@ -614,9 +615,11 @@ def remove_file_lock(vm_name):
             try:
                 os.remove(f"{lock_dir}/{file}")
                 print(f"{GOOD} 成功删除占卡锁 {file}，释放了 {vm_name}")
-                return "success"
+                removed += 1
             except OSError as e:
                 print(f"{FAIL} 删除占卡锁 {file} 失败: {e}")
-                return "failed"
-    print(f"{WARNING} 没有找到 {vm_name} 的锁文件")
-    return "failed"
+    if removed == 0:
+        print(f"{WARNING} 没有找到 {vm_name} 的锁文件")
+        return "failed"
+    print(f"{GOOD} 共删除了 {removed} 个 {vm_name} 的占卡锁")
+    return "success"
