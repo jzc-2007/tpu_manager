@@ -145,6 +145,12 @@ def explain(cmd):
             print("Describe the TPU state and environment sanity.")
             print("Usage: tpu -dtpu <tpu_name>")
 
+        case "lian":
+            print("Connect to a TPU VM via gcloud ssh.")
+            print("Usage: tpu lian <tpu_name_or_alias> [worker_num|all]")
+            print("- Default worker is 0 when omitted.")
+            print("- Supports alias and auto-prefixing kmh-tpuvm- when needed.")
+
         case "check-env":
             print("Check the python env (e.g. JAX visibility) of the TPU.")
             print("Usage: tpu check-env <tpu_name>")
@@ -203,6 +209,7 @@ e.g. `tpu run v2-32 --auto xibo`
 {YELLOW}== TPU Management =={NC}
 - `tpu describe <tpu>`: Describe TPU with environment info.
 - `tpu apply/reapply <tpu>`: Apply/Reapply(delete and apply) a TPU.
+- `tpu lian <tpu> [worker_num|all]`: SSH into a TPU (default worker is 0).
 {YELLOW}== Others =={NC}
 - `tpu help/-h <command>`: Show usage for a specific command.
 - `tpu tldr`: Show this summary.

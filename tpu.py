@@ -165,6 +165,11 @@ if __name__ == "__main__":
             print(operate.check_tpu_status(args[2]))
         elif cmd == "describe" or cmd == "-dtpu":
             operate.describe_tpu(args[2])
+        elif cmd == "lian":
+            if len(args) < 3:
+                raise ValueError("Usage: tpu lian <tpu_name_or_alias> [worker_num|all]")
+            worker = args[3] if len(args) >= 4 else "0"
+            operate.lian_tpu(args[2], worker=worker)
         elif cmd == "-lta" or cmd == "-sta":
             logger.explain_tpu_aliases()
         elif cmd == "reapply":

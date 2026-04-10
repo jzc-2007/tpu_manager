@@ -431,6 +431,91 @@ def check_tpu_running(tpu, quiet = True):
         else:
             print(f"{FAIL} check_tpu_running: Timeout expired")
             return 'failed'
+
+
+def _resolve_tpu_zone_and_name_for_lian(tpu_name):
+    """
+    Resolve TPU zone and full name for lian command.
+    Supports alias and missing kmh-tpuvm- prefix.
+    """
+    raw_name = tpu_name.strip()
+    if not raw_name:
+        return None, None
+
+    data = read_data()
+    alias_map = data.get("tpu_aliases", {})
+    zone_to_tpus = data.get("all_tpus", {})
+
+    tpu_to_zone = {}
+    for zone, tpu_list in zone_to_tpus.items():
+        for tpu in tpu_list:
+            tpu_to_zone[tpu] = zone
+
+    base_candidates = [raw_name]
+    if not raw_name.startswith("kmh-tpuvm-"):
+        base_candidates.append(f"kmh-tpuvm-{raw_name}")
+
+    expanded_candidates = []
+    seen = set()
+    for candidate in base_candidates:
+        alias_target = alias_map.get(candidate)
+        for name in [candidate, alias_target]:
+            if not name:
+                continue
+            candidate_names = [name]
+            if not name.startswith("kmh-tpuvm-"):
+                candidate_names.append(f"kmh-tpuvm-{name}")
+            for n in candidate_names:
+                if n not in seen:
+                    expanded_candidates.append(n)
+                    seen.add(n)
+
+    for candidate in expanded_candidates:
+        zone = tpu_to_zone.get(candidate)
+        if zone is not None:
+            return zone, candidate
+
+    return None, None
+
+
+def lian_tpu(tpu_name, worker="0"):
+    """
+    Connect to a TPU VM with gcloud ssh.
+    Usage: tpu lian <tpu_name_or_alias> [worker_num|all]
+    """
+    worker = str(worker).strip().lower() if worker is not None else "0"
+    if worker == "":
+        worker = "0"
+
+    if worker != "all":
+        if not is_integer(worker) or int(worker) < 0:
+            print(
+                f"{FAIL} lian_tpu: worker must be a non-negative integer or 'all', got '{worker}'"
+            )
+            return "invalid worker"
+
+    zone, tpu = _resolve_tpu_zone_and_name_for_lian(tpu_name)
+    if zone is None:
+        print(f"{FAIL} lian_tpu: TPU {tpu_name} not found")
+        return "no tpu found"
+
+    print(f"{INFO} lian_tpu: Connecting to TPU {tpu} in zone {zone}, worker={worker}...")
+    cmd = (
+        f"gcloud compute tpus tpu-vm ssh {tpu} "
+        f"--zone {zone} --project {PROJECT} --worker={worker}"
+    )
+
+    try:
+        result = subprocess.run(cmd, shell=True, check=False)
+    except Exception as e:
+        print(f"{FAIL} lian_tpu: Failed to start gcloud ssh: {e}")
+        return "ssh failed"
+
+    if result.returncode != 0:
+        print(f"{FAIL} lian_tpu: gcloud ssh exited with code {result.returncode}")
+        return "ssh failed"
+
+    return "success"
         
 
 def describe_tpu(tpu, quiet = False):
