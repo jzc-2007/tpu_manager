@@ -879,7 +879,7 @@ if __name__ == "__main__":
     num_loops = 0
     last_test_time = time.time()
     last_clean_time = time.time()
-    add_MONITOR_log(f"\n{GOOD} 哈哈，我上线了。我是何凯明的狗 (给{USER}口的)")
+    add_MONITOR_log(f"\n{GOOD} 哈哈，我上线了。我是何恺明的狗 (给{USER}口的)")
 
     if data_io.check_code_lock():
         print(f"{MADE} Code is locked for developing, please unlock it first.")
