@@ -1,5 +1,5 @@
 import os, random, time, fcntl
-import subprocess
+import subprocess, shlex
 from .data_io import read_and_lock_data, write_and_unlock_data, release_lock_data, read_data
 from .helpers import *
 from .constants import *
@@ -478,10 +478,10 @@ def _resolve_tpu_zone_and_name_for_lian(tpu_name):
     return None, None
 
 
-def lian_tpu(tpu_name, worker="0"):
+def lian_tpu(tpu_name, worker="0", command=None):
     """
     Connect to a TPU VM with gcloud ssh.
-    Usage: tpu lian <tpu_name_or_alias> [worker_num|all]
+    Usage: tpu lian <tpu_name_or_alias> [worker_num|all] [--command="..."]
     """
     worker = str(worker).strip().lower() if worker is not None else "0"
     if worker == "":
@@ -504,6 +504,8 @@ def lian_tpu(tpu_name, worker="0"):
         f"gcloud compute tpus tpu-vm ssh {tpu} "
         f"--zone {zone} --project {PROJECT} --worker={worker}"
     )
+    if command:
+        cmd += f" --command={shlex.quote(command)}"
 
     try:
         result = subprocess.run(cmd, shell=True, check=False)

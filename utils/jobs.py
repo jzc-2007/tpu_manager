@@ -563,6 +563,16 @@ def resume_rerun_job(job, new_tpu = None, load_ckpt = True):
         load_ckpt_path = ""
         wandb_resume_id = ""
 
+        # Try to read wandb run id for resuming the same wandb run
+        if job["log_dir"]:
+            wandb_id_file = os.path.join(job["log_dir"], "wandb_run_id.txt")
+            if os.path.exists(wandb_id_file):
+                with open(wandb_id_file, "r") as f:
+                    wandb_resume_id = f.read().strip()
+                print(f"{INFO} {operation}_job: Found wandb resume id: {wandb_resume_id}")
+            else:
+                print(f"{WARNING} {operation}_job: No wandb_run_id.txt found in {job['log_dir']}, will start a new wandb run")
+
         if load_ckpt:
             print(f'finding checkpoint path from log dir {job["log_dir"]}...')
             assert job["log_dir"] is not None, f"Job {job['windows_id']} for user {user_obj.name} has no log dir"
@@ -571,14 +581,6 @@ def resume_rerun_job(job, new_tpu = None, load_ckpt = True):
             else:
                 print(f'log dir exists. Continue to resume!')
                 load_ckpt_path = job["log_dir"]
-            # Try to read wandb run id for resuming the same wandb run
-            wandb_id_file = os.path.join(job["log_dir"], "wandb_run_id.txt")
-            if os.path.exists(wandb_id_file):
-                with open(wandb_id_file, "r") as f:
-                    wandb_resume_id = f.read().strip()
-                print(f"{INFO} {operation}_job: Found wandb resume id: {wandb_resume_id}")
-            else:
-                print(f"{WARNING} {operation}_job: No wandb_run_id.txt found in {job['log_dir']}, will start a new wandb run")
 
         data['users'][user_obj.name]['job_data'].append(new_job)
         user_obj.windows_offset = id + 1
@@ -615,7 +617,9 @@ def resume_rerun_job(job, new_tpu = None, load_ckpt = True):
                 os.system(f"tmux send-keys -t {session_name}:{id} 'source staging.sh ka={tpu} zone={zone} {config_args} --config.load_from={load_ckpt_path}{wandb_resume_arg}' Enter")
                 new_job['extra_configs'] += f" --config.load_from={load_ckpt_path}{wandb_resume_arg}"
         else:
-            os.system(f"tmux send-keys -t {session_name}:{id} 'source staging.sh ka={tpu} zone={zone} {config_args}' Enter")
+            os.system(f"tmux send-keys -t {session_name}:{id} 'source staging.sh ka={tpu} zone={zone} {config_args}{wandb_resume_arg}' Enter")
+            if wandb_resume_arg:
+                new_job['extra_configs'] += wandb_resume_arg
         
         print(f"{GOOD} {operation}_job: Successfully created job in tmux window {session_name}:{id}")
 

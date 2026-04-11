@@ -530,16 +530,37 @@ def _parse_lock_filename(filename):
     return user, vm_name, time_str
 
 
+def _normalize_lock_vm_name(vm_name):
+    """
+    Normalize vm name used by lock operations.
+    Priority: alias -> full name, otherwise auto-add kmh-tpuvm- prefix.
+    """
+    raw = (vm_name or "").strip()
+    if raw == "":
+        raise ValueError("vm_name is empty")
+
+    data = read_data()
+    alias_map = data.get("tpu_aliases", {})
+
+    if raw in alias_map:
+        return alias_map[raw]
+
+    if raw.startswith("kmh-tpuvm-"):
+        return raw
+
+    prefixed = f"kmh-tpuvm-{raw}"
+    if prefixed in alias_map:
+        return alias_map[prefixed]
+    return prefixed
+
+
 def zhan(user, vm_name):
     """
     write a file under /kmh-nfs-ssd-us-mount/code/qiao/tpu_lock,
     with name {USER_VMNAME_TIME}. Time format: YYYY-MM-DD_HH-MM-SS (no space, underscores).
     also support when the vm_name is an alias.
     """
-    if not vm_name.startswith("kmh-tpuvm-"):
-        # this is an alias.
-        data = read_data()
-        vm_name = data["tpu_aliases"][vm_name]
+    vm_name = _normalize_lock_vm_name(vm_name)
 
     # first check if the vm_name is already reserved by others
     if (
@@ -599,10 +620,7 @@ def remove_file_lock(vm_name):
     """
     删除与指定卡相关的所有占卡锁文件，释放占卡。支持别名。
     """
-    if not vm_name.startswith("kmh-tpuvm-"):
-        # this is an alias.
-        data = read_data()
-        vm_name = data["tpu_aliases"][vm_name]
+    vm_name = _normalize_lock_vm_name(vm_name)
 
     lock_dir = "/kmh-nfs-ssd-us-mount/code/qiao/tpu_lock"
     removed = 0
