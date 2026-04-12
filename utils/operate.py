@@ -784,7 +784,7 @@ def _mount_disk_locked(tpu, quiet=False, force=False, zone=None):
 
     """
 
-    if 'v6' in tpu or 'v5p' in tpu:
+    if 'v6' in tpu or 'v5' in tpu:
         # get bucket name by zone
         if 'us-east1' in zone: bucket = 'gs://kmh-gcp-us-east1'
         elif 'us-east5' in zone: bucket = 'gs://kmh-gcp-us-east5'
