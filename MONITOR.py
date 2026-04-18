@@ -5,6 +5,7 @@ import multiprocessing
 import re
 import ast
 import argparse
+import uuid
 from collections import deque
 import utils.users as users
 import utils.data_io as data_io
@@ -15,6 +16,7 @@ import utils.clean as clean
 from utils.helpers import *
 
 USER = 'sqa'
+SAME_TYPE_ONLY = False
 
 running_processes = []
 ANSI_ESCAPE_RE = re.compile(r"\x1B\[[0-?]*[ -/]*[@-~]")
@@ -84,6 +86,96 @@ def remove_resume_next_round(window_id):
         x['resume_next_round'].remove(window_id)
     _write_sqa_content(x)
     return
+
+# ---------------------------------------------------------------------------
+# Queue: submit new jobs to run on idle TPUs
+# ---------------------------------------------------------------------------
+QUEUE_FILE = '/kmh-nfs-ssd-us-mount/code/qiao/work/tpu_manager/queue.json'
+
+def _read_queue():
+    """读取 queue.json，返回含 pending / running / done 三个列表的 dict。"""
+    if not os.path.exists(QUEUE_FILE):
+        return {"pending": [], "running": [], "done": []}
+    with open(QUEUE_FILE, 'r') as f:
+        q = json.load(f)
+    q.setdefault('pending', [])
+    q.setdefault('running', [])
+    q.setdefault('done', [])
+    return q
+
+def _write_queue(q):
+    """将 queue dict 写回 queue.json。"""
+    with open(QUEUE_FILE, 'w') as f:
+        json.dump(q, f, indent=2)
+        f.write('\n')
+
+def queue_add_job(dir_no, preferred_type=None, preferred_zone=None):
+    """将一个新 job 加入 pending 队列并打印当前队列状态。"""
+    q = _read_queue()
+    entry = {
+        "id": uuid.uuid4().hex[:8],
+        "dir": str(dir_no),
+        "queued_at": get_abs_time_str(),
+    }
+    if preferred_type:
+        entry["preferred_type"] = preferred_type
+    if preferred_zone:
+        entry["preferred_zone"] = preferred_zone
+    q['pending'].append(entry)
+    _write_queue(q)
+    print(f"[queue] 已加入队列: dir={dir_no}" + (f" type={preferred_type}" if preferred_type else "") + (f" zone={preferred_zone}" if preferred_zone else ""))
+    print(f"[queue] 当前待跑队列 ({len(q['pending'])} 个): {[e['dir'] for e in q['pending']]}")
+
+def _queue_start_job(job_id, tpu_name, alias):
+    """将 job_id 对应的 entry 从 pending 移入 running。"""
+    q = _read_queue()
+    entry = next((e for e in q['pending'] if e['id'] == job_id), None)
+    if entry is None:
+        return
+    q['pending'].remove(entry)
+    running_entry = dict(entry)
+    running_entry['tpu'] = tpu_name
+    running_entry['alias'] = alias
+    running_entry['started_at'] = get_abs_time_str()
+    q['running'].append(running_entry)
+    _write_queue(q)
+
+def _queue_finish_job(job_id):
+    """将 job_id 对应的 running entry 移入 done。"""
+    q = _read_queue()
+    entry = next((e for e in q['running'] if e['id'] == job_id), None)
+    if entry is None:
+        return
+    q['running'].remove(entry)
+    done_entry = dict(entry)
+    done_entry['finished_at'] = get_abs_time_str()
+    q['done'].append(done_entry)
+    _write_queue(q)
+
+def _queue_fail_job(job_id):
+    """将 job_id 对应的 running entry 移回 pending 队列头（等待重试）。"""
+    q = _read_queue()
+    entry = next((e for e in q['running'] if e['id'] == job_id), None)
+    if entry is None:
+        return
+    q['running'].remove(entry)
+    pending_entry = {k: v for k, v in entry.items() if k not in ('tpu', 'alias', 'started_at')}
+    q['pending'].insert(0, pending_entry)
+    _write_queue(q)
+
+def queue_show():
+    """打印当前队列状态（pending / running / done）。"""
+    q = _read_queue()
+    print(f"=== Queue Status ===")
+    print(f"Pending ({len(q['pending'])}):")
+    for e in q['pending']:
+        print(f"  dir={e['dir']}  queued_at={e['queued_at']}" + (f"  type={e.get('preferred_type','')}" if e.get('preferred_type') else ""))
+    print(f"Running ({len(q['running'])}):")
+    for e in q['running']:
+        print(f"  dir={e['dir']}  alias={e.get('alias','')}  tpu={e.get('tpu','')}  started_at={e.get('started_at','')}")
+    print(f"Done ({len(q['done'])}):")
+    for e in q['done'][-10:]:
+        print(f"  dir={e['dir']}  alias={e.get('alias','')}  finished_at={e.get('finished_at','')}")
 
 def add_MONITOR_log(log):
     """将日志同时追加写入 output.log 并打印到 stdout（带 UTC 时间戳）。"""
@@ -314,12 +406,12 @@ def _parse_tpu_gen_size(tpu_type):
         return None, None
     return m.group(1), int(m.group(2))
 
-def _is_type_allowed(candidate_type, is_jit):
+def _is_type_allowed(candidate_type, low_cost):
     """Return True if candidate_type is allowed to resume the job.
 
     Rules:
-      - Always allowed: v6e-64 or larger, v5p-128 or larger.
-      - jit-only: v6e-32, v5p-64.
+      - high-cost (low_cost=False): v6e >= 64, v5p >= 128.
+      - low-cost  (low_cost=True):  v6e >= 32, v5p >= 64.
     """
     gen, size = _parse_tpu_gen_size(candidate_type)
     if gen is None:
@@ -328,17 +420,33 @@ def _is_type_allowed(candidate_type, is_jit):
         return True
     if gen == 'v5p' and size >= 128:
         return True
-    if is_jit:
-        if gen == 'v6e' and size == 32:
+    if low_cost:
+        if gen == 'v6e' and size >= 32:
             return True
-        if gen == 'v5p' and size == 64:
+        if gen == 'v5p' and size >= 64:
             return True
     return False
 
-def _is_jit_job(job):
-    """Return True if the job's wandb notes contain the token 'jit'."""
+def _is_low_cost_job(job):
+    """Return True if the job qualifies for low-cost (smaller) TPUs.
+    Triggered by tokens 'jit', 'nanogpt', 'MAE-B' in spreadsheet notes."""
     notes = (job.get('extra_msgs') or {}).get('spreadsheet_notes') or ''
-    return 'jit' in str(notes).lower().split()
+    allowed_tokens = ['jit', 'nanogpt', 'MAE-B']
+    return any(token in str(notes).lower().split() for token in allowed_tokens)
+
+def _zone_priority(zone):
+    """Return sort key for zone priority during TPU selection (lower = higher priority).
+
+    Priority order:
+      0 – asia-northeast1-b  (prefer first)
+      1 – us-east5-*         (prefer second)
+      2 – everything else
+    """
+    if zone == 'asia-northeast1-b':
+        return 0
+    if zone and zone.startswith('us-east5'):
+        return 1
+    return 2
 
 _FS_SCRIPT = "/kmh-nfs-ssd-us-mount/code/qiao/work/tpu_manager/find_saving_window.py"
 _NO_SAVING_ROOT_RE = re.compile(r"no 'saving' found anywhere in chain; reached root window (\d+)")
@@ -391,20 +499,23 @@ def _get_saving_window(window_id):
         return window_id, 'resume'
 
 
-def _pick_idle_tpu(idle_tpus, target_type, target_zone, is_jit=False):
+def _pick_idle_tpu(idle_tpus, target_type, target_zone, low_cost=False, same_type_only=False):
     """
     Pick an idle TPU that is allowed to resume the job.
 
     Type rules (see _is_type_allowed):
-      - Always allowed: v6e-64+, v5p-128+.
-      - jit-only:       v6e-32, v5p-64.
+      - high-cost (low_cost=False): v6e >= 64, v5p >= 128.
+      - low-cost  (low_cost=True):  v6e >= 32, v5p >= 64.
 
     Region rules:
-      - Pass 1: same type + same zone (type must pass rules).
-      - Pass 2: allowed type + same region.
+      - Pass 1: same type + same zone (exact match, always valid).
+      - Pass 2: allowed type + same region.   [skipped when same_type_only=True]
       - Pass 3: allowed type + cross-region, but only when both the job's
                 region AND the candidate's region are in _CROSS_REGION_ALLOWED
-                (us-central1, us-east5, asia-northeast1).
+                (us-central1, us-east5, asia-northeast1).   [skipped when same_type_only=True]
+
+    Within Pass 2 and Pass 3, candidates are ordered by zone priority:
+      asia-northeast1-b first, then us-east5-*, then everything else.
 
     Return:
       (new_tpu_name, new_zone, pick_mode)
@@ -418,27 +529,33 @@ def _pick_idle_tpu(idle_tpus, target_type, target_zone, is_jit=False):
     def _is_owned(tpu_name, zone):
         return tpu_name in all_tpus.get(zone, [])
 
-    # Pass 1: same type + same zone (type still subject to allow rules).
-    for tpu_name, zone in idle_tpus:
+    # Sort candidates by zone priority so preferred zones are tried first in Pass 2/3.
+    sorted_idle = sorted(idle_tpus, key=lambda t: _zone_priority(t[1]))
+
+    # Pass 1: same type + same zone (skip _is_type_allowed — exact match is always valid).
+    for tpu_name, zone in sorted_idle:
         if _is_owned(tpu_name, zone):
             continue
         tpu_type = _extract_tpu_type(tpu_name)
-        if tpu_type == target_type and zone == target_zone and _is_type_allowed(tpu_type, is_jit):
+        if tpu_type == target_type and zone == target_zone:
             return tpu_name, zone, "exact"
 
+    if same_type_only:
+        return None, None, None
+
     # Pass 2: any allowed type, same region.
-    for tpu_name, zone in idle_tpus:
+    for tpu_name, zone in sorted_idle:
         if _is_owned(tpu_name, zone):
             continue
         tpu_type = _extract_tpu_type(tpu_name)
         if _zone_region(zone) != target_region:
             continue
-        if _is_type_allowed(tpu_type, is_jit):
+        if _is_type_allowed(tpu_type, low_cost):
             return tpu_name, zone, "cross_type_same_region"
 
     # Pass 3: any allowed type, cross-region (both sides must be in allowed set).
     if target_region in _CROSS_REGION_ALLOWED:
-        for tpu_name, zone in idle_tpus:
+        for tpu_name, zone in sorted_idle:
             if _is_owned(tpu_name, zone):
                 continue
             tpu_type = _extract_tpu_type(tpu_name)
@@ -447,10 +564,49 @@ def _pick_idle_tpu(idle_tpus, target_type, target_zone, is_jit=False):
                 continue  # already covered in Pass 2
             if candidate_region not in _CROSS_REGION_ALLOWED:
                 continue
-            if _is_type_allowed(tpu_type, is_jit):
+            if _is_type_allowed(tpu_type, low_cost):
                 return tpu_name, zone, "cross_region"
 
     return None, None, None
+
+def _pick_any_idle_tpu(idle_tpus, preferred_type=None, preferred_zone=None):
+    """为新 job 选一张空闲 TPU（不要求 resume 同型号）。
+
+    优先级：
+      Pass 1: preferred_type + preferred_zone（若均指定）。
+      Pass 2: preferred_type 任意 zone（若只指定了 type）。
+      Pass 3: 任意通过 _is_type_allowed 的卡（v6e-64+, v5p-128+）。
+
+    返回 (tpu_name, zone) 或 (None, None)。
+    """
+    data = data_io.read_data()
+    all_tpus = data.get('all_tpus', {})
+
+    def _is_owned(tpu_name, zone):
+        return tpu_name in all_tpus.get(zone, [])
+
+    if preferred_type and preferred_zone:
+        for tpu_name, zone in idle_tpus:
+            if _is_owned(tpu_name, zone):
+                continue
+            if _extract_tpu_type(tpu_name) == preferred_type and zone == preferred_zone:
+                return tpu_name, zone
+
+    if preferred_type:
+        for tpu_name, zone in idle_tpus:
+            if _is_owned(tpu_name, zone):
+                continue
+            if _extract_tpu_type(tpu_name) == preferred_type:
+                return tpu_name, zone
+
+    for tpu_name, zone in idle_tpus:
+        if _is_owned(tpu_name, zone):
+            continue
+        tpu_type = _extract_tpu_type(tpu_name)
+        if _is_type_allowed(tpu_type, low_cost=False):
+            return tpu_name, zone
+
+    return None, None
 
 def _pick_new_alias(target_type, zone):
     """从该 zone 的候选 alias 列表中，找出全名不出现在 tou 输出里的第一个 alias
@@ -559,6 +715,112 @@ def kill_rerun(job):
 #         else:
 #             print(f"{FAIL} reapply_resume: Reapply TPU {ka} failed, no result returned")
 #             add_MONITOR_log(f"{FAIL} reapply_resume: Reapply TPU {ka} failed, no result returned")
+
+def _run_queued_jobs():
+    """处理 queue.json 中的 pending 任务：找空卡 -> ftmd -> tpu run。
+    每轮 mainloop 结束后调用一次。"""
+    q = _read_queue()
+    if not q['pending']:
+        return
+
+    add_MONITOR_log(f"{INFO} queue: 发现 {len(q['pending'])} 个待跑任务，开始处理")
+
+    for entry in list(q['pending']):
+        job_id = entry['id']
+        dir_no = entry['dir']
+        preferred_type = entry.get('preferred_type')
+        preferred_zone = entry.get('preferred_zone')
+
+        tou_result = subprocess.run(
+            _tou,
+            shell=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True
+        )
+        if tou_result.returncode != 0:
+            add_MONITOR_log(f'{MADE} queue: _tou 失败，跳过本轮 queue 处理\n')
+            break
+
+        idle_tpus = _parse_idle_tpus_from_tou(tou_result.stdout)
+        new_tpu_name, new_tpu_zone = _pick_any_idle_tpu(idle_tpus, preferred_type, preferred_zone)
+        if not new_tpu_name:
+            add_MONITOR_log(f'{MADE} queue: 找不到可用的 IDLE 卡 for dir={dir_no}，停止本轮 queue 处理\n')
+            break
+
+        new_tpu_type = _extract_tpu_type(new_tpu_name)
+        if not new_tpu_type or not new_tpu_zone:
+            add_MONITOR_log(f'{MADE} queue: 卡 {new_tpu_name} 无法解析类型/zone，跳过 dir={dir_no}\n')
+            continue
+
+        new_alias = _pick_new_alias(new_tpu_type, new_tpu_zone)
+        if not new_alias:
+            add_MONITOR_log(f'{MADE} queue: 找不到可用的 alias for {new_tpu_type}，停止本轮 queue 处理\n')
+            break
+
+        add_MONITOR_log(f'{INFO} queue: 准备跑 dir={dir_no}，卡={new_tpu_name} alias={new_alias}\n')
+
+        _tmd_inline = r'tmd() { local force=0; local args=(); for arg in "$@"; do if [ "$arg" = "--force" ]; then force=1; else args+=("$arg"); fi; done; while true; do if [ "$force" = "1" ]; then output=$(' + f'{_tpu}' + r' mount-disk --force "${args[@]}" 2>&1 | tee /dev/tty); else output=$(' + f'{_tpu}' + r' mount-disk "${args[@]}" 2>&1 | tee /dev/tty); fi; if [ "$force" = "0" ] && echo "$output" | grep -q "another process is already mounting"; then sleep 10; echo "sleep 10 and retrying..."; else break; fi; done; }'
+        fmd_cmd = f'{_tmd_inline} && {_tpu} zhan {new_tpu_name} {USER} && {_tpu} fang {new_tpu_name} {new_alias} && tmd {new_alias}'
+        add_MONITOR_log(f'{INFO} queue: 运行 ftmd: tpu zhan {new_tpu_name} {USER} && tpu fang {new_tpu_name} {new_alias} && tmd {new_alias}\n')
+
+        # mark as running before executing to prevent double-dispatch
+        _queue_start_job(job_id, new_tpu_name, new_alias)
+
+        try:
+            fmd_result = subprocess.run(
+                fmd_cmd,
+                shell=True,
+                executable='/bin/bash',
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=900
+            )
+        except subprocess.TimeoutExpired:
+            add_MONITOR_log(f'{MADE} queue: ftmd 超时 for dir={dir_no}，移回 pending\n')
+            _queue_fail_job(job_id)
+            continue
+
+        if fmd_result.returncode == 124:
+            add_MONITOR_log(f'{MADE} queue: ftmd 超时(124) for dir={dir_no}，移回 pending\n')
+            _queue_fail_job(job_id)
+            continue
+
+        fail = (fmd_result.returncode != 0) or ("is already reserved by" in fmd_result.stdout.lower())
+        if fail:
+            add_MONITOR_log(f'{MADE} queue: ftmd 失败 for dir={dir_no}，移回 pending\n')
+            _queue_fail_job(job_id)
+            continue
+
+        add_MONITOR_log(f'{GAOCHAO} queue: ftmd 完成，准备 tpu run {new_alias} {USER} dir={dir_no}\n')
+
+        run_cmd = f'{_tpu} run {new_alias} {USER} dir={dir_no} --monitor=False'
+        add_MONITOR_log(f'{INFO} queue: 运行 {run_cmd}\n')
+        try:
+            run_result = subprocess.run(
+                run_cmd,
+                shell=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=900
+            )
+        except subprocess.TimeoutExpired:
+            add_MONITOR_log(f'{MADE} queue: tpu run 超时 for dir={dir_no}，移回 pending\n')
+            _queue_fail_job(job_id)
+            continue
+
+        if run_result.returncode != 0:
+            add_MONITOR_log(f'{MADE} queue: tpu run 失败 for dir={dir_no}，移回 pending\n')
+            add_MONITOR_log(f'{MADE} queue: stderr: {run_result.stderr.strip()}\n')
+            _queue_fail_job(job_id)
+            continue
+
+        add_MONITOR_log(f'{GAOCHAO} queue: dir={dir_no} 已成功启动！alias={new_alias}')
+        _queue_finish_job(job_id)
+        subprocess.run('sleep 2', shell=True)
+
 
 def mainloop():
     error_jobs = {'preempted': [], 'deleted': [], 'tpu_still_exists': [], 'resume_next_round': []}
@@ -747,7 +1009,7 @@ def mainloop():
                     continue
 
                 idle_tpus = _parse_idle_tpus_from_tou(tou_result.stdout)
-                new_tpu_name, new_tpu_zone, pick_mode = _pick_idle_tpu(idle_tpus, target_type, target_zone, is_jit=_is_jit_job(job))
+                new_tpu_name, new_tpu_zone, pick_mode = _pick_idle_tpu(idle_tpus, target_type, target_zone, low_cost=_is_low_cost_job(job), same_type_only=SAME_TYPE_ONLY)
                 if not new_tpu_name:
                     add_MONITOR_log(f'{MADE} 我找不到可用的 IDLE 卡, 型号是 {target_type}, 所在区域是 {target_zone}\n')
                     remove_sqa(_window)
@@ -868,13 +1130,58 @@ def mainloop():
     #             except:
     #                 print(f"{FAIL} mainloop: Failed to handle job {job['windows_id']} for user {user}, (error type {error_type}, rule {rule})")
     #                 add_MONITOR_log(f"{FAIL} mainloop: Failed to handle job {job['windows_id']} for user {user}, (error type {error_type}, rule {rule})")
-    
+
+    _run_queued_jobs()
+
 
 if __name__ == "__main__":
+    # ---------------------------------------------------------------------------
+    # Subcommands: queue / queue-list / queue-clear
+    # Usage examples:
+    #   python MONITOR.py queue dir=123
+    #   python MONITOR.py queue dir=123 type=v6e-64
+    #   python MONITOR.py queue-list
+    #   python MONITOR.py queue-clear
+    # ---------------------------------------------------------------------------
+    _subcmd = sys.argv[1] if len(sys.argv) > 1 else None
+
+    if _subcmd == 'queue':
+        _params = {}
+        for _arg in sys.argv[2:]:
+            if '=' in _arg:
+                _k, _v = _arg.split('=', 1)
+                _params[_k.strip()] = _v.strip()
+        if 'dir' not in _params:
+            print("Usage: queue dir=<dir_no> [type=<tpu_type>] [zone=<zone>]")
+            sys.exit(1)
+        queue_add_job(
+            dir_no=_params['dir'],
+            preferred_type=_params.get('type'),
+            preferred_zone=_params.get('zone'),
+        )
+        sys.exit(0)
+
+    if _subcmd == 'queue-list':
+        queue_show()
+        sys.exit(0)
+
+    if _subcmd == 'queue-clear':
+        _q = _read_queue()
+        _cleared = len(_q['pending'])
+        _q['pending'] = []
+        _write_queue(_q)
+        print(f"[queue] 已清空 {_cleared} 个 pending 任务。")
+        sys.exit(0)
+
+    # ---------------------------------------------------------------------------
+    # Default: run the MONITOR loop
+    # ---------------------------------------------------------------------------
     _parser = argparse.ArgumentParser()
     _parser.add_argument('--user', type=str, default='sqa', help='User name (default: sqa)')
+    _parser.add_argument('--same-type-only', action='store_true', help='Only resume on the same TPU type (skip cross-type and cross-region fallback)')
     _args = _parser.parse_args()
     USER = _args.user
+    SAME_TYPE_ONLY = _args.same_type_only
 
     num_loops = 0
     last_test_time = time.time()
