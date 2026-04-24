@@ -179,16 +179,6 @@ def queue_show():
 
 def add_MONITOR_log(log):
     """将日志同时追加写入 output.log 并打印到 stdout（带 UTC 时间戳）。"""
-    # data = data_io.read_and_lock_data()
-    # try:
-    #     data["MONITOR_logs"].append({
-    #         "time": get_abs_time_str(),
-    #         "msg": log
-    #     })
-    #     data_io.write_and_unlock_data(data)
-    # except Exception as e:
-    #     print(f"{FAIL} add_MONITOR_log: Failed to add log {log}: {e}")
-    #     data_io.release_lock_data()
     with open(f'/kmh-nfs-ssd-us-mount/code/qiao/work/tpu_manager/output.log', 'a') as file:
         file.write(f"{get_abs_time_str()}: {log}\n")
     print(f"{get_abs_time_str()}: {log}")
@@ -210,6 +200,44 @@ def _append_resume_file_log(window_id, command_name, command, result):
         log_file.write("stderr:\n")
         log_file.write((result.stderr or "") + "\n")
         log_file.write("-" * 80 + "\n")
+
+def _append_queue_file_log(job_id, dir_no, command_name, command, result):
+    """将 queue 子任务命令执行结果落盘，便于排查 returncode=0 但实际失败的情况。"""
+    log_dir = os.path.join("logs", "queue")
+    os.makedirs(log_dir, exist_ok=True)
+    log_path = os.path.join(log_dir, f"job_{job_id}_dir_{dir_no}.txt")
+
+    with open(log_path, "a") as log_file:
+        log_file.write(f"[{get_abs_time_str()}] {command_name}\n")
+        log_file.write(f"cmd: {command}\n")
+        log_file.write(f"returncode: {result.returncode}\n")
+        log_file.write("stdout:\n")
+        log_file.write((result.stdout or "") + "\n")
+        log_file.write("stderr:\n")
+        log_file.write((result.stderr or "") + "\n")
+        log_file.write("-" * 80 + "\n")
+    return log_path
+
+def _tail_text(text, max_lines=20, max_chars=4000):
+    """截取文本尾部若干行，避免把超长输出全部打到主日志。"""
+    if not text:
+        return ""
+    lines = text.splitlines()
+    tail = "\n".join(lines[-max_lines:])
+    if len(tail) > max_chars:
+        tail = tail[-max_chars:]
+    return tail
+
+def _run_output_looks_failed(stdout_text, stderr_text):
+    """tpu run 可能吞掉异常并以 0 退出，这里基于输出做兜底失败判断。"""
+    merged = f"{stdout_text}\n{stderr_text}".lower()
+    failure_markers = (
+        "[fail]",
+        "traceback (most recent call last)",
+        "exception:",
+        "error:",
+    )
+    return any(marker in merged for marker in failure_markers)
 
 def show_MONITOR_log(timezone = 'us'):
     """从 data.json 读取历史 MONITOR 日志并按指定时区（'us'=EDT / 'cn'=CHN）打印。"""
@@ -293,7 +321,13 @@ def _extract_tpu_type(name):
     if norm_name.startswith('kmh-tpuvm-'):
         norm_name = norm_name[len('kmh-tpuvm-'):]
     match = TYPE_RE.match(norm_name)
-    return match.group(1) if match else None
+    if match is None:
+        # try special case: kmh-tpuvm-v6e-spot-xtiange-0423-2144-05a8a4-asia-northeast1-b, this is v6e-8
+        if norm_name.startswith('v6e-spot-xtiange') and norm_name.endswith('asia-northeast1-b'):
+            return 'v6e-8'
+        else:
+            return None
+    return match.group(1)
 
 def _extract_zone(tpu_name):
     """
@@ -830,13 +864,31 @@ def _run_queued_jobs():
             _queue_fail_job(job_id)
             continue
 
+        run_log_path = _append_queue_file_log(job_id, dir_no, "tpu_run", run_cmd, run_result)
+        clean_stdout = _strip_ansi(run_result.stdout or "").strip()
+        clean_stderr = _strip_ansi(run_result.stderr or "").strip()
+        if clean_stdout:
+            add_MONITOR_log(f'{INFO} queue: tpu run stdout尾部(dir={dir_no}):\n{_tail_text(clean_stdout)}\n')
+        if clean_stderr:
+            add_MONITOR_log(f'{INFO} queue: tpu run stderr尾部(dir={dir_no}):\n{_tail_text(clean_stderr)}\n')
+
         if run_result.returncode != 0:
-            add_MONITOR_log(f'{MADE} queue: tpu run 失败 for dir={dir_no}，移回 pending\n')
-            add_MONITOR_log(f'{MADE} queue: stderr: {run_result.stderr.strip()}\n')
+            add_MONITOR_log(
+                f'{MADE} queue: tpu run 失败 for dir={dir_no}，移回 pending。'
+                f'完整输出见 {run_log_path}\n'
+            )
             _queue_fail_job(job_id)
             continue
 
-        add_MONITOR_log(f'{GAOCHAO} queue: dir={dir_no} 已成功启动！alias={new_alias}')
+        if _run_output_looks_failed(clean_stdout, clean_stderr):
+            add_MONITOR_log(
+                f'{MADE} queue: tpu run 输出含失败标记(尽管returncode=0) for dir={dir_no}，移回 pending。'
+                f'完整输出见 {run_log_path}\n'
+            )
+            _queue_fail_job(job_id)
+            continue
+
+        add_MONITOR_log(f'{GAOCHAO} queue: dir={dir_no} 已成功启动！alias={new_alias}，完整输出见 {run_log_path}')
         _queue_finish_job(job_id)
         subprocess.run('sleep 2', shell=True)
 
@@ -1028,7 +1080,13 @@ def mainloop():
                     continue
 
                 idle_tpus = _parse_idle_tpus_from_tou(tou_result.stdout)
-                new_tpu_name, new_tpu_zone, pick_mode, tpu_already_owned = _pick_idle_tpu(idle_tpus, target_type, target_zone, low_cost=_is_low_cost_job(job), same_type_only=SAME_TYPE_ONLY)
+                new_tpu_name, new_tpu_zone, pick_mode, tpu_already_owned = _pick_idle_tpu(
+                    idle_tpus,
+                    target_type,
+                    target_zone,
+                    low_cost=_is_low_cost_job(job),
+                    same_type_only=SAME_TYPE_ONLY,
+                )
                 if not new_tpu_name:
                     add_MONITOR_log(f'{MADE} 我找不到可用的 IDLE 卡, 型号是 {target_type}, 所在区域是 {target_zone}\n')
                     remove_sqa(_window)
