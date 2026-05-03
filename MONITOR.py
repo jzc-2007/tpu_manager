@@ -382,6 +382,17 @@ def _parse_idle_tpus_from_tou(stdout):
         idle_tpus.append((tpu_name.strip(), zone.strip()))
     return idle_tpus
 
+def _parse_all_tpu_names_from_tou(stdout):
+    """解析 tou 输出中出现的所有 TPU 名称（含 IDLE/BUSY）。"""
+    names = set()
+    clean_stdout = _strip_ansi(stdout)
+    for line in clean_stdout.splitlines():
+        match = re.search(r"\[(?:IDLE|BUSY)\]\s+([^\s]+)\s+\(([^)]+)\)", line)
+        if not match:
+            continue
+        names.add(match.group(1).strip())
+    return names
+
 def _get_tpu_usage_from_tou(stdout, tpu_name):
     """在 tou 输出中查找指定 TPU 的占用状态。
     返回 ('idle', []) / ('busy', [user, ...]) / ('unknown', [])。"""
@@ -440,15 +451,22 @@ def _parse_tpu_gen_size(tpu_type):
         return None, None
     return m.group(1), int(m.group(2))
 
-def _is_type_allowed(candidate_type, low_cost):
+def _is_type_allowed(candidate_type, low_cost, gpt_b_only=False):
     """Return True if candidate_type is allowed to resume the job.
 
     Rules:
       - high-cost (low_cost=False): v6e >= 64, v5p >= 128.
       - low-cost  (low_cost=True):  v6e >= 32, v5p >= 64.
+      - GPT-B notes (gpt_b_only=True): v6e <= 16, v5p <= 32.
     """
     gen, size = _parse_tpu_gen_size(candidate_type)
     if gen is None:
+        return False
+    if gpt_b_only:
+        if gen == 'v6e' and size <= 16:
+            return True
+        if gen == 'v5p' and size <= 32:
+            return True
         return False
     if gen == 'v6e' and size >= 64:
         return True
@@ -465,8 +483,13 @@ def _is_low_cost_job(job):
     """Return True if the job qualifies for low-cost (smaller) TPUs.
     Triggered by tokens 'jit', 'nanogpt', 'MAE-B' in spreadsheet notes."""
     notes = (job.get('extra_msgs') or {}).get('spreadsheet_notes') or ''
-    allowed_tokens = ['jit', 'nanogpt', 'MAE-B']
+    allowed_tokens = ['jit', 'nanogpt', 'MAE-B', 'unify-base']
     return any(token in str(notes).lower().split() for token in allowed_tokens)
+
+def _is_gpt_b_job(job):
+    """Return True if spreadsheet/wandb notes indicate GPT-B workload."""
+    notes = (job.get('extra_msgs') or {}).get('spreadsheet_notes') or ''
+    return 'gpt-b' in str(notes).lower()
 
 def _zone_priority(zone):
     """Return sort key for zone priority during TPU selection (lower = higher priority).
@@ -542,16 +565,17 @@ def _get_tpu_existing_alias(tpu_name):
             return alias
     return None
 
-def _pick_idle_tpu(idle_tpus, target_type, target_zone, low_cost=False, same_type_only=False):
+def _pick_idle_tpu(idle_tpus, target_type, target_zone, low_cost=False, same_type_only=False, excluded_tpus=None, gpt_b_only=False):
     """
     Pick an idle TPU that is allowed to resume the job.
 
     Type rules (see _is_type_allowed):
-      - high-cost (low_cost=False): v6e >= 64, v5p >= 128.
-      - low-cost  (low_cost=True):  v6e >= 32, v5p >= 64.
+      - default high-cost (low_cost=False): v6e >= 64, v5p >= 128.
+      - default low-cost  (low_cost=True):  v6e >= 32, v5p >= 64.
+      - GPT-B notes (gpt_b_only=True):      v6e <= 16, v5p <= 32.
 
     Region rules:
-      - Pass 1: same type + same zone (exact match, always valid).
+      - Pass 1: same type + same zone (exact match, but still must pass type rules).
       - Pass 2: allowed type + same region.   [skipped when same_type_only=True]
       - Pass 3: allowed type + cross-region, but only when both the job's
                 region AND the candidate's region are in _CROSS_REGION_ALLOWED
@@ -573,17 +597,24 @@ def _pick_idle_tpu(idle_tpus, target_type, target_zone, low_cost=False, same_typ
     def _is_owned(tpu_name, zone):
         return tpu_name in all_tpus.get(zone, [])
 
+    excluded_tpus = excluded_tpus or set()
+
     # Sort all candidates by zone priority; then partition into unowned/owned.
-    sorted_idle = sorted(idle_tpus, key=lambda t: _zone_priority(t[1]))
+    sorted_idle = sorted(
+        [(n, z) for n, z in idle_tpus if n not in excluded_tpus],
+        key=lambda t: _zone_priority(t[1])
+    )
     unowned = [(n, z) for n, z in sorted_idle if not _is_owned(n, z)]
     owned   = [(n, z) for n, z in sorted_idle if _is_owned(n, z)]
 
     # Pass 1: same type + same zone — unowned first, owned as fallback.
     for tpu_name, zone in unowned:
-        if _extract_tpu_type(tpu_name) == target_type and zone == target_zone:
+        tpu_type = _extract_tpu_type(tpu_name)
+        if tpu_type == target_type and zone == target_zone and _is_type_allowed(tpu_type, low_cost, gpt_b_only=gpt_b_only):
             return tpu_name, zone, "exact", False
     for tpu_name, zone in owned:
-        if _extract_tpu_type(tpu_name) == target_type and zone == target_zone:
+        tpu_type = _extract_tpu_type(tpu_name)
+        if tpu_type == target_type and zone == target_zone and _is_type_allowed(tpu_type, low_cost, gpt_b_only=gpt_b_only):
             return tpu_name, zone, "exact", True
 
     if same_type_only:
@@ -593,12 +624,12 @@ def _pick_idle_tpu(idle_tpus, target_type, target_zone, low_cost=False, same_typ
     for tpu_name, zone in unowned:
         if _zone_region(zone) != target_region:
             continue
-        if _is_type_allowed(_extract_tpu_type(tpu_name), low_cost):
+        if _is_type_allowed(_extract_tpu_type(tpu_name), low_cost, gpt_b_only=gpt_b_only):
             return tpu_name, zone, "cross_type_same_region", False
     for tpu_name, zone in owned:
         if _zone_region(zone) != target_region:
             continue
-        if _is_type_allowed(_extract_tpu_type(tpu_name), low_cost):
+        if _is_type_allowed(_extract_tpu_type(tpu_name), low_cost, gpt_b_only=gpt_b_only):
             return tpu_name, zone, "cross_type_same_region", True
 
     # Pass 3: any allowed type, cross-region — unowned first, owned as fallback.
@@ -611,12 +642,12 @@ def _pick_idle_tpu(idle_tpus, target_type, target_zone, low_cost=False, same_typ
                     continue  # already covered in Pass 2
                 if candidate_region not in _CROSS_REGION_ALLOWED:
                     continue
-                if _is_type_allowed(tpu_type, low_cost):
+                if _is_type_allowed(tpu_type, low_cost, gpt_b_only=gpt_b_only):
                     return tpu_name, zone, "cross_region", is_already_owned
 
     return None, None, None, None
 
-def _pick_any_idle_tpu(idle_tpus, preferred_type=None, preferred_zone=None):
+def _pick_any_idle_tpu(idle_tpus, preferred_type=None, preferred_zone=None, excluded_tpus=None):
     """为新 job 选一张空闲 TPU（不要求 resume 同型号）。
 
     优先级（每级内 unowned 先于 owned）：
@@ -632,8 +663,11 @@ def _pick_any_idle_tpu(idle_tpus, preferred_type=None, preferred_zone=None):
     def _is_owned(tpu_name, zone):
         return tpu_name in all_tpus.get(zone, [])
 
-    unowned = [(n, z) for n, z in idle_tpus if not _is_owned(n, z)]
-    owned   = [(n, z) for n, z in idle_tpus if _is_owned(n, z)]
+    excluded_tpus = excluded_tpus or set()
+    filtered_idle = [(n, z) for n, z in idle_tpus if n not in excluded_tpus]
+
+    unowned = [(n, z) for n, z in filtered_idle if not _is_owned(n, z)]
+    owned   = [(n, z) for n, z in filtered_idle if _is_owned(n, z)]
 
     if preferred_type and preferred_zone:
         for candidates, flag in [(unowned, False), (owned, True)]:
@@ -654,28 +688,47 @@ def _pick_any_idle_tpu(idle_tpus, preferred_type=None, preferred_zone=None):
 
     return None, None, False
 
-def _pick_new_alias(target_type, zone):
+def _pick_new_alias(target_type, zone, tou_stdout=None, reserved_aliases=None, reserved_tpus=None):
     """从该 zone 的候选 alias 列表中，找出全名不出现在 tou 输出里的第一个 alias
     （即当前没有被任何人用到的 alias），用于 fmd 放卡。返回 alias 字符串或 None。"""
     available_aliases = avilable_aliases(target_type, zone)
-    # do tou
-    tou_result = subprocess.run(
-        _tou,
-        shell=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True
-    )
-    if tou_result.returncode != 0:
-        return None
-    # for each alias, find its tpu full name, and look whether it is in output of tou
-    clean_stdout = _strip_ansi(tou_result.stdout)
+    if tou_stdout is None:
+        tou_result = subprocess.run(
+            _tou,
+            shell=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True
+        )
+        if tou_result.returncode != 0:
+            return None
+        tou_stdout = tou_result.stdout
+
+    reserved_aliases = reserved_aliases or set()
+    reserved_tpus = reserved_tpus or set()
+    tpus_in_tou = _parse_all_tpu_names_from_tou(tou_stdout)
+    data = data_io.read_data()
+    alias_map = data.get('tpu_aliases', {})
+
     for a in available_aliases:
-        data = data_io.read_data()
-        full_name = data['tpu_aliases'][a]
-        if full_name not in clean_stdout:
+        if a in reserved_aliases:
+            continue
+        full_name = alias_map.get(a)
+        if not full_name:
+            continue
+        if full_name in reserved_tpus:
+            continue
+        if full_name not in tpus_in_tou:
             return a
     return None
+
+def _queue_reserved_aliases_tpus():
+    """返回 queue running 中已占用的 alias/tpu 集合。"""
+    q = _read_queue()
+    running = q.get('running', [])
+    aliases = {str(e.get('alias')).strip() for e in running if e.get('alias')}
+    tpus = {str(e.get('tpu')).strip() for e in running if e.get('tpu')}
+    return aliases, tpus
 
 # def restart_worker(ka, result_queue):
 #     sys.stdout = open(os.devnull, 'w')
@@ -762,14 +815,19 @@ def kill_rerun(job):
 #             print(f"{FAIL} reapply_resume: Reapply TPU {ka} failed, no result returned")
 #             add_MONITOR_log(f"{FAIL} reapply_resume: Reapply TPU {ka} failed, no result returned")
 
-def _run_queued_jobs():
+def _run_queued_jobs(excluded_tpus=None):
     """处理 queue.json 中的 pending 任务：找空卡 -> ftmd -> tpu run。
     每轮 mainloop 结束后调用一次。"""
     q = _read_queue()
     if not q['pending']:
         return
 
+    excluded_tpus = set(excluded_tpus or set())
+
     add_MONITOR_log(f"{INFO} queue: 发现 {len(q['pending'])} 个待跑任务，开始处理")
+
+    loop_reserved_aliases = set()
+    loop_reserved_tpus = set(excluded_tpus)
 
     for entry in list(q['pending']):
         job_id = entry['id']
@@ -789,36 +847,72 @@ def _run_queued_jobs():
             break
 
         idle_tpus = _parse_idle_tpus_from_tou(tou_result.stdout)
-        new_tpu_name, new_tpu_zone, tpu_already_owned = _pick_any_idle_tpu(idle_tpus, preferred_type, preferred_zone)
+        queue_reserved_aliases, queue_reserved_tpus = _queue_reserved_aliases_tpus()
+        reserved_aliases = queue_reserved_aliases | loop_reserved_aliases
+        reserved_tpus = queue_reserved_tpus | loop_reserved_tpus
+
+        excluded_tpus_for_pick = set(reserved_tpus)
+        new_tpu_name, new_tpu_zone, tpu_already_owned, new_alias, fmd_cmd = None, None, None, None, None
+
+        while True:
+            picked_tpu, picked_zone, picked_owned = _pick_any_idle_tpu(
+                idle_tpus,
+                preferred_type,
+                preferred_zone,
+                excluded_tpus=excluded_tpus_for_pick,
+            )
+            if not picked_tpu:
+                break
+
+            picked_type = _extract_tpu_type(picked_tpu)
+            if not picked_type or not picked_zone:
+                add_MONITOR_log(f'{MADE} queue: 卡 {picked_tpu} 无法解析类型/zone，跳过 dir={dir_no}\n')
+                excluded_tpus_for_pick.add(picked_tpu)
+                continue
+
+            _tmd_inline = r'tmd() { local force=0; local args=(); for arg in "$@"; do if [ "$arg" = "--force" ]; then force=1; else args+=("$arg"); fi; done; while true; do if [ "$force" = "1" ]; then output=$(' + f'{_tpu}' + r' mount-disk --force "${args[@]}" 2>&1 | tee /dev/tty); else output=$(' + f'{_tpu}' + r' mount-disk "${args[@]}" 2>&1 | tee /dev/tty); fi; if [ "$force" = "0" ] && echo "$output" | grep -q "another process is already mounting"; then sleep 10; echo "sleep 10 and retrying..."; else break; fi; done; }'
+            if picked_owned:
+                picked_alias = _get_tpu_existing_alias(picked_tpu)
+                if not picked_alias:
+                    add_MONITOR_log(f'{MADE} queue: 卡 {picked_tpu} 已注册但找不到 alias，跳过 dir={dir_no}\n')
+                    excluded_tpus_for_pick.add(picked_tpu)
+                    continue
+                if picked_alias in reserved_aliases:
+                    add_MONITOR_log(f'{WARNING} queue: alias={picked_alias} 已被 queue 占用，跳过卡 {picked_tpu} for dir={dir_no}\n')
+                    excluded_tpus_for_pick.add(picked_tpu)
+                    continue
+                new_tpu_name, new_tpu_zone, tpu_already_owned, new_alias = picked_tpu, picked_zone, True, picked_alias
+                add_MONITOR_log(f'{INFO} queue: 卡 {new_tpu_name} 已注册，alias={new_alias}，跳过 fang 直接 zhan+tmd，准备跑 dir={dir_no}\n')
+                fmd_cmd = f'{_tmd_inline} && {_tpu} zhan {new_tpu_name} {USER} && tmd {new_alias}'
+                add_MONITOR_log(f'{INFO} queue: 运行 zhan+mount-disk (已注册卡): tpu zhan {new_tpu_name} {USER} && tmd {new_alias}\n')
+                break
+
+            picked_alias = _pick_new_alias(
+                picked_type,
+                picked_zone,
+                tou_stdout=tou_result.stdout,
+                reserved_aliases=reserved_aliases,
+                reserved_tpus=reserved_tpus | {picked_tpu},
+            )
+            if not picked_alias:
+                add_MONITOR_log(f'{WARNING} queue: 卡 {picked_tpu} 未找到可用 alias，尝试下一张卡 for dir={dir_no}\n')
+                excluded_tpus_for_pick.add(picked_tpu)
+                continue
+
+            new_tpu_name, new_tpu_zone, tpu_already_owned, new_alias = picked_tpu, picked_zone, False, picked_alias
+            add_MONITOR_log(f'{INFO} queue: 准备跑 dir={dir_no}，卡={new_tpu_name} alias={new_alias}\n')
+            fmd_cmd = f'{_tmd_inline} && {_tpu} zhan {new_tpu_name} {USER} && {_tpu} fang {new_tpu_name} {new_alias} && tmd {new_alias}'
+            add_MONITOR_log(f'{INFO} queue: 运行 ftmd: tpu zhan {new_tpu_name} {USER} && tpu fang {new_tpu_name} {new_alias} && tmd {new_alias}\n')
+            break
+
         if not new_tpu_name:
             add_MONITOR_log(f'{MADE} queue: 找不到可用的 IDLE 卡 for dir={dir_no}，停止本轮 queue 处理\n')
             break
 
-        new_tpu_type = _extract_tpu_type(new_tpu_name)
-        if not new_tpu_type or not new_tpu_zone:
-            add_MONITOR_log(f'{MADE} queue: 卡 {new_tpu_name} 无法解析类型/zone，跳过 dir={dir_no}\n')
-            continue
-
-        _tmd_inline = r'tmd() { local force=0; local args=(); for arg in "$@"; do if [ "$arg" = "--force" ]; then force=1; else args+=("$arg"); fi; done; while true; do if [ "$force" = "1" ]; then output=$(' + f'{_tpu}' + r' mount-disk --force "${args[@]}" 2>&1 | tee /dev/tty); else output=$(' + f'{_tpu}' + r' mount-disk "${args[@]}" 2>&1 | tee /dev/tty); fi; if [ "$force" = "0" ] && echo "$output" | grep -q "another process is already mounting"; then sleep 10; echo "sleep 10 and retrying..."; else break; fi; done; }'
-        if tpu_already_owned:
-            new_alias = _get_tpu_existing_alias(new_tpu_name)
-            if not new_alias:
-                add_MONITOR_log(f'{MADE} queue: 卡 {new_tpu_name} 已注册但找不到 alias，跳过 dir={dir_no}\n')
-                continue
-            add_MONITOR_log(f'{INFO} queue: 卡 {new_tpu_name} 已注册，alias={new_alias}，跳过 fang 直接 zhan+tmd，准备跑 dir={dir_no}\n')
-            fmd_cmd = f'{_tmd_inline} && {_tpu} zhan {new_tpu_name} {USER} && tmd {new_alias}'
-            add_MONITOR_log(f'{INFO} queue: 运行 zhan+mount-disk (已注册卡): tpu zhan {new_tpu_name} {USER} && tmd {new_alias}\n')
-        else:
-            new_alias = _pick_new_alias(new_tpu_type, new_tpu_zone)
-            if not new_alias:
-                add_MONITOR_log(f'{MADE} queue: 找不到可用的 alias for {new_tpu_type}，停止本轮 queue 处理\n')
-                break
-            add_MONITOR_log(f'{INFO} queue: 准备跑 dir={dir_no}，卡={new_tpu_name} alias={new_alias}\n')
-            fmd_cmd = f'{_tmd_inline} && {_tpu} zhan {new_tpu_name} {USER} && {_tpu} fang {new_tpu_name} {new_alias} && tmd {new_alias}'
-            add_MONITOR_log(f'{INFO} queue: 运行 ftmd: tpu zhan {new_tpu_name} {USER} && tpu fang {new_tpu_name} {new_alias} && tmd {new_alias}\n')
-
         # mark as running before executing to prevent double-dispatch
         _queue_start_job(job_id, new_tpu_name, new_alias)
+        loop_reserved_aliases.add(new_alias)
+        loop_reserved_tpus.add(new_tpu_name)
 
         try:
             fmd_result = subprocess.run(
@@ -895,6 +989,7 @@ def _run_queued_jobs():
 
 def mainloop():
     error_jobs = {'preempted': [], 'deleted': [], 'tpu_still_exists': [], 'resume_next_round': []}
+    resumed_tpus_this_round = set()
     data = data_io.read_data()
     sqa_session_name = data['users'][USER]['tmux_name']
     sqa = read_sqa()
@@ -1052,6 +1147,7 @@ def mainloop():
                 add_MONITOR_log(f"{MADE} 检查tpu使用状态失败了: {e}")
 
         error_jobs["deleted"].extend(force_deleted_jobs)
+        used_tpus_this_round = set()
         for job in error_jobs["deleted"]:
             
             _window = job['windows_id']
@@ -1080,17 +1176,25 @@ def mainloop():
                     continue
 
                 idle_tpus = _parse_idle_tpus_from_tou(tou_result.stdout)
+                gpt_b_only = _is_gpt_b_job(job)
+                if gpt_b_only:
+                    add_MONITOR_log(f'{INFO} window {_window} 命中 GPT-B notes，resume 仅允许 v5p<=32 / v6e<=16\n')
                 new_tpu_name, new_tpu_zone, pick_mode, tpu_already_owned = _pick_idle_tpu(
                     idle_tpus,
                     target_type,
                     target_zone,
                     low_cost=_is_low_cost_job(job),
                     same_type_only=SAME_TYPE_ONLY,
+                    excluded_tpus=used_tpus_this_round,
+                    gpt_b_only=gpt_b_only,
                 )
                 if not new_tpu_name:
-                    add_MONITOR_log(f'{MADE} 我找不到可用的 IDLE 卡, 型号是 {target_type}, 所在区域是 {target_zone}\n')
+                    add_MONITOR_log(f'{MADE} 我找不到可用的 IDLE 卡(本轮已排除: {sorted(list(used_tpus_this_round))}), 型号是 {target_type}, 所在区域是 {target_zone}\n')
                     remove_sqa(_window)
                     continue
+
+                used_tpus_this_round.add(new_tpu_name)
+                resumed_tpus_this_round.add(new_tpu_name)
 
                 new_tpu_type = _extract_tpu_type(new_tpu_name)
                 if not new_tpu_type or not new_tpu_zone:
@@ -1216,7 +1320,7 @@ def mainloop():
     #                 print(f"{FAIL} mainloop: Failed to handle job {job['windows_id']} for user {user}, (error type {error_type}, rule {rule})")
     #                 add_MONITOR_log(f"{FAIL} mainloop: Failed to handle job {job['windows_id']} for user {user}, (error type {error_type}, rule {rule})")
 
-    _run_queued_jobs()
+    _run_queued_jobs(excluded_tpus=resumed_tpus_this_round)
 
 
 if __name__ == "__main__":
