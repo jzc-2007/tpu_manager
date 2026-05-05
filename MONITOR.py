@@ -1,5 +1,6 @@
 import os, sys, subprocess
 import json
+import yaml
 import time
 import multiprocessing
 import re
@@ -169,7 +170,11 @@ def queue_show():
     print(f"=== Queue Status ===")
     print(f"Pending ({len(q['pending'])}):")
     for e in q['pending']:
-        print(f"  dir={e['dir']}  queued_at={e['queued_at']}" + (f"  type={e.get('preferred_type','')}" if e.get('preferred_type') else ""))
+        print(
+            f"  dir={e['dir']}  queued_at={e['queued_at']}"
+            + (f"  type={e.get('preferred_type','')}" if e.get('preferred_type') else "")
+            + (f"  zone={e.get('preferred_zone','')}" if e.get('preferred_zone') else "")
+        )
     print(f"Running ({len(q['running'])}):")
     for e in q['running']:
         print(f"  dir={e['dir']}  alias={e.get('alias','')}  tpu={e.get('tpu','')}  started_at={e.get('started_at','')}")
@@ -481,15 +486,50 @@ def _is_type_allowed(candidate_type, low_cost, gpt_b_only=False):
 
 def _is_low_cost_job(job):
     """Return True if the job qualifies for low-cost (smaller) TPUs.
-    Triggered by tokens 'jit', 'nanogpt', 'MAE-B' in spreadsheet notes."""
+    Triggered by tokens in spreadsheet notes."""
     notes = (job.get('extra_msgs') or {}).get('spreadsheet_notes') or ''
-    allowed_tokens = ['jit', 'nanogpt', 'MAE-B', 'unify-base']
-    return any(token in str(notes).lower().split() for token in allowed_tokens)
+    notes_l = str(notes).lower()
+    allowed_tokens = ['jit', 'mae-b', 'unify-base']
+    return any(token in notes_l for token in allowed_tokens)
 
 def _is_gpt_b_job(job):
     """Return True if spreadsheet/wandb notes indicate GPT-B workload."""
     notes = (job.get('extra_msgs') or {}).get('spreadsheet_notes') or ''
     return 'gpt-b' in str(notes).lower()
+
+def _get_queue_job_wandb_notes(dir_no):
+    """从 USER 的 working_dir[dir_no] 读取 wandb_notes。
+
+    默认读取 configs/remote_run_config.yml；若其中 finetune=True，改读
+    configs/finetune_config.yml。失败时返回空字符串。
+    """
+    try:
+        data = data_io.read_data()
+        user_data = data.get('users', {}).get(USER, {})
+        working_dir = (user_data.get('working_dir') or {}).get(str(dir_no))
+        if not working_dir:
+            return ''
+
+        remote_cfg = os.path.join(working_dir, 'configs', 'remote_run_config.yml')
+        if not os.path.exists(remote_cfg):
+            return ''
+
+        with open(remote_cfg, 'r', encoding='utf-8', errors='ignore') as f:
+            cfg = yaml.safe_load(f) or {}
+
+        target_cfg = cfg
+        if bool(cfg.get('finetune', False)):
+            finetune_cfg = os.path.join(working_dir, 'configs', 'finetune_config.yml')
+            if os.path.exists(finetune_cfg):
+                with open(finetune_cfg, 'r', encoding='utf-8', errors='ignore') as f:
+                    target_cfg = yaml.safe_load(f) or {}
+
+        notes = target_cfg.get('wandb_notes')
+        if notes is None and isinstance(target_cfg.get('logging'), dict):
+            notes = target_cfg.get('logging', {}).get('wandb_notes')
+        return str(notes or '')
+    except Exception:
+        return ''
 
 def _zone_priority(zone):
     """Return sort key for zone priority during TPU selection (lower = higher priority).
@@ -647,7 +687,7 @@ def _pick_idle_tpu(idle_tpus, target_type, target_zone, low_cost=False, same_typ
 
     return None, None, None, None
 
-def _pick_any_idle_tpu(idle_tpus, preferred_type=None, preferred_zone=None, excluded_tpus=None):
+def _pick_any_idle_tpu(idle_tpus, preferred_type=None, preferred_zone=None, excluded_tpus=None, low_cost=False, gpt_b_only=False):
     """为新 job 选一张空闲 TPU（不要求 resume 同型号）。
 
     优先级（每级内 unowned 先于 owned）：
@@ -683,7 +723,7 @@ def _pick_any_idle_tpu(idle_tpus, preferred_type=None, preferred_zone=None, excl
 
     for candidates, flag in [(unowned, False), (owned, True)]:
         for tpu_name, zone in candidates:
-            if _is_type_allowed(_extract_tpu_type(tpu_name), low_cost=False):
+            if _is_type_allowed(_extract_tpu_type(tpu_name), low_cost=low_cost, gpt_b_only=gpt_b_only):
                 return tpu_name, zone, flag
 
     return None, None, False
@@ -834,6 +874,22 @@ def _run_queued_jobs(excluded_tpus=None):
         dir_no = entry['dir']
         preferred_type = entry.get('preferred_type')
         preferred_zone = entry.get('preferred_zone')
+        notes = _get_queue_job_wandb_notes(dir_no)
+        queue_job = {'extra_msgs': {'spreadsheet_notes': notes}}
+        low_cost = _is_low_cost_job(queue_job)
+        gpt_b_only = _is_gpt_b_job(queue_job)
+        if preferred_type or preferred_zone:
+            add_MONITOR_log(
+                f"{INFO} queue: dir={dir_no} 使用队列偏好"
+                + (f" type={preferred_type}" if preferred_type else "")
+                + (f" zone={preferred_zone}" if preferred_zone else "")
+            )
+        if notes:
+            add_MONITOR_log(f"{INFO} queue: dir={dir_no} wandb_notes={notes}")
+        if gpt_b_only:
+            add_MONITOR_log(f'{INFO} queue: dir={dir_no} 命中 GPT-B notes，选卡仅允许 v5p<=32 / v6e<=16')
+        elif low_cost:
+            add_MONITOR_log(f'{INFO} queue: dir={dir_no} 命中 low-cost notes，选卡允许 v6e>=32 / v5p>=64')
 
         tou_result = subprocess.run(
             _tou,
@@ -860,6 +916,8 @@ def _run_queued_jobs(excluded_tpus=None):
                 preferred_type,
                 preferred_zone,
                 excluded_tpus=excluded_tpus_for_pick,
+                low_cost=low_cost,
+                gpt_b_only=gpt_b_only,
             )
             if not picked_tpu:
                 break
@@ -906,8 +964,8 @@ def _run_queued_jobs(excluded_tpus=None):
             break
 
         if not new_tpu_name:
-            add_MONITOR_log(f'{MADE} queue: 找不到可用的 IDLE 卡 for dir={dir_no}，停止本轮 queue 处理\n')
-            break
+            add_MONITOR_log(f'{MADE} queue: 找不到可用的 IDLE 卡 for dir={dir_no}，看下一个\n')
+            continue
 
         # mark as running before executing to prevent double-dispatch
         _queue_start_job(job_id, new_tpu_name, new_alias)
