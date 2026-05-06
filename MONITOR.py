@@ -858,6 +858,16 @@ def kill_rerun(job):
 def _run_queued_jobs(excluded_tpus=None):
     """处理 queue.json 中的 pending 任务：找空卡 -> ftmd -> tpu run。
     每轮 mainloop 结束后调用一次。"""
+    # Queue 里的 dir_no 是 sqa 的 working_dir 编号；只有 sqa 能正确消费。
+    # 其他 user（如 bird）跳过 queue，避免 hijack sqa 的 job 还跑失败。
+    if USER != "sqa":
+        q = _read_queue()
+        n_pending = len(q.get("pending", []))
+        if n_pending > 0:
+            add_MONITOR_log(
+                f"{INFO} queue: 跳过 ({n_pending} pending) because USER={USER}, only sqa consumes queue"
+            )
+        return
     q = _read_queue()
     if not q['pending']:
         return
