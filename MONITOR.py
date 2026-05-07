@@ -495,7 +495,7 @@ def _is_low_cost_job(job):
 def _is_gpt_b_job(job):
     """Return True if spreadsheet/wandb notes indicate GPT-B workload."""
     notes = (job.get('extra_msgs') or {}).get('spreadsheet_notes') or ''
-    return 'gpt-b' in str(notes).lower()
+    return ('gpt-b' in str(notes).lower() or 'deit' in str(notes).lower())
 
 def _get_queue_job_wandb_notes(dir_no):
     """从 USER 的 working_dir[dir_no] 读取 wandb_notes。
