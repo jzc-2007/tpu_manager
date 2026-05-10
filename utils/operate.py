@@ -598,13 +598,17 @@ def describe_tpu(tpu, quiet = False):
             print(f"{FAIL} describe_tpu: Timeout expired. This may probably because the TPU is deleted.")
         return 'timeout'
 
-def check_env(tpu, quiet = False, recurse=0):
+def check_env(tpu, quiet = False, recurse=0, zone=None):
     """
     Check if the environment in the TPU is good.
     Return value: ['no tpu found', 'success', 'failed', 'file error', 'unknown', 'timeout', 'occupied']
+    If zone is provided directly, skip the data.json lookup so the TPU does not need to be registered.
     """
-    zone, pre, spot, tpu = get_zone_pre_spot(tpu)
-    if zone is None: return 'no tpu found'
+    if zone is None:
+        zone, pre, spot, tpu = get_zone_pre_spot(tpu)
+        if zone is None: return 'no tpu found'
+    else:
+        tpu = tpu.strip()
     
     conda_path = '/kmh-nfs-ssd-us-mount/code/hanhong/miniforge3/bin/python' if 'us-central2' in zone else 'python'
 
@@ -667,8 +671,8 @@ def check_env(tpu, quiet = False, recurse=0):
             print(f"{FAIL} check_remote_env: Can't find directory.")
         if recurse == 0:
             print(f"{INFO} check_env: Trying to mount disk and check again...")
-            mount_disk(tpu, quiet=quiet)
-            return check_env(tpu, quiet=quiet, recurse=recurse+1)
+            mount_disk(tpu, quiet=quiet, zone=zone)
+            return check_env(tpu, quiet=quiet, recurse=recurse+1, zone=zone)
         else:
             return 'file error'
     
@@ -884,8 +888,8 @@ def _mount_disk_locked(tpu, quiet=False, force=False, zone=None):
         print(f'skip checking env for v5p')
         _write_disk_mounted(tpu, zone)
         return 'success'
-    
-    state = check_env(tpu)
+
+    state = check_env(tpu, zone=zone)
 
     if state == 'success':
         print(f"{GOOD} Environment in TPU {tpu} is good, done mounting disk")
