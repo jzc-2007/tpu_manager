@@ -967,7 +967,16 @@ def run(user_obj, args, monitor_job = True):
             print(f"{INFO} run: Quiting... {tpu}")
             return
         print(f"{INFO} run: TPU {tpu} is not reserved by others.")
-        
+
+        # Auto-zhan: take the reservation lock so other tools (master.py auto-mount,
+        # other users' runs) don't grab this TPU during the staging window.
+        # Mirrors resume_rerun_job behavior. Lock auto-expires after 30 min.
+        ret = zhan(user_obj.name, tpu)
+        if ret != 'success':
+            print(f"{FAIL} run: Failed to zhan tpu {tpu}, error: {ret}")
+            print(f"{INFO} run: Quiting... {tpu}")
+            return
+
         try:
             _ssh_check_cmd = (
                 f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} "
