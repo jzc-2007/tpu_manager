@@ -19,6 +19,11 @@ from utils.helpers import *
 USER = 'sqa'
 SAME_TYPE_ONLY = False
 
+# Per-user resume floor — overrides default high-cost gating (v6e>=64) for listed users.
+_USER_MIN_SIZES = {
+    'bird': {'v6e': 16, 'v5p': 32},
+}
+
 running_processes = []
 ANSI_ESCAPE_RE = re.compile(r"\x1B\[[0-?]*[ -/]*[@-~]")
 TYPE_RE = re.compile(r"^(v[0-9a-z]+-\d+)")
@@ -473,6 +478,10 @@ def _is_type_allowed(candidate_type, low_cost, gpt_b_only=False):
         if gen == 'v5p' and size <= 32:
             return True
         return False
+    if USER in _USER_MIN_SIZES:
+        mins = _USER_MIN_SIZES[USER]
+        if gen in mins and size >= mins[gen]:
+            return True
     if gen == 'v6e' and size >= 64:
         return True
     if gen == 'v5p' and size >= 128:
