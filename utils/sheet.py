@@ -42,12 +42,15 @@ def read_sheet_info() -> dict:
             assert len(row) >= 7, f"line {i+1} is too short: {row}"
             _, tpu, belong, running_status, user, user_note, script_note, env, other = row[:9]
             zone, pre, spot, full_name = get_zone_pre_spot(tpu)
-            
-            assert zone is not None, f"line {i+1} tpu {tpu} not found in zone"
-            assert zone.startswith(env), f"line {i+1} zone {zone} does not start with env {env}"
+
+            if zone is None:
+                continue
+            if not zone.startswith(env):
+                continue
 
             # print(running_status, user, user_note, script_note)
-            assert running_status in ['running', 'reserved', 'reserved(error)', '闲的', '没了!'], f"line {i+1} running status {running_status} cannot be recognized"
+            if running_status not in ['running', 'reserved', 'reserved(error)', '闲的', '没了!']:
+                continue
             if running_status == '闲的':
                 running_status = 'free'
 
@@ -66,7 +69,8 @@ def read_sheet_info() -> dict:
                 if key in full_name:
                     tpu_type = NAME_TO_TYPE[key]
 
-            assert (tpu_version is not None) and (tpu_type is not None), f"line {i+1} tpu {tpu} name cannot be recognized: {tpu_version}, {tpu_type}, {full_name}"
+            if (tpu_version is None) or (tpu_type is None):
+                continue
 
             tpu_information[full_name] = {
                 'zone': zone,

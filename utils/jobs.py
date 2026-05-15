@@ -23,6 +23,14 @@ def _ansi_ljust(s: str, width: int) -> str:
     pad = max(0, width - _vis_len(s))
     return s + (' ' * pad)
 
+def _drop_config_overrides(config_args: str, *keys: str) -> str:
+    """Remove existing absl config overrides before appending fresh resume overrides."""
+    prefixes = tuple(f"--{key}=" for key in keys)
+    return " ".join(
+        arg for arg in config_args.split()
+        if not arg.startswith(prefixes)
+    )
+
 # --- suppression (unchanged semantics, just using helpers) ---
 def _suppress_preview(text: str, limit: int) -> str:
     """
@@ -444,6 +452,15 @@ def resume_rerun_job(job, new_tpu = None, load_ckpt = True):
             return
     tpu = job["tpu"] if new_tpu is None else new_tpu
     zone, _, _, _ = get_zone_pre_spot(tpu)
+    if zone is None:
+        print(f"{FAIL} {operation}_job: No zone found for tpu {tpu}")
+        return
+    if not is_resume_queue_allowed_zone(zone):
+        print(
+            f"{FAIL} {operation}_job: TPU {tpu} is in zone {zone}; "
+            f"resume/rerun only allows {RESUME_QUEUE_ALLOWED_ZONE_LABEL}"
+        )
+        return
     data = read_and_lock_data()
     try:
         user = data['users'][job["user"]]
@@ -456,6 +473,11 @@ def resume_rerun_job(job, new_tpu = None, load_ckpt = True):
             return
         id = user_obj.windows_offset
         data['users'][user_obj.name]['windows_offset'] = id + 1
+        clean_extra_configs = _drop_config_overrides(
+            job["extra_configs"],
+            "config.load_from",
+            "config.stage",
+        )
         new_job = {
             'user': user_obj.name,
             'windows_id': id,
@@ -465,7 +487,7 @@ def resume_rerun_job(job, new_tpu = None, load_ckpt = True):
             'job_tags': job["job_tags"],
             'log_dir': None,
             'stage_dir': None,
-            'extra_configs': job["extra_configs"],
+            'extra_configs': clean_extra_configs,
             'status': None,
             'stage': new_stage,
             'monitor': job["monitor"],
@@ -505,7 +527,7 @@ def resume_rerun_job(job, new_tpu = None, load_ckpt = True):
                 jb["extra_msgs"].update({"child": id})
         
         session_name = user_obj.tmux_name
-        config_args = job["extra_configs"]
+        config_args = new_job["extra_configs"]
         tags = job["job_tags"]
         stage_dir = job["stage_dir"]
         assert stage_dir is not None, f"Job {job['windows_id']} for user {user_obj.name} has no stage dir"
@@ -1396,10 +1418,17 @@ def run_job_on_tpu(job: Job, tpu, quiet = True, ignore_window = None):
         # update logs
         user = job.user
         user_obj = users.user_from_dict(data['users'][user])
+        zone, pre, spot, tpu = get_zone_pre_spot(tpu)
+        if zone is None:
+            raise ValueError(f"run_job_on_tpu: No zone found for tpu {tpu}")
+        if not is_resume_queue_allowed_zone(zone):
+            raise ValueError(
+                f"run_job_on_tpu: TPU {tpu} is in zone {zone}; "
+                f"queue jobs only allow {RESUME_QUEUE_ALLOWED_ZONE_LABEL}"
+            )
         window_id = user_obj.windows_offset
         data['users'][user_obj.name]['windows_offset'] = window_id + 1
         user_obj.windows_offset = window_id + 1
-        zone, pre, spot, tpu = get_zone_pre_spot(tpu)
         if not job.rules:
             job.rules = RULE_DICT["pre"] if pre else RULE_DICT["pass"]
         

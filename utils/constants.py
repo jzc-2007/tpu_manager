@@ -70,6 +70,24 @@ ZONE_DICT = {
     'asia-northeast1-b': ['asia-northeast1-b'],
 }
 
+RESUME_QUEUE_ALLOWED_REGIONS = {'us-central1', 'us-east5'}
+RESUME_QUEUE_ALLOWED_ZONES = {'asia-northeast1-b'}
+RESUME_QUEUE_ALLOWED_ZONE_LABEL = 'us-central1 / us-east5 / asia-northeast1-b'
+
+def zone_to_region(zone):
+    if not zone:
+        return None
+    parts = str(zone).split('-')
+    if len(parts) >= 3:
+        return '-'.join(parts[:-1])
+    return str(zone)
+
+def is_resume_queue_allowed_zone(zone):
+    if not zone:
+        return False
+    zone = str(zone)
+    return zone in RESUME_QUEUE_ALLOWED_ZONES or zone_to_region(zone) in RESUME_QUEUE_ALLOWED_REGIONS
+
 
 # ------------ monitor config ----------
 COL_WIDTH = 50       # width of EACH job column

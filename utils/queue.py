@@ -136,7 +136,16 @@ def run_queued_job(user_obj, args):
         id = args[0] if is_integer(args[0]) else args[1]
         assert is_integer(id), f"run_queued_job: id {id} is not an integer"
 
-        _, _, _, tpu = get_zone_pre_spot(tpu)
+        zone, _, _, tpu = get_zone_pre_spot(tpu)
+        if zone is None:
+            print(f"{FAIL} run_queued_job: No zone found for tpu {tpu}")
+            return
+        if not is_resume_queue_allowed_zone(zone):
+            print(
+                f"{FAIL} run_queued_job: TPU {tpu} is in zone {zone}; "
+                f"queue jobs only allow {RESUME_QUEUE_ALLOWED_ZONE_LABEL}"
+            )
+            return
         for i, task_dict in enumerate(queue):
             task_obj = Task.from_dict(task_dict)
             if task_obj.user == user_obj.name and str(task_obj.other_info['task_id']) == str(id):
@@ -159,6 +168,15 @@ def dequeue_and_run(task_id, tpu):
     and run it on the specified TPU.
     """
     zone, _, _, tpu = get_zone_pre_spot(tpu)
+    if zone is None:
+        print(f"{FAIL} dequeue_and_run: No zone found for tpu {tpu}")
+        return
+    if not is_resume_queue_allowed_zone(zone):
+        print(
+            f"{FAIL} dequeue_and_run: TPU {tpu} is in zone {zone}; "
+            f"queue jobs only allow {RESUME_QUEUE_ALLOWED_ZONE_LABEL}"
+        )
+        return
     queue = read_and_lock_queue()
     try:
         target = str(task_id)
@@ -225,6 +243,10 @@ def check_valid(task, information):
         return False
 
     print(f"stage_dir: {stage_dir}")
+
+    tpu_zone = information.get("info", {}).get("zone")
+    if not is_resume_queue_allowed_zone(tpu_zone):
+        return False
 
     # --- availability: TPU allowed ---
     valid_tpu = getattr(task, "tpu_info", {}).get("valid_tpu", []) if hasattr(task, "tpu_info") else []
@@ -364,6 +386,17 @@ def parse_config_args_for_queue(user_obj, args):
 
     if not accept_zones:
         accept_zones = ZONE_DICT['all']
+    accept_zones = list(dict.fromkeys(accept_zones))
+    skipped_zones = [z for z in accept_zones if not is_resume_queue_allowed_zone(z)]
+    accept_zones = [z for z in accept_zones if is_resume_queue_allowed_zone(z)]
+    if skipped_zones:
+        print(
+            f"{WARNING} queue: Ignoring zones outside {RESUME_QUEUE_ALLOWED_ZONE_LABEL}: "
+            f"{skipped_zones}"
+        )
+    if not accept_zones:
+        print(f"{FAIL} queue: No allowed zones selected; queue jobs only allow {RESUME_QUEUE_ALLOWED_ZONE_LABEL}")
+        raise ValueError("No allowed zones selected for queue job")
     if not accept_tpu_types:
         accept_tpu_types = TYPE_DICT['all']
 
@@ -397,20 +430,33 @@ def parse_config_args_for_queue(user_obj, args):
 
     # --- build valid_tpu ---
     # Start with any explicit TPUs passed (can be many)
-    valid_tpu = list(dict.fromkeys(explicit_tpus))  # de-dup preserving order
+    had_explicit_tpus = bool(explicit_tpus)
+    valid_tpu = []
+    for tpu_name in dict.fromkeys(explicit_tpus):  # de-dup preserving order
+        zone, _, _, full_tpu = get_zone_pre_spot(tpu_name)
+        if zone is None:
+            continue
+        if not is_resume_queue_allowed_zone(zone):
+            print(
+                f"{WARNING} queue: Ignoring TPU {full_tpu} in zone {zone}; "
+                f"queue jobs only allow {RESUME_QUEUE_ALLOWED_ZONE_LABEL}"
+            )
+            continue
+        valid_tpu.append(full_tpu)
 
-    # If a type filter was provided, union in all TPUs of that type
-    if not valid_tpu:
+    # If no explicit TPU was provided, use the type/zone filters.
+    if not valid_tpu and not had_explicit_tpus:
         valid_tpu = list(filter_tpu_information(read_sheet_info(), zone=accept_zones, type=accept_tpu_types).keys())
-        tpu_type_to_log = ','.join(accept_tpu_types) if accept_tpu_types else 'v'+valid_tpu[0].split('v')[-1]+f'(+{len(valid_tpu)-1})'
+        tpu_type_to_log = ','.join(accept_tpu_types) if accept_tpu_types else '-'
     else:
-        tpu_type_to_log = ','.join(explicit_tpus) if explicit_tpus else 'v'+valid_tpu[0].split('v')[-1]+f'(+{len(explicit_tpus)-1})'
+        tpu_type_to_log = ','.join(valid_tpu or explicit_tpus)
 
     
     print(f"valid_tpu: {valid_tpu}")
     # If still empty, fall back to whatever filters read_tpu_info_from_type(args) applies
     if not valid_tpu:
         print(f'{FAIL} parse_config_args_for_queue: NO TPU FOUND')
+        raise ValueError("No TPU found for queue job after zone restrictions")
 
     if rule is not None:
         rule = RULE_DICT[rule]

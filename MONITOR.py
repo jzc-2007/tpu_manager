@@ -15,6 +15,7 @@ import utils.unit_tests as unit_tests
 import utils.jobs as jobs
 import utils.clean as clean
 from utils.helpers import *
+from utils.constants import RESUME_QUEUE_ALLOWED_ZONE_LABEL, is_resume_queue_allowed_zone
 
 USER = 'sqa'
 SAME_TYPE_ONLY = False
@@ -115,13 +116,55 @@ def _write_queue(q):
         json.dump(q, f, indent=2)
         f.write('\n')
 
-def queue_add_job(dir_no, preferred_type=None, preferred_zone=None):
+def _parse_queue_priority(priority):
+    """Queue priority is intentionally simple: any integer, larger runs first."""
+    try:
+        return int(priority)
+    except (TypeError, ValueError):
+        return 0
+
+def _queue_entry_priority(entry):
+    return _parse_queue_priority(entry.get('priority', 0))
+
+def _queue_sort_key(entry):
+    # Higher priority wins; queued_at/id keep same-priority jobs stable and readable.
+    return (-_queue_entry_priority(entry), str(entry.get('queued_at', '')), str(entry.get('id', '')))
+
+def _ensure_queue_entry_metadata(entry, refresh_notes=False):
+    """Backfill fields used for queue.json readability without breaking old entries."""
+    changed = False
+    if 'priority' not in entry:
+        entry['priority'] = 0
+        changed = True
+    else:
+        parsed_priority = _parse_queue_priority(entry.get('priority'))
+        if entry.get('priority') != parsed_priority:
+            entry['priority'] = parsed_priority
+            changed = True
+
+    if 'wandb_notes' not in entry or entry.get('wandb_notes') is None or refresh_notes:
+        entry['wandb_notes'] = _get_queue_job_wandb_notes(entry.get('dir', ''))
+        changed = True
+    return changed
+
+def _ensure_queue_metadata(q, refresh_notes=False, sections=('pending', 'running')):
+    changed = False
+    for section in sections:
+        for entry in q.get(section, []):
+            changed = _ensure_queue_entry_metadata(entry, refresh_notes=refresh_notes) or changed
+    return changed
+
+def queue_add_job(dir_no, preferred_type=None, preferred_zone=None, priority=0):
     """将一个新 job 加入 pending 队列并打印当前队列状态。"""
     q = _read_queue()
+    priority = _parse_queue_priority(priority)
+    wandb_notes = _get_queue_job_wandb_notes(dir_no)
     entry = {
         "id": uuid.uuid4().hex[:8],
         "dir": str(dir_no),
         "queued_at": get_abs_time_str(),
+        "priority": priority,
+        "wandb_notes": wandb_notes,
     }
     if preferred_type:
         entry["preferred_type"] = preferred_type
@@ -129,7 +172,12 @@ def queue_add_job(dir_no, preferred_type=None, preferred_zone=None):
         entry["preferred_zone"] = preferred_zone
     q['pending'].append(entry)
     _write_queue(q)
-    print(f"[queue] 已加入队列: dir={dir_no}" + (f" type={preferred_type}" if preferred_type else "") + (f" zone={preferred_zone}" if preferred_zone else ""))
+    print(
+        f"[queue] 已加入队列: dir={dir_no} priority={priority}"
+        + (f" type={preferred_type}" if preferred_type else "")
+        + (f" zone={preferred_zone}" if preferred_zone else "")
+        + (f" wandb_notes={wandb_notes}" if wandb_notes else "")
+    )
     print(f"[queue] 当前待跑队列 ({len(q['pending'])} 个): {[e['dir'] for e in q['pending']]}")
 
 def _queue_start_job(job_id, tpu_name, alias):
@@ -172,20 +220,31 @@ def _queue_fail_job(job_id):
 def queue_show():
     """打印当前队列状态（pending / running / done）。"""
     q = _read_queue()
+    if _ensure_queue_metadata(q):
+        _write_queue(q)
     print(f"=== Queue Status ===")
     print(f"Pending ({len(q['pending'])}):")
-    for e in q['pending']:
+    for e in sorted(q['pending'], key=_queue_sort_key):
         print(
-            f"  dir={e['dir']}  queued_at={e['queued_at']}"
+            f"  dir={e['dir']}  priority={_queue_entry_priority(e)}  queued_at={e['queued_at']}"
             + (f"  type={e.get('preferred_type','')}" if e.get('preferred_type') else "")
             + (f"  zone={e.get('preferred_zone','')}" if e.get('preferred_zone') else "")
+            + (f"  notes={e.get('wandb_notes','')}" if e.get('wandb_notes') else "")
         )
     print(f"Running ({len(q['running'])}):")
     for e in q['running']:
-        print(f"  dir={e['dir']}  alias={e.get('alias','')}  tpu={e.get('tpu','')}  started_at={e.get('started_at','')}")
+        print(
+            f"  dir={e['dir']}  priority={_queue_entry_priority(e)}  alias={e.get('alias','')}  "
+            f"tpu={e.get('tpu','')}  started_at={e.get('started_at','')}"
+            + (f"  notes={e.get('wandb_notes','')}" if e.get('wandb_notes') else "")
+        )
     print(f"Done ({len(q['done'])}):")
     for e in q['done'][-10:]:
-        print(f"  dir={e['dir']}  alias={e.get('alias','')}  finished_at={e.get('finished_at','')}")
+        print(
+            f"  dir={e['dir']}  priority={_queue_entry_priority(e)}  alias={e.get('alias','')}  "
+            f"finished_at={e.get('finished_at','')}"
+            + (f"  notes={e.get('wandb_notes','')}" if e.get('wandb_notes') else "")
+        )
 
 def add_MONITOR_log(log):
     """将日志同时追加写入 output.log 并打印到 stdout（带 UTC 时间戳）。"""
@@ -249,6 +308,29 @@ def _run_output_looks_failed(stdout_text, stderr_text):
     )
     return any(marker in merged for marker in failure_markers)
 
+def _command_created_job(stdout_text, stderr_text):
+    """Return True once the external tpu command has created a tmux window.
+
+    Some backend commands print later spreadsheet/sheet errors after the job is
+    already launched. Those must be treated as success by this monitor, otherwise
+    the same queue entry or failed window gets dispatched again next loop.
+    """
+    merged = _strip_ansi(f"{stdout_text or ''}\n{stderr_text or ''}").lower()
+    return (
+        "successfully created job in tmux window" in merged
+        or re.search(r"\b(?:run|resume|rerun) job .* with new windows id \d+", merged) is not None
+    )
+
+def _timeout_result(command, exc):
+    """Convert TimeoutExpired into a CompletedProcess-like object for logging."""
+    stdout = exc.stdout or getattr(exc, 'output', '') or ''
+    stderr = exc.stderr or ''
+    if isinstance(stdout, bytes):
+        stdout = stdout.decode(errors='replace')
+    if isinstance(stderr, bytes):
+        stderr = stderr.decode(errors='replace')
+    return subprocess.CompletedProcess(command, returncode=124, stdout=stdout, stderr=stderr)
+
 def show_MONITOR_log(timezone = 'us'):
     """从 data.json 读取历史 MONITOR 日志并按指定时区（'us'=EDT / 'cn'=CHN）打印。"""
     data = data_io.read_data()
@@ -290,11 +372,10 @@ def check_job_status(job):
         return None
 
     log_dir = job["log_dir"]
-    zone_match = ZONE_RE.search(log_dir)
-    if zone_match is None:
+    zone = _extract_log_dir_zone(log_dir)
+    if zone is None:
         print(f"{MADE} check_job_status: cannot parse zone from log_dir {log_dir}")
         return None
-    zone = zone_match.group(0)
 
     cmd = f"gcloud compute tpus tpu-vm describe {tpu} --zone={zone} --format='value(state)'"
     try:
@@ -357,13 +438,26 @@ def _extract_zone(tpu_name):
             return zone
     return None
 
+def _extract_log_dir_zone(log_dir):
+    """Extract the real TPU zone from a log_dir path.
+
+    TPU names can contain strings such as `us-central1-spot-zongyili-...`,
+    which match the loose zone regex but are not zones. Prefer the last
+    allowed zone in the log path, usually the `_<zone>__...` suffix.
+    """
+    zones = [m.group(0) for m in ZONE_RE.finditer(log_dir or "")]
+    if not zones:
+        return None
+    allowed_zones = [z for z in zones if is_resume_queue_allowed_zone(z)]
+    if allowed_zones:
+        return allowed_zones[-1]
+    return zones[-1]
+
 def _get_job_type_zone(job):
     """从 job dict 中提取 (tpu_type, zone)，类型来自 TPU 名称，zone 来自 log_dir 路径。"""
     old_tpu = job["tpu"]
     target_type = _extract_tpu_type(old_tpu)
-    log_dir = job.get("log_dir", "")
-    zone_match = ZONE_RE.search(log_dir or "")
-    target_zone = zone_match.group(0) if zone_match else None
+    target_zone = _extract_log_dir_zone(job.get("log_dir", ""))
     return target_type, target_zone
 
 def _zone_region(zone):
@@ -503,8 +597,62 @@ def _is_low_cost_job(job):
 
 def _is_gpt_b_job(job):
     """Return True if spreadsheet/wandb notes indicate GPT-B workload."""
-    notes = (job.get('extra_msgs') or {}).get('spreadsheet_notes') or ''
+    notes = _get_job_notes(job)
     return ('gpt-b' in str(notes).lower() or 'deit' in str(notes).lower())
+
+def _get_job_notes(job):
+    """Return all note-like text available on a job dict."""
+    extra = job.get('extra_msgs') or {}
+    chunks = [
+        job.get('wandb_notes'),
+        job.get('notes'),
+        job.get('user_note'),
+        job.get('job_tags'),
+        job.get('extra_configs'),
+        extra.get('wandb_notes'),
+        extra.get('spreadsheet_notes'),
+        extra.get('notes'),
+        extra.get('user_note'),
+        extra.get('job_tags'),
+        extra.get('extra_configs'),
+    ]
+    return "\n".join(str(x) for x in chunks if x is not None)
+
+def _jobs_by_window(data):
+    return {
+        int(job['windows_id']): job
+        for job in data.get('users', {}).get(USER, {}).get('job_data', [])
+        if job.get('windows_id') is not None
+    }
+
+def _job_child_window(job):
+    child = (job.get('extra_msgs') or {}).get('child')
+    if child is None or child == '':
+        return None
+    try:
+        return int(child)
+    except (TypeError, ValueError):
+        return None
+
+def _child_window_for(window_id, jobs_by_window):
+    job = jobs_by_window.get(int(window_id))
+    if job is None:
+        return None
+    return _job_child_window(job)
+
+def _resume_superseded_by(window_id, actual_window, jobs_by_window):
+    """Return newer child id if this failed window is no longer the chain leaf."""
+    own_child = _child_window_for(window_id, jobs_by_window)
+    if own_child is not None:
+        return own_child
+
+    if actual_window is None or int(actual_window) == int(window_id):
+        return None
+
+    actual_child = _child_window_for(actual_window, jobs_by_window)
+    if actual_child is not None and int(actual_child) != int(window_id):
+        return actual_child
+    return None
 
 def _get_queue_job_wandb_notes(dir_no):
     """从 USER 的 working_dir[dir_no] 读取 wandb_notes。
@@ -650,7 +798,12 @@ def _pick_idle_tpu(idle_tpus, target_type, target_zone, low_cost=False, same_typ
 
     # Sort all candidates by zone priority; then partition into unowned/owned.
     sorted_idle = sorted(
-        [(n, z) for n, z in idle_tpus if n not in excluded_tpus],
+        [
+            (n, z)
+            for n, z in idle_tpus
+            if n not in excluded_tpus
+            and is_resume_queue_allowed_zone(z)
+        ],
         key=lambda t: _zone_priority(t[1])
     )
     unowned = [(n, z) for n, z in sorted_idle if not _is_owned(n, z)]
@@ -713,7 +866,12 @@ def _pick_any_idle_tpu(idle_tpus, preferred_type=None, preferred_zone=None, excl
         return tpu_name in all_tpus.get(zone, [])
 
     excluded_tpus = excluded_tpus or set()
-    filtered_idle = [(n, z) for n, z in idle_tpus if n not in excluded_tpus]
+    filtered_idle = [
+        (n, z)
+        for n, z in idle_tpus
+        if n not in excluded_tpus
+        and is_resume_queue_allowed_zone(z)
+    ]
 
     unowned = [(n, z) for n, z in filtered_idle if not _is_owned(n, z)]
     owned   = [(n, z) for n, z in filtered_idle if _is_owned(n, z)]
@@ -880,6 +1038,8 @@ def _run_queued_jobs(excluded_tpus=None):
     q = _read_queue()
     if not q['pending']:
         return
+    if _ensure_queue_metadata(q):
+        _write_queue(q)
 
     excluded_tpus = set(excluded_tpus or set())
 
@@ -888,15 +1048,17 @@ def _run_queued_jobs(excluded_tpus=None):
     loop_reserved_aliases = set()
     loop_reserved_tpus = set(excluded_tpus)
 
-    for entry in list(q['pending']):
+    for entry in sorted(list(q['pending']), key=_queue_sort_key):
         job_id = entry['id']
         dir_no = entry['dir']
+        priority = _queue_entry_priority(entry)
         preferred_type = entry.get('preferred_type')
         preferred_zone = entry.get('preferred_zone')
-        notes = _get_queue_job_wandb_notes(dir_no)
+        notes = entry.get('wandb_notes') or _get_queue_job_wandb_notes(dir_no)
         queue_job = {'extra_msgs': {'spreadsheet_notes': notes}}
         low_cost = _is_low_cost_job(queue_job)
         gpt_b_only = _is_gpt_b_job(queue_job)
+        add_MONITOR_log(f"{INFO} queue: 尝试 dir={dir_no} priority={priority}")
         if preferred_type or preferred_zone:
             add_MONITOR_log(
                 f"{INFO} queue: dir={dir_no} 使用队列偏好"
@@ -983,7 +1145,7 @@ def _run_queued_jobs(excluded_tpus=None):
             break
 
         if not new_tpu_name:
-            add_MONITOR_log(f'{MADE} queue: 找不到可用的 IDLE 卡 for dir={dir_no}，看下一个\n')
+            add_MONITOR_log(f'{MADE} queue: 找不到可用的 IDLE 卡 for dir={dir_no}，允许区域={RESUME_QUEUE_ALLOWED_ZONE_LABEL}，看下一个\n')
             continue
 
         # mark as running before executing to prevent double-dispatch
@@ -1030,10 +1192,8 @@ def _run_queued_jobs(excluded_tpus=None):
                 text=True,
                 timeout=900
             )
-        except subprocess.TimeoutExpired:
-            add_MONITOR_log(f'{MADE} queue: tpu run 超时 for dir={dir_no}，移回 pending\n')
-            _queue_fail_job(job_id)
-            continue
+        except subprocess.TimeoutExpired as e:
+            run_result = _timeout_result(run_cmd, e)
 
         run_log_path = _append_queue_file_log(job_id, dir_no, "tpu_run", run_cmd, run_result)
         clean_stdout = _strip_ansi(run_result.stdout or "").strip()
@@ -1042,6 +1202,20 @@ def _run_queued_jobs(excluded_tpus=None):
             add_MONITOR_log(f'{INFO} queue: tpu run stdout尾部(dir={dir_no}):\n{_tail_text(clean_stdout)}\n')
         if clean_stderr:
             add_MONITOR_log(f'{INFO} queue: tpu run stderr尾部(dir={dir_no}):\n{_tail_text(clean_stderr)}\n')
+
+        if _command_created_job(clean_stdout, clean_stderr):
+            add_MONITOR_log(
+                f'{GAOCHAO} queue: dir={dir_no} 已创建 tmux job，'
+                f'即使后续输出有sheet/alias错误也视为已启动。完整输出见 {run_log_path}'
+            )
+            _queue_finish_job(job_id)
+            subprocess.run('sleep 2', shell=True)
+            continue
+
+        if run_result.returncode == 124:
+            add_MONITOR_log(f'{MADE} queue: tpu run 超时且没看到创建job标记 for dir={dir_no}，移回 pending\n')
+            _queue_fail_job(job_id)
+            continue
 
         if run_result.returncode != 0:
             add_MONITOR_log(
@@ -1065,9 +1239,10 @@ def _run_queued_jobs(excluded_tpus=None):
 
 
 def mainloop():
-    error_jobs = {'preempted': [], 'deleted': [], 'tpu_still_exists': [], 'resume_next_round': []}
+    error_jobs = {'deleted': [], 'tpu_still_exists': [], 'resume_next_round': []}
     resumed_tpus_this_round = set()
     data = data_io.read_data()
+    jobs_by_window = _jobs_by_window(data)
     sqa_session_name = data['users'][USER]['tmux_name']
     sqa = read_sqa()
     resume_next_round_set = set(sqa.get('resume_next_round', []))
@@ -1087,10 +1262,23 @@ def mainloop():
             if job['windows_id'] in resume_next_round_set:
                 remove_resume_next_round(job['windows_id'])
             continue
+        child_window = _job_child_window(job)
+        if child_window is not None:
+            add_MONITOR_log(
+                f"{INFO} window {job['windows_id']} 已有 child {child_window}，"
+                f"这是旧 error window，本地标记为已处理以免重复resume\n"
+            )
+            finish_sqa(job['windows_id'])
+            continue
         if job['windows_id'] in resume_next_round_set:
             error_jobs['resume_next_round'].append(job)
             continue
         error_type = check_job_status(job)
+        if error_type == 'preempted':
+            add_MONITOR_log(
+                f"{INFO} window {job['windows_id']} 的卡是 preempted；跳过，等外部脚本删卡后下一轮按 deleted 处理"
+            )
+            continue
         if error_type in error_jobs:
             error_jobs[error_type].append(job)
         elif error_type is None:
@@ -1109,30 +1297,28 @@ def mainloop():
         error_windows_list = [(job['user'], job['windows_id']) for job in error_jobs['resume_next_round']]
         add_MONITOR_log(f"{INFO} 我找到了 {len(error_jobs['resume_next_round'])} 个下一轮直冲resume的job, 窗口列表是: {error_windows_list}")
     
-    # if len(error_jobs['preempted']) != 0:
-    #     error_windows_list = [(job['user'], job['windows_id']) for job in error_jobs['preempted']]
-    #     print(f"{INFO} mainloop: Found {len(error_jobs['preempted'])} preempted jobs, windows list: {error_windows_list}")
-    #     add_MONITOR_log(f"{INFO} mainloop: Found {len(error_jobs['preempted'])} preempted jobs, windows list: {error_windows_list}")
-    
-    # if len(error_jobs['grpc']) != 0:
-    #     error_windows_list = [(job['user'], job['windows_id']) for job in error_jobs['grpc']]
-    #     print(f"{INFO} mainloop: Found {len(error_jobs['grpc'])} grpc jobs, windows list: {error_windows_list}")
-    #     add_MONITOR_log(
-    #         f"{INFO} mainloop: Found {len(error_jobs['grpc'])} grpc jobs, windows list: {error_windows_list}"
-    #     )
-    
     all_good = all(len(error_jobs[error_type]) == 0 for error_type in error_jobs)
 
     if all_good:
         add_MONITOR_log(f"{GAOCHAO} 好像都没问题，睡大觉")
         
     if not all_good:
+        resume_targets_this_round = set()
+
         for job in error_jobs["resume_next_round"]:
             # check whether the window still exists, and the tpu is still there
 
             _window = job['windows_id']
             _old_tpu = job['tpu']
-
+            old_zone = _extract_zone(_old_tpu) or _get_job_type_zone(job)[1]
+            if not is_resume_queue_allowed_zone(old_zone):
+                add_MONITOR_log(
+                    f'{INFO} window {_window} 旧卡 {_old_tpu}/{old_zone} '
+                    f'不在允许区域 ({RESUME_QUEUE_ALLOWED_ZONE_LABEL})，不走buffer直接resume，改为找允许区域空卡\n'
+                )
+                remove_resume_next_round(_window)
+                error_jobs['deleted'].append(job)
+                continue
             if f'Window {_window}' not in check_result.stdout:
                 add_MONITOR_log(f'{WARNING} window {_window} 已不存在，移出 resume_next_round')
                 remove_resume_next_round(_window)
@@ -1163,6 +1349,23 @@ def mainloop():
                 continue
 
             actual_window, resume_action = _get_saving_window(_window)
+            superseded_by = _resume_superseded_by(_window, actual_window, jobs_by_window)
+            if superseded_by is not None:
+                add_MONITOR_log(
+                    f'{INFO} window {_window} 已被 child {superseded_by} 覆盖，'
+                    f'不再从 actual_window={actual_window} 重复resume\n'
+                )
+                remove_resume_next_round(_window)
+                finish_sqa(_window)
+                continue
+            target_key = f"{resume_action}:{actual_window}"
+            if target_key in resume_targets_this_round:
+                add_MONITOR_log(
+                    f'{WARNING} window {_window} 和本轮前面的任务指向同一个 actual_window={actual_window}，'
+                    f'本轮跳过，避免同一轮重复创建child\n'
+                )
+                continue
+            resume_targets_this_round.add(target_key)
             write_sqa(_window)
             try:
                 add_MONITOR_log(f'{INFO} 我在试着 resume window {_window}. 这是上一轮我就看见的，buffer命中，直接resume\n')
@@ -1180,6 +1383,17 @@ def mainloop():
                     text=True
                 )
                 _append_resume_file_log(_window, "resume_next_round", resume_cmd, resume_result)
+                if _command_created_job(resume_result.stdout, resume_result.stderr):
+                    remove_resume_next_round(_window)
+                    add_MONITOR_log(
+                        f'{GAOCHAO} buffer {"rerun" if resume_action == "rerun" else "resume"} 已创建新tmux job，'
+                        f'window {_window} 标记 finished\n'
+                    )
+                    finish_sqa(_window)
+                    if actual_window != _window:
+                        add_MONITOR_log(f'{INFO} 关掉无saving的窗口 {_window}\n')
+                        os.system(f"tmux kill-window -t {sqa_session_name}:{_window}")
+                    continue
                 if resume_result.returncode != 0:
                     add_MONITOR_log(f'{MADE} buffer {"rerun" if resume_action == "rerun" else "resume"} failed, skip finish for window {_window}\n')
                     remove_sqa(_window)
@@ -1213,6 +1427,14 @@ def mainloop():
 
                 usage, busy_users = _get_tpu_usage_from_tou(tou_result.stdout, _old_tpu)
                 if usage == 'idle':
+                    old_zone = _extract_zone(_old_tpu) or _get_job_type_zone(job)[1]
+                    if not is_resume_queue_allowed_zone(old_zone):
+                        add_MONITOR_log(
+                            f'{INFO} window {_window} 旧卡 {_old_tpu}/{old_zone} '
+                            f'不在允许区域 ({RESUME_QUEUE_ALLOWED_ZONE_LABEL})，按卡没了处理以便换到允许区域\n'
+                        )
+                        force_deleted_jobs.append(job)
+                        continue
                     add_resume_next_round(_window)
                     add_MONITOR_log(f'{INFO} window {_window} 对应的卡 {_old_tpu} 现在是空着的，已加入下一轮resume buffer\n')
                 elif usage == 'busy':
@@ -1240,6 +1462,25 @@ def mainloop():
                     remove_sqa(_window)
                     continue
 
+                actual_window, resume_action = _get_saving_window(_window)
+                superseded_by = _resume_superseded_by(_window, actual_window, jobs_by_window)
+                if superseded_by is not None:
+                    add_MONITOR_log(
+                        f'{INFO} window {_window} 已被 child {superseded_by} 覆盖，'
+                        f'不再从 actual_window={actual_window} 重复resume\n'
+                    )
+                    finish_sqa(_window)
+                    continue
+                target_key = f"{resume_action}:{actual_window}"
+                if target_key in resume_targets_this_round:
+                    add_MONITOR_log(
+                        f'{WARNING} window {_window} 和本轮前面的任务指向同一个 actual_window={actual_window}，'
+                        f'本轮跳过，避免同一轮重复创建child\n'
+                    )
+                    remove_sqa(_window)
+                    continue
+                resume_targets_this_round.add(target_key)
+
                 tou_result = subprocess.run(
                     _tou,
                     shell=True,
@@ -1250,6 +1491,7 @@ def mainloop():
 
                 if tou_result.returncode != 0:
                     add_MONITOR_log(f'{MADE} _tou failed, skip this job\n')
+                    remove_sqa(_window)
                     continue
 
                 idle_tpus = _parse_idle_tpus_from_tou(tou_result.stdout)
@@ -1266,7 +1508,10 @@ def mainloop():
                     gpt_b_only=gpt_b_only,
                 )
                 if not new_tpu_name:
-                    add_MONITOR_log(f'{MADE} 我找不到可用的 IDLE 卡(本轮已排除: {sorted(list(used_tpus_this_round))}), 型号是 {target_type}, 所在区域是 {target_zone}\n')
+                    add_MONITOR_log(
+                        f'{MADE} 我找不到可用的 IDLE 卡(本轮已排除: {sorted(list(used_tpus_this_round))}), '
+                        f'型号是 {target_type}, 所在区域是 {target_zone}, 允许区域={RESUME_QUEUE_ALLOWED_ZONE_LABEL}\n'
+                    )
                     remove_sqa(_window)
                     continue
 
@@ -1287,7 +1532,6 @@ def mainloop():
                     add_MONITOR_log(
                         f'{INFO} 未找到同区空卡，启用跨区兜底: {target_type}/{target_zone} -> {new_tpu_type}/{new_tpu_zone}'
                     )
-
                 _tmd_inline = r'tmd() { local force=0; local args=(); for arg in "$@"; do if [ "$arg" = "--force" ]; then force=1; else args+=("$arg"); fi; done; while true; do if [ "$force" = "1" ]; then output=$(' + f'{_tpu}' + r' mount-disk --force "${args[@]}" 2>&1 | tee /dev/tty); else output=$(' + f'{_tpu}' + r' mount-disk "${args[@]}" 2>&1 | tee /dev/tty); fi; if [ "$force" = "0" ] && echo "$output" | grep -q "another process is already mounting"; then sleep 10; echo "sleep 10 and retrying..."; else break; fi; done; }'
                 if tpu_already_owned:
                     new_alias = _get_tpu_existing_alias(new_tpu_name)
@@ -1328,27 +1572,38 @@ def mainloop():
                     remove_sqa(_window)
                     continue
                 add_MONITOR_log(f'{GAOCHAO} 放完了，哈哈')
-
-                actual_window, resume_action = _get_saving_window(_window)
                 if resume_action == 'rerun':
                     resume_cmd = f'{_tpu} rerun {USER} window={actual_window} tpu={new_tpu_name}'
                     add_MONITOR_log(f'{INFO} 整条链无saving，改为rerun根窗口 (actual_window={actual_window}): {resume_cmd}\n')
                 else:
                     resume_cmd = f'{_tpu} resume {USER} window={actual_window} tpu={new_tpu_name}'
                     add_MONITOR_log(f'{INFO} 运行 resume 命令 (actual_window={actual_window}): {resume_cmd}\n')
-                resume_result = subprocess.run(
-                    resume_cmd,
-                    shell=True,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True,
-                    timeout=900
-                )
+                try:
+                    resume_result = subprocess.run(
+                        resume_cmd,
+                        shell=True,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        text=True,
+                        timeout=900
+                    )
+                except subprocess.TimeoutExpired as e:
+                    resume_result = _timeout_result(resume_cmd, e)
+                _append_resume_file_log(_window, "resume", resume_cmd, resume_result)
+                if _command_created_job(resume_result.stdout, resume_result.stderr):
+                    add_MONITOR_log(
+                        f'{GAOCHAO} {"rerun" if resume_action == "rerun" else "resume"} 已创建新tmux job，'
+                        f'window {_window} 标记 finished\n'
+                    )
+                    finish_sqa(_window)
+                    if actual_window != _window:
+                        add_MONITOR_log(f'{INFO} 关掉无saving的窗口 {_window}\n')
+                        os.system(f"tmux kill-window -t {sqa_session_name}:{_window}")
+                    continue
                 if resume_result.returncode == 124:
                     add_MONITOR_log(f'{MADE} {"rerun" if resume_action == "rerun" else "resume"} 超时了！去看看 window {_window} 的log吧。我先跳过\n')
                     remove_sqa(_window)
                     continue
-                _append_resume_file_log(_window, "resume", resume_cmd, resume_result)
                 fail = (resume_result.returncode != 0)
                 fail = fail or ("is already reserved by" in resume_result.stdout.lower())
                 if fail:
@@ -1365,8 +1620,6 @@ def mainloop():
                 remove_sqa(_window)
             except Exception as e:
                 add_MONITOR_log(f"{MADE} 我失败了: {e}")
-                raise e
-                # remove job from sqa.json
                 remove_sqa(_window)
             subprocess.run('sleep 2', shell=True)
 
@@ -1418,12 +1671,13 @@ if __name__ == "__main__":
                 _k, _v = _arg.split('=', 1)
                 _params[_k.strip()] = _v.strip()
         if 'dir' not in _params:
-            print("Usage: queue dir=<dir_no> [type=<tpu_type>] [zone=<zone>]")
+            print("Usage: queue dir=<dir_no> [type=<tpu_type>] [zone=<zone>] [priority=<int>]")
             sys.exit(1)
         queue_add_job(
             dir_no=_params['dir'],
             preferred_type=_params.get('type'),
             preferred_zone=_params.get('zone'),
+            priority=_params.get('priority', _params.get('p', 0)),
         )
         sys.exit(0)
 
