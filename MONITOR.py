@@ -25,22 +25,18 @@ from utils.constants import (
 USER = 'sqa'
 SAME_TYPE_ONLY = False
 
-# Per-user resume floor — overrides default high-cost gating (v6e>=64) for listed users.
-_USER_MIN_SIZES = {
-    'bird': {'v6e': 16, 'v5p': 32},
-}
-
 ANSI_ESCAPE_RE = re.compile(r"\x1B\[[0-?]*[ -/]*[@-~]")
 TYPE_RE = re.compile(r"^(v[0-9a-z]+-\d+)")
 ZONE_RE = re.compile(r"(us|asia|europe|australia|northamerica|southamerica)-[a-z0-9-]+-[a-z]")
 
 _tpu = 'python /home/jzc/zhichengjiang/working/xibo_tpu_manager/tpu.py'
 _tou = 'python /kmh-nfs-ssd-us-mount/code/qiao/work/tpu_dls/wrap_master.py'
-TOU_MAX_CACHE_AGE_SECONDS = 420
+TOU_MAX_CACHE_AGE_SECONDS = 60
 TOU_CACHE_AGE_RE = re.compile(r"audit was\s+([0-9.]+)s ago")
 TPU_PROJECT = "he-vision-group"
 TPU_ENV_CHECK_TIMEOUT_SECONDS = 300
 TPU_JAX_CHECK_REMOTE_CMD = "python -c \"import jax; print('JAX_OK', jax.__version__)\""
+_ASIA_RESERVED_ZONE = 'asia-northeast1-b'
 
 
 class TouCacheStale(Exception):
@@ -398,6 +394,28 @@ def _run_tpu_jax_check(tpu_name, zone):
         result = _timeout_result(cmd_text, exc)
     return cmd_text, result
 
+def _build_tmd_inline(tpu_name=None, zone=None):
+    """Build a shell `tmd` wrapper with xibo's required --force argument order."""
+    del tpu_name, zone  # Kept in the signature so callers log/pass the chosen TPU.
+    return (
+        r'tmd() { '
+        r'local force=0; local args=(); '
+        r'for arg in "$@"; do '
+        r'if [ "$arg" = "--force" ]; then force=1; else args+=("$arg"); fi; '
+        r'done; '
+        r'while true; do '
+        r'if [ "$force" = "1" ]; then '
+        r'output=$(' + f'{_tpu}' + r' mount-disk "${args[@]}" --force 2>&1 | tee /dev/tty); '
+        r'else '
+        r'output=$(' + f'{_tpu}' + r' mount-disk "${args[@]}" 2>&1 | tee /dev/tty); '
+        r'fi; '
+        r'if [ "$force" = "0" ] && echo "$output" | grep -q "another process is already mounting"; then '
+        r'sleep 10; echo "sleep 10 and retrying..."; '
+        r'else break; fi; '
+        r'done; '
+        r'}'
+    )
+
 def _tpu_jax_check_passed(result):
     """Require an explicit JAX_OK marker; gcloud can be noisy even on success."""
     merged = _strip_ansi(f"{result.stdout or ''}\n{result.stderr or ''}").lower()
@@ -660,8 +678,7 @@ def _get_tpu_usage_from_tou(stdout, tpu_name):
     return 'unknown', []
 
 def _has_retrying_ssh_error_in_recent_logs(job, recent_lines=40):
-    """检查 job 的 output.log 末尾 recent_lines 行中是否包含 SSH 重试错误，
-    用于区分「TPU 还活着但 SSH 卡住」和「TPU 已消失」两种 error 情形。"""
+    """检查 output.log 末尾是否包含明确需要 resume/rerun 的错误 marker。"""
     log_dir = job.get('log_dir')
     if not log_dir:
         return False
@@ -677,7 +694,20 @@ def _has_retrying_ssh_error_in_recent_logs(job, recent_lines=40):
         return False
 
     tail_text = ''.join(tail_lines)
-    return "Retrying: SSH command error" in tail_text
+    tail_lower = tail_text.lower()
+    markers = [
+        "retrying: ssh command error",
+        "unable to initialize backend 'tpu': aborted",
+        "fatal python error: aborted",
+        "jax distributed service detected fatal errors",
+        "coordinationservice/heartbeat",
+        "deadline_exceeded",
+        "python: can't open file '/home/sqa/main.py'",
+        "cp: cannot stat",
+        "no module named 'jax'",
+        "modulenotfounderror",
+    ]
+    return any(marker in tail_lower for marker in markers)
 
 def _tmux_windows_for_session(session_name):
     """Return existing tmux window ids for a session.
@@ -798,57 +828,80 @@ def _tpu_generation_rank(gen):
 def _tpu_size_sort_key(tpu_name, zone, gpt_b_only=False):
     """Sort TPU candidates by effective capacity.
 
-    Size is the primary signal, generation is the tie breaker. That gives:
-    v6-64 > v5-64 > v6-32. GPT-B/DeiT jobs invert the direction so they try
-    the smallest allowed cards first. Zone priority remains only a tie breaker
-    inside the existing exact/same-region/cross-region passes.
+    Non-Asia TPUs are preferred first to preserve asia-northeast1-b capacity.
+    Inside that group, size is the primary signal and generation is the tie
+    breaker. GPT-B/DeiT jobs invert the size direction.
     """
     gen, size = _parse_tpu_gen_size(_extract_tpu_type(tpu_name))
     gen_rank = _tpu_generation_rank(gen)
     size = size if size is not None else -1
+    zone_rank = _zone_priority(zone)
     if gpt_b_only:
-        return (size, gen_rank, _zone_priority(zone), tpu_name)
-    return (-size, -gen_rank, _zone_priority(zone), tpu_name)
+        return (zone_rank, size, gen_rank, tpu_name)
+    return (zone_rank, -size, -gen_rank, tpu_name)
 
-def _is_type_allowed(candidate_type, low_cost, gpt_b_only=False):
-    """Return True if candidate_type is allowed to resume the job.
+def _is_v5_generation(gen):
+    """Return True for TPU generations that are operationally treated as v5."""
+    return str(gen or '').startswith('v5')
+
+def _is_type_allowed(candidate_type, low_cost, gpt_b_only=False, v5_only=False):
+    """Return True if candidate_type is allowed for a from-scratch launch.
 
     Rules:
-      - high-cost (low_cost=False): v6e >= 64, v5p >= 128.
-      - low-cost  (low_cost=True):  v6e >= 32, v5p >= 64.
+      - high-cost (low_cost=False): exactly v6e-64 or v5/v5p-128.
+      - low-cost  (low_cost=True):  exactly v6e-32 or v5/v5p-64.
       - GPT-B notes (gpt_b_only=True): v6e <= 16, v5p <= 32.
+      - v5_only=True: additionally reject every non-v5 generation.
+
+    Checkpoint resumes do not use this cost-class choice. They require the
+    original TPU type exactly, handled by _same_resume_type_allowed().
     """
     gen, size = _parse_tpu_gen_size(candidate_type)
     if gen is None:
         return False
+    is_v5 = _is_v5_generation(gen)
+    if v5_only and not is_v5:
+        return False
     if gpt_b_only:
         if gen == 'v6e' and size <= 16:
             return True
-        if gen == 'v5p' and size <= 32:
+        if is_v5 and size <= 32:
             return True
         return False
-    if USER in _USER_MIN_SIZES:
-        mins = _USER_MIN_SIZES[USER]
-        if gen in mins and size >= mins[gen]:
-            return True
-    if gen == 'v6e' and size >= 64:
-        return True
-    if gen == 'v5p' and size >= 128:
-        return True
     if low_cost:
-        if gen == 'v6e' and size >= 32:
+        if gen == 'v6e' and size == 32:
             return True
-        if gen == 'v5p' and size >= 64:
+        if is_v5 and size == 64:
             return True
+        return False
+    if gen == 'v6e' and size == 64:
+        return True
+    if is_v5 and size == 128:
+        return True
     return False
+
+def _same_resume_type_allowed(candidate_type, target_type, v5_only=False):
+    """Hard constraints for checkpoint resumes, which otherwise require exact type."""
+    if candidate_type != target_type:
+        return False
+    gen, _ = _parse_tpu_gen_size(candidate_type)
+    if gen is None:
+        return False
+    if v5_only and not _is_v5_generation(gen):
+        return False
+    return True
 
 def _is_low_cost_job(job):
     """Return True if the job qualifies for low-cost (smaller) TPUs.
     Triggered by tokens in spreadsheet notes."""
-    notes = (job.get('extra_msgs') or {}).get('spreadsheet_notes') or ''
+    notes = _get_job_notes(job)
     notes_l = str(notes).lower()
-    allowed_tokens = ['jit', 'mae-b', 'unify-base']
+    allowed_tokens = ['jit', 'mae-b', 'unify-base', 'llava-1.5 reproduction']
     return any(token in notes_l for token in allowed_tokens)
+
+def _is_llava15_reproduction_job(job):
+    """LLaVA-1.5 reproduction jobs OOM on v6, so they must run only on v5."""
+    return 'llava-1.5 reproduction' in str(_get_job_notes(job)).lower()
 
 def _is_gpt_b_job(job):
     """Return True if spreadsheet/wandb notes indicate GPT-B workload."""
@@ -982,15 +1035,15 @@ def _zone_priority(zone):
     """Return sort key for zone priority during TPU selection (lower = higher priority).
 
     Priority order:
-      0 – asia-northeast1-b  (prefer first)
-      1 – us-east5-*         (prefer second)
-      2 – everything else
+      0 – us-east5-* / us-central1-* (prefer first)
+      1 – other allowed non-Asia zones
+      2 – asia-northeast1-b          (preserve for LAION unless needed)
     """
-    if zone == 'asia-northeast1-b':
+    if zone == _ASIA_RESERVED_ZONE:
+        return 2
+    if zone and (zone.startswith('us-east5') or zone.startswith('us-central1')):
         return 0
-    if zone and zone.startswith('us-east5'):
-        return 1
-    return 2
+    return 1
 
 _FS_SCRIPT = "/kmh-nfs-ssd-us-mount/code/qiao/work/tpu_manager/find_saving_window.py"
 _NO_SAVING_ROOT_RE = re.compile(r"no 'saving' found anywhere in chain; reached root window (\d+)")
@@ -1052,21 +1105,29 @@ def _get_tpu_existing_alias(tpu_name):
             return alias
     return None
 
-def _pick_idle_tpu(idle_tpus, target_type, target_zone, low_cost=False, same_type_only=False, excluded_tpus=None, gpt_b_only=False):
+def _pick_idle_tpu(
+    idle_tpus,
+    target_type,
+    target_zone,
+    low_cost=False,
+    same_type_only=False,
+    excluded_tpus=None,
+    gpt_b_only=False,
+    v5_only=False,
+):
     """
     Pick an idle TPU that is allowed to resume the job.
 
-    Type rules (see _is_type_allowed):
-      - default high-cost (low_cost=False): v6e >= 64, v5p >= 128.
-      - default low-cost  (low_cost=True):  v6e >= 32, v5p >= 64.
-      - GPT-B notes (gpt_b_only=True):      v6e <= 16, v5p <= 32.
+    Type rules:
+      - same_type_only=True: exact target_type, across allowed zones if needed.
+      - otherwise see _is_type_allowed for checkpoint-free reruns.
+      - LLaVA-1.5 reproduction keeps its v5-only hard constraint.
 
     Region rules:
-      - Pass 1: same type + same zone (exact match, but still must pass type rules).
-      - Pass 2: allowed type + same region.   [skipped when same_type_only=True]
-      - Pass 3: allowed type + cross-region, but only when both the job's
-                region AND the candidate's region are in _CROSS_REGION_ALLOWED
-                (us-central1, us-east5, asia-northeast1).   [skipped when same_type_only=True]
+      - Pass 1: same type + same zone.
+      - Pass 2: same region; exact type when same_type_only, otherwise any allowed type.
+      - Pass 3: cross-region fallback, but only when both the job's region AND the
+                candidate's region are in _CROSS_REGION_ALLOWED.
 
     Within each pass, unowned TPUs are tried before owned ones. Inside each
     ownership group, normal jobs try larger cards first; GPT-B/DeiT jobs try
@@ -1074,7 +1135,13 @@ def _pick_idle_tpu(idle_tpus, target_type, target_zone, low_cost=False, same_typ
 
     Return:
       (new_tpu_name, new_zone, pick_mode, already_owned)
-      pick_mode in {"exact", "cross_type_same_region", "cross_region"}
+      pick_mode in {
+          "exact",
+          "same_type_same_region",
+          "same_type_cross_region",
+          "cross_type_same_region",
+          "cross_region",
+      }
       or (None, None, None, None) if not found.
     """
     data = data_io.read_data()
@@ -1101,29 +1168,51 @@ def _pick_idle_tpu(idle_tpus, target_type, target_zone, low_cost=False, same_typ
     unowned = [(n, z) for n, z in sorted_idle if not _is_owned(n, z)]
     owned   = [(n, z) for n, z in sorted_idle if _is_owned(n, z)]
 
-    # Pass 1: same type + same zone — unowned first, owned as fallback.
-    for tpu_name, zone in unowned:
-        tpu_type = _extract_tpu_type(tpu_name)
-        if tpu_type == target_type and zone == target_zone and _is_type_allowed(tpu_type, low_cost, gpt_b_only=gpt_b_only):
-            return tpu_name, zone, "exact", False
-    for tpu_name, zone in owned:
-        tpu_type = _extract_tpu_type(tpu_name)
-        if tpu_type == target_type and zone == target_zone and _is_type_allowed(tpu_type, low_cost, gpt_b_only=gpt_b_only):
-            return tpu_name, zone, "exact", True
+    # Pass 1: same type + same zone. Checkpoint resume intentionally does not
+    # apply low/high-cost class filters here; the old checkpoint fixes topology.
+    for candidates, is_already_owned in [(unowned, False), (owned, True)]:
+        for tpu_name, zone in candidates:
+            tpu_type = _extract_tpu_type(tpu_name)
+            if (
+                zone == target_zone
+                and _same_resume_type_allowed(tpu_type, target_type, v5_only=v5_only)
+            ):
+                return tpu_name, zone, "exact", is_already_owned
 
     if same_type_only:
+        # Pass 2: same type + same region.
+        for candidates, is_already_owned in [(unowned, False), (owned, True)]:
+            for tpu_name, zone in candidates:
+                if _zone_region(zone) != target_region:
+                    continue
+                tpu_type = _extract_tpu_type(tpu_name)
+                if _same_resume_type_allowed(tpu_type, target_type, v5_only=v5_only):
+                    return tpu_name, zone, "same_type_same_region", is_already_owned
+
+        # Pass 3: same type + cross-region.
+        if target_region in _CROSS_REGION_ALLOWED:
+            for candidates, is_already_owned in [(unowned, False), (owned, True)]:
+                for tpu_name, zone in candidates:
+                    candidate_region = _zone_region(zone)
+                    if candidate_region == target_region:
+                        continue  # already covered in Pass 2
+                    if candidate_region not in _CROSS_REGION_ALLOWED:
+                        continue
+                    tpu_type = _extract_tpu_type(tpu_name)
+                    if _same_resume_type_allowed(tpu_type, target_type, v5_only=v5_only):
+                        return tpu_name, zone, "same_type_cross_region", is_already_owned
         return None, None, None, None
 
     # Pass 2: any allowed type, same region — unowned first, owned as fallback.
     for tpu_name, zone in unowned:
         if _zone_region(zone) != target_region:
             continue
-        if _is_type_allowed(_extract_tpu_type(tpu_name), low_cost, gpt_b_only=gpt_b_only):
+        if _is_type_allowed(_extract_tpu_type(tpu_name), low_cost, gpt_b_only=gpt_b_only, v5_only=v5_only):
             return tpu_name, zone, "cross_type_same_region", False
     for tpu_name, zone in owned:
         if _zone_region(zone) != target_region:
             continue
-        if _is_type_allowed(_extract_tpu_type(tpu_name), low_cost, gpt_b_only=gpt_b_only):
+        if _is_type_allowed(_extract_tpu_type(tpu_name), low_cost, gpt_b_only=gpt_b_only, v5_only=v5_only):
             return tpu_name, zone, "cross_type_same_region", True
 
     # Pass 3: any allowed type, cross-region — unowned first, owned as fallback.
@@ -1136,18 +1225,27 @@ def _pick_idle_tpu(idle_tpus, target_type, target_zone, low_cost=False, same_typ
                     continue  # already covered in Pass 2
                 if candidate_region not in _CROSS_REGION_ALLOWED:
                     continue
-                if _is_type_allowed(tpu_type, low_cost, gpt_b_only=gpt_b_only):
+                if _is_type_allowed(tpu_type, low_cost, gpt_b_only=gpt_b_only, v5_only=v5_only):
                     return tpu_name, zone, "cross_region", is_already_owned
 
     return None, None, None, None
 
-def _pick_any_idle_tpu(idle_tpus, preferred_type=None, preferred_zone=None, excluded_tpus=None, low_cost=False, gpt_b_only=False):
+def _pick_any_idle_tpu(
+    idle_tpus,
+    preferred_type=None,
+    preferred_zone=None,
+    excluded_tpus=None,
+    low_cost=False,
+    gpt_b_only=False,
+    v5_only=False,
+):
     """为新 job 选一张空闲 TPU（不要求 resume 同型号）。
 
     优先级（每级内 unowned 先于 owned；普通 job 大卡优先，GPT-B/DeiT 小卡优先）：
       Pass 1: preferred_type + preferred_zone（若均指定）。
       Pass 2: preferred_type 任意 zone（若只指定了 type）。
-      Pass 3: 任意通过 _is_type_allowed 的卡（v6e >= 64, v5p >= 128）。
+      Pass 3: 任意通过 _is_type_allowed 的卡（high exact v6e-64/v5-128,
+              low exact v6e-32/v5-64）。
 
     返回 (tpu_name, zone, already_owned) 或 (None, None, False)。
     """
@@ -1176,18 +1274,27 @@ def _pick_any_idle_tpu(idle_tpus, preferred_type=None, preferred_zone=None, excl
     if preferred_type and preferred_zone:
         for candidates, flag in [(unowned, False), (owned, True)]:
             for tpu_name, zone in candidates:
-                if _extract_tpu_type(tpu_name) == preferred_type and zone == preferred_zone:
+                tpu_type = _extract_tpu_type(tpu_name)
+                if (
+                    tpu_type == preferred_type
+                    and zone == preferred_zone
+                    and _is_type_allowed(tpu_type, low_cost=low_cost, gpt_b_only=gpt_b_only, v5_only=v5_only)
+                ):
                     return tpu_name, zone, flag
 
     if preferred_type:
         for candidates, flag in [(unowned, False), (owned, True)]:
             for tpu_name, zone in candidates:
-                if _extract_tpu_type(tpu_name) == preferred_type:
+                tpu_type = _extract_tpu_type(tpu_name)
+                if (
+                    tpu_type == preferred_type
+                    and _is_type_allowed(tpu_type, low_cost=low_cost, gpt_b_only=gpt_b_only, v5_only=v5_only)
+                ):
                     return tpu_name, zone, flag
 
     for candidates, flag in [(unowned, False), (owned, True)]:
         for tpu_name, zone in candidates:
-            if _is_type_allowed(_extract_tpu_type(tpu_name), low_cost=low_cost, gpt_b_only=gpt_b_only):
+            if _is_type_allowed(_extract_tpu_type(tpu_name), low_cost=low_cost, gpt_b_only=gpt_b_only, v5_only=v5_only):
                 return tpu_name, zone, flag
 
     return None, None, False
@@ -1265,6 +1372,7 @@ def _run_queued_jobs(excluded_tpus=None):
         queue_job = {'extra_msgs': {'spreadsheet_notes': notes}}
         low_cost = _is_low_cost_job(queue_job)
         gpt_b_only = _is_gpt_b_job(queue_job)
+        v5_only = _is_llava15_reproduction_job(queue_job)
         add_MONITOR_log(f"{INFO} queue: 尝试 dir={dir_no} priority={priority}")
         if preferred_type or preferred_zone:
             add_MONITOR_log(
@@ -1276,8 +1384,10 @@ def _run_queued_jobs(excluded_tpus=None):
             add_MONITOR_log(f"{INFO} queue: dir={dir_no} wandb_notes={notes}")
         if gpt_b_only:
             add_MONITOR_log(f'{INFO} queue: dir={dir_no} 命中 GPT-B notes，选卡仅允许 v5p<=32 / v6e<=16')
-        elif low_cost:
-            add_MONITOR_log(f'{INFO} queue: dir={dir_no} 命中 low-cost notes，选卡允许 v6e>=32 / v5p>=64')
+        if v5_only:
+            add_MONITOR_log(f'{INFO} queue: dir={dir_no} 命中 llava-1.5 reproduction，v6 会 OOM，选卡仅允许 v5/v5p-64\n')
+        elif low_cost and not gpt_b_only:
+            add_MONITOR_log(f'{INFO} queue: dir={dir_no} 命中 low-cost notes，选卡仅允许 v6e-32 / v5/v5p-64')
 
         tou_result = _run_tou_checked(f'queue dir={dir_no}')
         if tou_result.returncode != 0:
@@ -1300,6 +1410,7 @@ def _run_queued_jobs(excluded_tpus=None):
                 excluded_tpus=excluded_tpus_for_pick,
                 low_cost=low_cost,
                 gpt_b_only=gpt_b_only,
+                v5_only=v5_only,
             )
             if not picked_tpu:
                 break
@@ -1310,7 +1421,7 @@ def _run_queued_jobs(excluded_tpus=None):
                 excluded_tpus_for_pick.add(picked_tpu)
                 continue
 
-            _tmd_inline = r'tmd() { local force=0; local args=(); for arg in "$@"; do if [ "$arg" = "--force" ]; then force=1; else args+=("$arg"); fi; done; while true; do if [ "$force" = "1" ]; then output=$(' + f'{_tpu}' + r' mount-disk --force "${args[@]}" 2>&1 | tee /dev/tty); else output=$(' + f'{_tpu}' + r' mount-disk "${args[@]}" 2>&1 | tee /dev/tty); fi; if [ "$force" = "0" ] && echo "$output" | grep -q "another process is already mounting"; then sleep 10; echo "sleep 10 and retrying..."; else break; fi; done; }'
+            _tmd_inline = _build_tmd_inline(picked_tpu, picked_zone)
             if picked_owned:
                 picked_alias = _get_tpu_existing_alias(picked_tpu)
                 if not picked_alias:
@@ -1586,6 +1697,23 @@ def mainloop():
                 remove_resume_next_round(_window)
                 finish_sqa(_window)
                 continue
+            if resume_action == 'rerun':
+                old_tpu_type = _extract_tpu_type(_old_tpu)
+                old_type_allowed = _is_type_allowed(
+                    old_tpu_type,
+                    low_cost=_is_low_cost_job(job),
+                    gpt_b_only=_is_gpt_b_job(job),
+                    v5_only=_is_llava15_reproduction_job(job),
+                )
+                if not old_type_allowed:
+                    add_MONITOR_log(
+                        f'{INFO} window {_window} 没有完整checkpoint，需要从头rerun；'
+                        f'旧卡 {_old_tpu} type={old_tpu_type} 不符合当前job cost class，'
+                        f'移出buffer改走正常选卡\n'
+                    )
+                    remove_resume_next_round(_window)
+                    error_jobs['deleted'].append(job)
+                    continue
             target_key = f"{resume_action}:{actual_window}"
             if target_key in resume_targets_this_round:
                 add_MONITOR_log(
@@ -1733,16 +1861,32 @@ def mainloop():
 
                 idle_tpus = _parse_idle_tpus_from_tou(tou_result.stdout)
                 gpt_b_only = _is_gpt_b_job(job)
+                v5_only = _is_llava15_reproduction_job(job)
                 if gpt_b_only:
                     add_MONITOR_log(f'{INFO} window {_window} 命中 GPT-B notes，resume 仅允许 v5p<=32 / v6e<=16\n')
+                if v5_only:
+                    add_MONITOR_log(f'{INFO} window {_window} 命中 llava-1.5 reproduction，v6 会 OOM，resume/rerun 仅允许 v5\n')
+                same_type_resume = resume_action == 'resume'
+                same_type_pick = same_type_resume or SAME_TYPE_ONLY
+                if same_type_resume:
+                    add_MONITOR_log(
+                        f'{INFO} window {_window} 有完整checkpoint，resume只允许同type={target_type}；'
+                        f'可以跨允许区域找同type空卡\n'
+                    )
+                else:
+                    add_MONITOR_log(
+                        f'{INFO} window {_window} 整条链没有完整checkpoint，本次从头rerun，'
+                        f'允许按job cost class重新选择卡type\n'
+                    )
                 new_tpu_name, new_tpu_zone, pick_mode, tpu_already_owned = _pick_idle_tpu(
                     idle_tpus,
                     target_type,
                     target_zone,
                     low_cost=_is_low_cost_job(job),
-                    same_type_only=SAME_TYPE_ONLY,
+                    same_type_only=same_type_pick,
                     excluded_tpus=used_tpus_this_round,
                     gpt_b_only=gpt_b_only,
+                    v5_only=v5_only,
                 )
                 if not new_tpu_name:
                     add_MONITOR_log(
@@ -1765,11 +1909,19 @@ def mainloop():
                     add_MONITOR_log(
                         f'{INFO} 未找到同type同zone空卡，启用同区跨类型兜底: {target_type}/{target_zone} -> {new_tpu_type}/{new_tpu_zone}'
                     )
+                elif pick_mode == "same_type_same_region":
+                    add_MONITOR_log(
+                        f'{INFO} 未找到同type同zone空卡，启用同区同type兜底: {target_type}/{target_zone} -> {new_tpu_type}/{new_tpu_zone}'
+                    )
+                elif pick_mode == "same_type_cross_region":
+                    add_MONITOR_log(
+                        f'{INFO} 未找到同区同type空卡，启用跨区同type兜底: {target_type}/{target_zone} -> {new_tpu_type}/{new_tpu_zone}'
+                    )
                 elif pick_mode == "cross_region":
                     add_MONITOR_log(
                         f'{INFO} 未找到同区空卡，启用跨区兜底: {target_type}/{target_zone} -> {new_tpu_type}/{new_tpu_zone}'
                     )
-                _tmd_inline = r'tmd() { local force=0; local args=(); for arg in "$@"; do if [ "$arg" = "--force" ]; then force=1; else args+=("$arg"); fi; done; while true; do if [ "$force" = "1" ]; then output=$(' + f'{_tpu}' + r' mount-disk --force "${args[@]}" 2>&1 | tee /dev/tty); else output=$(' + f'{_tpu}' + r' mount-disk "${args[@]}" 2>&1 | tee /dev/tty); fi; if [ "$force" = "0" ] && echo "$output" | grep -q "another process is already mounting"; then sleep 10; echo "sleep 10 and retrying..."; else break; fi; done; }'
+                _tmd_inline = _build_tmd_inline(new_tpu_name, new_tpu_zone)
                 if tpu_already_owned:
                     new_alias = _get_tpu_existing_alias(new_tpu_name)
                     if not new_alias:
@@ -1925,7 +2077,11 @@ if __name__ == "__main__":
     # ---------------------------------------------------------------------------
     _parser = argparse.ArgumentParser()
     _parser.add_argument('--user', type=str, default='sqa', help='User name (default: sqa)')
-    _parser.add_argument('--same-type-only', action='store_true', help='Only resume on the same TPU type (skip cross-type and cross-region fallback)')
+    _parser.add_argument(
+        '--same-type-only',
+        action='store_true',
+        help='Also force checkpoint-free reruns to use the original TPU type. Checkpoint resumes are always same-type.',
+    )
     _args = _parser.parse_args()
     USER = _args.user
     SAME_TYPE_ONLY = _args.same_type_only
