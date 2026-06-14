@@ -10,8 +10,6 @@ from .users import user_from_dict
 from .operate import mount_disk
 
 import os, yaml
-import gspread
-from google.oauth2.service_account import Credentials
 import re
 import subprocess
 import sys
@@ -223,93 +221,14 @@ def register_tpu_and_write_spreadsheet(
         print(
             f"{GOOD} Successfully registered TPU {tpu_alias} with full name {full_name}"
         )
-
-        # Write to spreadsheet
-        try:
-            secret_path = SECRET_PATH
-            sheet_id = "1MFtgLx7uzBFdiPxrIqck00ilrSslZU2w2jRwriVpKMw"
-            sheet_name = "ka[experimental]"
-
-            # Authenticate
-            scopes = ["https://www.googleapis.com/auth/spreadsheets"]
-            creds = Credentials.from_service_account_file(secret_path, scopes=scopes)
-            client = gspread.authorize(creds)
-
-            # Open the sheet
-            ws = client.open_by_key(sheet_id).worksheet(sheet_name)
-
-            # Find the last row of the TPU table.
-            # IMPORTANT:
-            # - We define last_row as the last row that has data in column B/C/D/E.
-            # - We ignore the top 10 rows (headers), so last_row is at least 10.
-            # This avoids being affected by unrelated sections (e.g. K/L usage stats).
-            last_row = 10
-            for sentinel_col in range(2, 6):  # COL B, C, D, E
-                col_values = ws.col_values(sentinel_col)
-                last_row = max(last_row, len(col_values))
-
-            # Determine TPU version and type from full_name
-            tpu_version = None
-            tpu_type = None
-            for key in NAME_TO_VER:
-                if key in full_name:
-                    tpu_version = NAME_TO_VER[key]
-                    break
-            for key in NAME_TO_TYPE:
-                if key in full_name:
-                    tpu_type = NAME_TO_TYPE[key]
-                    break
-
-            # If we can't determine type from full_name, try to extract from spreadsheet_name
-            if tpu_type is None and spreadsheet_name:
-                for key in NAME_TO_TYPE:
-                    if key in spreadsheet_name:
-                        tpu_type = NAME_TO_TYPE[key]
-                        break
-
-            # Prepare the row data: [empty, tpu_alias, belong, running_status, user, user_note, script_note, env, other_note]
-            # Column A: empty (or can be left empty)
-            # Column B: spreadsheet_name (TPU alias)
-            # Column C: belong (default to empty string or 'ka' - using empty for now)
-            # Column D: running_status ('free' -> will be written as '闲的')
-            # Column E: user ('free' -> will be written as '闲的')
-            # Column F: user_note (empty)
-            # Column G: script_note ('READY')
-            # Column H: env (zone)
-            # Column I: other_note (empty)
-
-            new_row = [
-                "",  # Column A
-                spreadsheet_name,  # Column B: TPU alias
-                "unknown",  # Column C: belong (can be filled later)
-                "闲的",  # Column D: running_status (free)
-                "闲的",  # Column E: user (free)
-                ".",  # Column F: user_note
-                "READY",  # Column G: script_note
-                zone,  # Column H: env (zone)
-                ".",  # Column I: other_note
-            ]
-
-            # Write exactly one line under the current last line of the table (A..I).
-            target_row = last_row + 1
-            ws.update(
-                f"A{target_row}:I{target_row}",
-                [new_row],
-                value_input_option="USER_ENTERED",
-            )
-            print(
-                f"{GOOD} Successfully added TPU {spreadsheet_name} to spreadsheet at row {target_row}"
-            )
-        except Exception as e:
-            print(f"{WARNING} Failed to write to spreadsheet: {e}")
-            # Don't fail the whole function if spreadsheet write fails
+        print(f"{INFO} ka sheet disabled; TPU registration was local-only")
 
     except Exception as e:
         print(f"{FAIL} Failed to register TPU: {e}")
         release_lock_data()
 
 
-def fang_new_tpu(new_tpu_name, old_tpu_alias):
+def fang_new_tpu(new_tpu_name, old_tpu_alias, zone=None):
     data = read_and_lock_data()
     try:
         # first check if the new tpu name already exists
@@ -326,13 +245,15 @@ def fang_new_tpu(new_tpu_name, old_tpu_alias):
         if old_tpu_alias not in data["tpu_aliases"]:
             raise ValueError(f"Old TPU alias {old_tpu_alias} not found")
         old_full_name = data["tpu_aliases"][old_tpu_alias]
-        zone = None
+        old_zone = None
         for z in data["all_tpus"]:
             if old_full_name in data["all_tpus"][z]:
-                zone = z
+                old_zone = z
                 break
-        if zone is None:
+        if old_zone is None:
             raise ValueError(f"Old TPU full name {old_full_name} not found in any zone")
+        # Use caller-provided zone for the new TPU; fall back to old zone
+        new_zone = zone if zone else old_zone
         # replace the four appear of old_full_name with new_tpu_name: 2 alias, 1 in zone, 1 in spot
         all_aliases = [
             alias
@@ -345,8 +266,10 @@ def fang_new_tpu(new_tpu_name, old_tpu_alias):
         ], f"found more than 2 aliases for the old TPU. FUCK YOU! please modify manually. get aliases: {all_aliases}"
         for alias_ in all_aliases:
             data["tpu_aliases"][alias_] = new_tpu_name
-        data["all_tpus"][zone].remove(old_full_name)
-        data["all_tpus"][zone].append(new_tpu_name)
+        data["all_tpus"][old_zone].remove(old_full_name)
+        if new_zone not in data["all_tpus"]:
+            data["all_tpus"][new_zone] = []
+        data["all_tpus"][new_zone].append(new_tpu_name)
         if old_full_name in data["pre_info"]["spot"]:
             data["pre_info"]["spot"].remove(old_full_name)
             data["pre_info"]["spot"].append(new_tpu_name)

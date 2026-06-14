@@ -701,6 +701,28 @@ def fetch_tpu_sheet_rows() -> List[Dict[str, Any]]:
 app = Flask(__name__)
 app.secret_key = os.environ.get('FLASK_SECRET_KEY', 'your-secret-key-change-this-in-production')
 
+WEB_URL_PREFIX = os.environ.get("WEB_URL_PREFIX", "").rstrip("/")
+LATEST_URL = os.environ.get("LATEST_URL", "/latest/")
+
+
+class PrefixMiddleware:
+    """Allow the app to live under a reverse-proxy path such as /legacy."""
+
+    def __init__(self, app, prefix: str):
+        self.app = app
+        self.prefix = prefix
+
+    def __call__(self, environ, start_response):
+        path = environ.get("PATH_INFO", "")
+        if self.prefix and (path == self.prefix or path.startswith(self.prefix + "/")):
+            environ["SCRIPT_NAME"] = self.prefix
+            environ["PATH_INFO"] = path[len(self.prefix):] or "/"
+        return self.app(environ, start_response)
+
+
+if WEB_URL_PREFIX:
+    app.wsgi_app = PrefixMiddleware(app.wsgi_app, WEB_URL_PREFIX)
+
 # Import authentication functions
 try:
     from utils import autenticate as auth_mod
@@ -754,12 +776,22 @@ def check_permission(required_permission=None, username=None):
     # Just check if logged in
     return True
 
+def safe_next_url(target: str):
+    if not target or target.startswith(("http://", "https://", "//")):
+        return url_for('index')
+    return target
+
+def current_relative_url():
+    root = request.script_root.rstrip("/")
+    path = request.full_path.rstrip("?")
+    return f"{root}{path}" if root else path
+
 def require_auth(f):
     """Decorator to require authentication"""
     @wraps(f)
     def decorated_function(*args, **kwargs):
         if 'permissions' not in session:
-            return redirect(url_for('login', next=request.url))
+            return redirect(url_for('login', next=current_relative_url()))
         return f(*args, **kwargs)
     return decorated_function
 
@@ -769,7 +801,7 @@ def require_permission(permission=None):
         @wraps(f)
         def decorated_function(*args, **kwargs):
             if 'permissions' not in session:
-                return redirect(url_for('login', next=request.url))
+                return redirect(url_for('login', next=current_relative_url()))
             
             # Check permission
             if permission == 'admin':
@@ -896,6 +928,8 @@ BASE_HTML = r"""
           <a class="user-pill {% if u==cur_user %}active{% endif %}" href="{{ url_for('user_page', username=u) }}">{{ u }}</a>
         {% endfor %}
         <a class="user-pill" href="{{ url_for('tpu_panel') }}">TPU 面板</a>
+        <a class="user-pill" href="{{ latest_url }}">Latest</a>
+        <a class="user-pill" href="{{ url_for('logout') }}">Logout</a>
       </div>
     </div>
   </div>
@@ -3605,6 +3639,14 @@ LOGIN_HTML = """
             margin-top: 10px;
             font-size: 14px;
         }
+        .switch-link {
+            display: block;
+            margin-top: 16px;
+            text-align: center;
+            color: #667eea;
+            text-decoration: none;
+            font-weight: 600;
+        }
     </style>
 </head>
 <body>
@@ -3621,6 +3663,7 @@ LOGIN_HTML = """
             {% endif %}
             <button type="submit">Login</button>
         </form>
+        <a class="switch-link" href="{{ latest_url }}">Latest dashboard</a>
     </div>
 </body>
 </html>
@@ -3631,7 +3674,7 @@ def login():
     if request.method == "POST":
         password = request.form.get('password', '')
         if not password:
-            return render_template_string(LOGIN_HTML, error="Password is required")
+            return render_template_string(LOGIN_HTML, error="Password is required", latest_url=LATEST_URL)
         
         passwords = get_web_passwords()
         password_hash_hex = password_hash(password)
@@ -3639,12 +3682,17 @@ def login():
         if password_hash_hex in passwords:
             session['permissions'] = passwords[password_hash_hex]
             session['logged_in'] = True
-            next_url = request.form.get('next') or request.args.get('next') or url_for('index')
+            next_url = safe_next_url(request.form.get('next') or request.args.get('next') or "")
             return redirect(next_url)
         else:
-            return render_template_string(LOGIN_HTML, error="Invalid password")
+            return render_template_string(LOGIN_HTML, error="Invalid password", latest_url=LATEST_URL)
     
-    return render_template_string(LOGIN_HTML)
+    return render_template_string(LOGIN_HTML, latest_url=LATEST_URL)
+
+@app.route("/latest")
+@app.route("/latest/")
+def latest():
+    return redirect(LATEST_URL)
 
 @app.route("/logout")
 def logout():
@@ -3672,11 +3720,21 @@ def index():
     return redirect(url_for("user_page", username=users[0]))
 
 @app.route("/user/<username>")
+@require_auth
 def user_page(username: str):
     users = list_all_users()
+    if 'admin' not in session.get('permissions', []):
+        user_permissions = session.get('permissions', [])
+        users = [u for u in users if u in user_permissions]
+        if username not in users:
+            return render_template_string(
+                '<html><body style="padding:24px;font-family:sans-serif;">'
+                '<h2>Access Denied</h2><p>Insufficient permissions.</p>'
+                '<a href="{{ url_for(\'index\') }}">Go back</a></body></html>'
+            ), 403
     data = build_job_rows(username)
     rows = data.get("jobs", [])
-    return render_template_string(BASE_HTML, users=users, cur_user=username, rows=rows)
+    return render_template_string(BASE_HTML, users=users, cur_user=username, rows=rows, latest_url=LATEST_URL)
 
 # TPU 面板
 @app.route("/tpus")

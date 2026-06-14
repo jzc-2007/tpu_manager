@@ -1,5 +1,6 @@
 from .constants import *
 import os
+import re
 
 try:
     import gcsfs
@@ -9,6 +10,34 @@ except Exception as e:
 FS = gcsfs.GCSFileSystem()
 
 zones_list = ['us-central1', 'us-east1', 'us-east5', 'us-central2', 'asia-northeast1-b', 'europe-west4-a', 'code/qiao/work']
+_CHECKPOINT_RE = re.compile(r"^checkpoint_(\d+)$")
+_NORMAL_CKPT_PREFIX = "/qiao_zhicheng_hanhong_files/"
+_PRETRAINED_CKPT_PREFIX = "/pretrained-ckpts/qiao_zhicheng_hanhong_files/"
+
+def _bucket_for_zone(zone: str):
+    if zone.startswith('us-central1'):
+        return 'kmh-gcp-us-central1'
+    if zone.startswith('us-east1'):
+        return 'kmh-gcp-us-east1'
+    if zone.startswith('us-east5'):
+        return 'kmh-gcp-us-east5'
+    if zone.startswith('us-central2'):
+        return 'kmh-gcp-us-central2'
+    if zone.startswith('asia-northeast1-b'):
+        return 'kmh-gcp-asia-northeast1-b'
+    if zone.startswith('europe-west4'):
+        return 'kmh-gcp'
+    return None
+
+def _convert_known_gs_to_zone(path: str, zone: str):
+    bucket = _bucket_for_zone(zone)
+    if bucket is None:
+        return path
+    for prefix in (_PRETRAINED_CKPT_PREFIX, _NORMAL_CKPT_PREFIX):
+        idx = path.find(prefix)
+        if idx >= 0 and path.startswith('gs://kmh-gcp'):
+            return f"gs://{bucket}{path[idx:]}"
+    return path
 
 def get_zone_from_workdir(workdir: str) -> str:
     matched_zones = [z for z in zones_list if z in workdir]
@@ -23,9 +52,16 @@ def check_gs_dir_exists(gs_dir):
 
 def is_checkpoint(path: str): return True # trivial
 
+def _normalize_logdir(logdir: str) -> str:
+    if logdir.startswith('/kmh-nfs-ssd-eu-mount/logs/sqa'):
+        logdir = logdir.replace('/kmh-nfs-ssd-eu-mount/logs/sqa', '/kmh-nfs-ssd-us-mount/logs/sqa')
+    if logdir.startswith('/kmh-nfs-us-mount/logs/sqa'):
+        logdir = logdir.replace('/kmh-nfs-us-mount/logs/sqa', '/kmh-nfs-ssd-us-mount/logs/sqa')
+    return logdir
+
 def convert_to_gs_by_zone(path: str, zone: str):
     if path.startswith('gs://'):
-        return path
+        return _convert_known_gs_to_zone(path, zone)
     if zone.startswith('us-central1'):
         return path.replace('/kmh-nfs-ssd-us-mount/logs/sqa', 'gs://kmh-gcp-us-central1/qiao_zhicheng_hanhong_files')
     if zone.startswith('us-east1'):
@@ -40,6 +76,113 @@ def convert_to_gs_by_zone(path: str, zone: str):
         return path.replace('/kmh-nfs-ssd-us-mount/logs/sqa', 'gs://kmh-gcp/qiao_zhicheng_hanhong_files')
     print(f"{WARNING} convert_to_gs_by_zone: Unknown zone {zone}")
     return None
+
+def convert_to_pretrained_gs_by_zone(path: str, zone: str):
+    gs_path = convert_to_gs_by_zone(_normalize_logdir(path), zone)
+    if gs_path is None:
+        return None
+    if _PRETRAINED_CKPT_PREFIX in gs_path:
+        return gs_path.rstrip('/')
+    if _NORMAL_CKPT_PREFIX not in gs_path:
+        print(f"{WARNING} convert_to_pretrained_gs_by_zone: cannot convert {gs_path}")
+        return None
+    return gs_path.replace(_NORMAL_CKPT_PREFIX, _PRETRAINED_CKPT_PREFIX, 1).rstrip('/')
+
+def _as_gs(path: str) -> str:
+    return path if path.startswith('gs://') else f'gs://{path}'
+
+def _latest_checkpoint_path(gs_path: str):
+    gs_path = gs_path.rstrip('/')
+    basename = os.path.basename(gs_path)
+    if basename.startswith('checkpoint_'):
+        return gs_path if FS.exists(gs_path) else None
+    try:
+        files = FS.ls(gs_path)
+    except Exception:
+        return None
+    ckpt_candidates = []
+    for f in files:
+        f = _as_gs(f).rstrip('/')
+        basename = os.path.basename(f)
+        match = _CHECKPOINT_RE.match(basename)
+        if match is not None:
+            ckpt_candidates.append((int(match.group(1)), f))
+    if not ckpt_candidates:
+        return None
+    ckpt_candidates.sort(key=lambda item: item[0], reverse=True)
+    return ckpt_candidates[0][1]
+
+def _checkpoint_available(gs_path: str) -> bool:
+    return gs_path is not None and _latest_checkpoint_path(gs_path) is not None
+
+def copy_latest_checkpoint_dir(src_root: str, dst_root: str):
+    src = _latest_checkpoint_path(src_root)
+    if src is None:
+        raise ValueError(f'No checkpoint_ folders found under {src_root}')
+    if os.path.basename(dst_root.rstrip('/')).startswith('checkpoint_'):
+        dst = dst_root.rstrip('/')
+    else:
+        dst = f"{dst_root.rstrip('/')}/{os.path.basename(src)}"
+    if FS.exists(dst):
+        print(f"{GOOD} copy_latest_checkpoint_dir: {dst} already exists; skipping")
+        return True
+    print(f"{INFO} copy_latest_checkpoint_dir: copying {src} -> {dst}")
+    FS.copy(src, dst, recursive=True)
+    print(f"{GOOD} copy_latest_checkpoint_dir: copy done")
+    return True
+
+def mirror_latest_checkpoint_to_pretrained(logdir, zone):
+    normal_gs = convert_to_gs_by_zone(_normalize_logdir(logdir), zone)
+    pretrained_gs = convert_to_pretrained_gs_by_zone(logdir, zone)
+    if normal_gs is None or pretrained_gs is None:
+        print(f"{WARNING} mirror_latest_checkpoint_to_pretrained: cannot convert {logdir} in zone {zone}")
+        return False
+    if not _checkpoint_available(normal_gs):
+        print(f"{WARNING} mirror_latest_checkpoint_to_pretrained: no checkpoint found under {normal_gs}")
+        return False
+    return copy_latest_checkpoint_dir(normal_gs, pretrained_gs)
+
+def ensure_pretrained_checkpoint_for_launch(load_from_pretrained, target_zone):
+    """
+    Ensures target_zone has a durable pretrained copy for load_from_pretrained.
+
+    The normal target bucket is preferred. If it is missing, the same-zone
+    pretrained-ckpts path is preferred. If that is also missing, copy the latest
+    checkpoint from another zone's pretrained-ckpts prefix into target_zone's
+    pretrained-ckpts prefix.
+    """
+    load_from_pretrained = _normalize_logdir(load_from_pretrained)
+    normal_target = convert_to_gs_by_zone(load_from_pretrained, target_zone)
+    if normal_target is None:
+        raise ValueError(f'Cannot convert load_from_pretrained={load_from_pretrained} for zone {target_zone}')
+    if _checkpoint_available(normal_target):
+        print(f"{GOOD} ensure_pretrained_checkpoint_for_launch: normal target checkpoint exists: {normal_target}")
+        return True
+
+    pretrained_target = convert_to_pretrained_gs_by_zone(load_from_pretrained, target_zone)
+    if pretrained_target is None:
+        raise ValueError(f'Cannot convert pretrained target for {load_from_pretrained} in zone {target_zone}')
+    if _checkpoint_available(pretrained_target):
+        print(f"{GOOD} ensure_pretrained_checkpoint_for_launch: pretrained target checkpoint exists: {pretrained_target}")
+        return True
+
+    for src_zone in zones_list:
+        if src_zone == 'code/qiao/work':
+            continue
+        if str(target_zone).startswith(src_zone):
+            continue
+        pretrained_src = convert_to_pretrained_gs_by_zone(load_from_pretrained, src_zone)
+        if pretrained_src is not None and _checkpoint_available(pretrained_src):
+            print(
+                f"{INFO} ensure_pretrained_checkpoint_for_launch: found pretrained source "
+                f"in {src_zone}: {pretrained_src}"
+            )
+            return copy_latest_checkpoint_dir(pretrained_src, pretrained_target)
+
+    raise ValueError(
+        f'No checkpoint found in normal target path {normal_target}, pretrained target path '
+        f'{pretrained_target}, or any other zone pretrained-ckpts path.'
+    )
 
 def convert_name(path:str, zone: str):
     if zone is None:
@@ -81,11 +224,7 @@ def check_gs_logdir_exists(logdir, zone, quiet=True, all=False):
     logdir is the dir for resume checkpoint
     zone the is the zone of current / new tpu to resume
     '''
-    if logdir.startswith('/kmh-nfs-ssd-eu-mount/logs/sqa'):
-        logdir = logdir.replace('/kmh-nfs-ssd-eu-mount/logs/sqa', '/kmh-nfs-ssd-us-mount/logs/sqa')
-    # turn to general case (ssd-us-mount)
-    if logdir.startswith('/kmh-nfs-us-mount/logs/sqa'):
-        logdir = logdir.replace('/kmh-nfs-us-mount/logs/sqa', '/kmh-nfs-ssd-us-mount/logs/sqa')
+    logdir = _normalize_logdir(logdir)
     
     for z in [zone] + zones_list:
         if z == 'code/qiao/work': continue

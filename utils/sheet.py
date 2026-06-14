@@ -1,570 +1,343 @@
-import gspread
-from google.oauth2.service_account import Credentials
-from typing import List
-from .helpers import *
+"""Local TPU registry adapter.
+
+The old implementation used the ka Google Spreadsheet as a live state store.
+That state is not reliable enough for automatic scheduling, so this module no
+longer performs any Google Sheet I/O.  The public function names are kept for
+old xibo call sites, but reads are synthesized from local ``data.json`` and
+writes are explicit no-ops.
+"""
+
+import csv
+import re
+import subprocess
+from io import StringIO
+
 from .constants import *
-from .data_io import *
+from .data_io import read_data
+from .helpers import display_tpu_information, filter_tpu_information, get_zone_pre_spot
+
+
+def _type_and_version_from_name(full_name):
+    tpu_type = None
+    tpu_version = None
+    for key, value in NAME_TO_TYPE.items():
+        if key in full_name:
+            tpu_type = value
+    for key, value in NAME_TO_VER.items():
+        if key in full_name:
+            tpu_version = value
+    return tpu_type, tpu_version
+
+
+def _best_alias_for_tpu(data, full_name):
+    aliases = [
+        alias
+        for alias, mapped in data.get("tpu_aliases", {}).items()
+        if mapped == full_name
+    ]
+    if not aliases:
+        return full_name
+
+    def score(alias):
+        # Prefer the short temporary aliases used by the scheduling scripts.
+        if re.match(r"^v\d+(e|p)?-\d+-tmp\d+$", alias):
+            return (0, len(alias), alias)
+        if alias.startswith("kmh-tpuvm-"):
+            return (2, len(alias), alias)
+        return (1, len(alias), alias)
+
+    return sorted(aliases, key=score)[0]
+
+
+def _job_status_by_tpu(data):
+    """Return best-effort local job ownership by TPU from data.json.
+
+    This is intentionally display-only.  It should not be used as the source of
+    truth for scheduling; use tou and reservation locks for that.
+    """
+    status = {}
+    for user, user_data in data.get("users", {}).items():
+        for job in user_data.get("job_data", []):
+            tpu = job.get("tpu")
+            if not tpu:
+                continue
+            job_status = job.get("status")
+            if job_status == "running":
+                status[tpu] = (
+                    "running",
+                    user,
+                    (job.get("extra_msgs") or {}).get("spreadsheet_notes")
+                    or job.get("job_tags")
+                    or "",
+                )
+            elif job_status == "error" and tpu not in status:
+                status[tpu] = (
+                    "reserved",
+                    user,
+                    (job.get("extra_msgs") or {}).get("spreadsheet_notes")
+                    or job.get("job_tags")
+                    or "",
+                )
+    return status
+
 
 def read_sheet_info() -> dict:
-    """
-    Read the TPU information from the Google Sheet.
-    Return: a dictionary of dictionaries with TPU information.
-    Keys: TPU full name
-    Values: a dictionary with keys ['zone', 'pre', 'belong', 'running_status', 'user', 'user_note', 'script_note', 'alias', 'version', 'type', 'other_note', 'env', 'line']
-    Logic: Read the lines that COL B starts with 'v'.
-    """
+    """Return spreadsheet-shaped TPU info synthesized from local data.json."""
     data = read_data()
+    job_status = _job_status_by_tpu(data)
+    preemptible = set((data.get("pre_info") or {}).get("preemptible", []))
+    spot = set((data.get("pre_info") or {}).get("spot", []))
 
-    secret_path = SECRET_PATH
-    sheet_id  = "1MFtgLx7uzBFdiPxrIqck00ilrSslZU2w2jRwriVpKMw"
-    sheet_name  = "ka[experimental]"
-
-    # 1. authenticate
-    scopes = ["https://www.googleapis.com/auth/spreadsheets.readonly"]
-    creds  = Credentials.from_service_account_file(secret_path, scopes=scopes)
-    client = gspread.authorize(creds)
-
-    # 2. open the sheet
-    ws = client.open_by_key(sheet_id).worksheet(sheet_name)
-
-    # 3. find the number of rows
-    last_row = 0
-    for sentinel_col in range(2, 7): # COL B, C (ka, belonging)
-        col_values = ws.col_values(sentinel_col)
-        last_row = max(last_row, len(col_values))
-
-    # 4. get the data
-    table = ws.get(f"A1:Z{last_row}")      # gspread.values_get -> List[List[str]]
-    
     tpu_information = {}
-    for i, row in enumerate(table):
-        if len(row) > 1 and (row[1].startswith('v') or row[1].startswith('kmh-tpuvm-')):
-            assert len(row) >= 7, f"line {i+1} is too short: {row}"
-            _, tpu, belong, running_status, user, user_note, script_note, env, other = row[:9]
-            zone, pre, spot, full_name = get_zone_pre_spot(tpu)
-            
-            assert zone is not None, f"line {i+1} tpu {tpu} not found in zone"
-            assert zone.startswith(env), f"line {i+1} zone {zone} does not start with env {env}, for tpu {tpu}"
-
-            # print(running_status, user, user_note, script_note)
-            assert running_status in ['running', 'reserved', 'reserved(error)', '闲的', '没了!'], f"line {i+1} running status {running_status} cannot be recognized"
-            if running_status == '闲的':
-                running_status = 'free'
-
-            if running_status == 'reserved(error)':
-                running_status = 'reserved'
-
-            if user == '闲的':
-                user = 'free'
-
-            tpu_type, tpu_version = None, None
-            for key in NAME_TO_VER:
-                if key in full_name:
-                    tpu_version = NAME_TO_VER[key]
-
-            if full_name == 'kmh-tpuvm-v6e-spot-301': tpu_type = 'v6e-64'
-            for key in NAME_TO_TYPE:
-                if key in full_name:
-                    tpu_type = NAME_TO_TYPE[key]
-
-            assert (tpu_version is not None) and (tpu_type is not None), f"line {i+1} tpu {tpu} name cannot be recognized: {tpu_version}, {tpu_type}, {full_name}"
-
+    line = 1
+    for zone, tpu_list in (data.get("all_tpus") or {}).items():
+        for full_name in tpu_list:
+            tpu_type, tpu_version = _type_and_version_from_name(full_name)
+            if tpu_type is None or tpu_version is None:
+                continue
+            running_status, user, user_note = job_status.get(
+                full_name, ("free", "free", "")
+            )
             tpu_information[full_name] = {
-                'zone': zone,
-                'pre': pre,
-                'belong': belong,
-                'version': tpu_version,
-                'type': tpu_type,
-                'running_status': running_status,
-                'user': user,
-                'env': env,
-                'user_note': user_note,
-                'script_note': script_note,
-                'alias': tpu,
-                'other_note': other,
-                'line': i + 1
+                "zone": zone,
+                "pre": full_name in preemptible,
+                "spot": full_name in spot,
+                "belong": "local",
+                "version": tpu_version,
+                "type": tpu_type,
+                "running_status": running_status,
+                "user": user,
+                "env": zone,
+                "user_note": user_note,
+                "script_note": "READY",
+                "alias": _best_alias_for_tpu(data, full_name),
+                "other_note": "local data.json; ka sheet disabled",
+                "line": line,
             }
-
-    # assert 'kmh-tpuvm-v6e-64-spot-keya-su30sn' in tpu_information, f"kmh-tpuvm-v6e-64-spot-keya-su30sn not found in tpu_information"
-
+            line += 1
     return tpu_information
 
+
 def write_sheet_info(info_to_write):
-    """
-    Write the tpu information to the Google Sheet.
-    Args: a dictionary of a specific TPU information, with keys ['zone', 'pre', 'belong', 'running_status', 'user', 'user_note', 'script_note', 'alias', 'version', 'type', 'other_note', 'line']
-    Only updating belong, running_status, user, user_note, script_note
-    """
-    secret_path = SECRET_PATH
-    sheet_id  = "1MFtgLx7uzBFdiPxrIqck00ilrSslZU2w2jRwriVpKMw"
-    sheet_name  = "ka[experimental]"
-
-    # 1. authenticate
-    scopes = ["https://www.googleapis.com/auth/spreadsheets"]
-    creds  = Credentials.from_service_account_file(secret_path, scopes=scopes)
-    client = gspread.authorize(creds)
-
-    # 2. open the sheet
-    ws = client.open_by_key(sheet_id).worksheet(sheet_name)
-
-    # 3. write the data
-    row = info_to_write['line']
-    col = 1
-    transform_dict = {'free': '闲的'}
-
-    ws.update(f"C{row}:I{row}", [
-        [
-            transform_dict.get(info_to_write['belong'], info_to_write['belong']),
-            transform_dict.get(info_to_write['running_status'], info_to_write['running_status']),
-            transform_dict.get(info_to_write['user'], info_to_write['user']),
-            transform_dict.get(info_to_write['user_note'], info_to_write['user_note']),
-            transform_dict.get(info_to_write['script_note'], info_to_write['script_note']),            
-            transform_dict.get(info_to_write['env'], info_to_write['env']),
-            transform_dict.get(info_to_write['other_note'], info_to_write['other_note']),
-        ]
-    ], value_input_option='USER_ENTERED')
-
-    # print("" + str(resp))  # Debugging output to see the response from the update
-
-    # print(f"{INFO} update row {row} in the sheet with TPU information: {info_to_write}")
-
-    print(f"{INFO} write_sheet_info: TPU {info_to_write['alias']} information updated in the sheet")
+    """Compatibility no-op for old call sites that used to update ka sheet."""
+    alias = (info_to_write or {}).get("alias") or (info_to_write or {}).get("tpu") or "<unknown>"
+    print(f"{INFO} write_sheet_info: ka sheet disabled; skipped update for {alias}")
     return True
 
+
 def read_tpu_info_from_type(args):
-    """
-    Read the TPU information from specific args.
-    Supported args: ['v<num>', 'v<num>+', 'v<num>-<num>', 'v*/-a/--all', '-p'/'-pre', '-n'/'-norm']
-    Return: a dictionary of dictionaries with TPU information.
-    """
+    """Read TPU information from local data.json and filter by type/pre flag."""
     type_list = []
     pre_filter = None
 
     for arg in args:
-        if arg in ARG_TO_LIST: 
+        if arg in ARG_TO_LIST:
             if isinstance(ARG_TO_LIST[arg], list):
                 type_list += ARG_TO_LIST[arg]
             else:
                 type_list.append(ARG_TO_LIST[arg])
-        if arg in ['-p', '-pre']: pre_filter = True
-        if arg in ['-n', '-norm']: pre_filter = False
+        if arg in ["-p", "-pre"]:
+            pre_filter = True
+        if arg in ["-n", "-norm"]:
+            pre_filter = False
 
     if len(type_list) == 0:
         type_list = all_type_list
 
     tpu_information = read_sheet_info()
-
     if pre_filter is not None:
-        filtered_tpu_information = filter_tpu_information(tpu_information, type=type_list, pre=pre_filter)
-    else:
-        filtered_tpu_information = filter_tpu_information(tpu_information, type=type_list)
+        return filter_tpu_information(tpu_information, type=type_list, pre=pre_filter)
+    return filter_tpu_information(tpu_information, type=type_list)
 
-    return filtered_tpu_information
 
-def find_tpu_from_type(args):   
-    """
-    Find the TPU information from specific args, and display it.
-    Supported args: ['v<num>', 'v<num>-<num>', 'v*', 'v<num>+', '-p'/'-pre', '-n'/'-norm', '-del'(show deleted)]
-    Display Style: ['full', 'category', 'category_note'(default)]
-    """
+def find_tpu_from_type(args):
+    """Display local TPU registry rows. Live state comes from tou, not here."""
     style = None
     for arg in args:
-        if arg.startswith('style='):
-            style = arg.split('=')[1]
+        if arg.startswith("style="):
+            style = arg.split("=", 1)[1]
             break
+    print(f"{WARNING} ka sheet disabled; showing local data.json registry only.")
     information = read_tpu_info_from_type(args)
-    if '-del' not in args:
-        # Exclude deleted: running_status '没了!' or script_note not found/preempted
-        information = {
-            tpu: info for tpu, info in information.items()
-            if info.get('running_status') != '没了!'
-            and (info.get('script_note') or '').lower() not in ['not found', 'preempted']
-        }
     return display_tpu_information(information, style=style)
 
+
 def get_tpu_info_sheet(tpu):
-    """
-    Get the information of a specific TPU from the Google Sheet.
-    Args: TPU name or alias
-    Return: a dictionary with keys ['zone', 'pre', 'belong', 'running_status', 'user', 'user_note', 'script_note', 'alias', 'version', 'type', 'line']
-    """
-    # print(f"{INFO} get_tpu_info_sheet: Getting information for TPU {tpu} from the sheet...")
+    """Return a spreadsheet-shaped row for a TPU from local data.json."""
+    _, _, _, full_name = get_zone_pre_spot(tpu, quiet=True)
+    if full_name is None:
+        print(f"{FAIL} TPU {tpu} not found in local data.json")
+        return None
     tpu_information = read_sheet_info()
-    # print(f"{INFO} get_tpu_info_sheet: Looking for TPU {tpu} in the sheet information...")
-    _, _, _, full_name = get_zone_pre_spot(tpu)
-    # print(f"{INFO} get_tpu_info_sheet: Full name for TPU {tpu} is {full_name}")
     if full_name in tpu_information:
         return tpu_information[full_name]
-    else:
-        print(f"{FAIL} TPU {tpu} not found in the sheet")
-        return None
+    print(f"{FAIL} TPU {tpu} not found in local data.json registry")
+    return None
+
 
 def release_tpu(args):
+    """Compatibility no-op.
+
+    Old behavior only updated ka sheet. Reservation locks are managed by zhan /
+    fang and expire independently, so there is no local sheet state to release.
     """
-    Change the running status to '闲的', user to '闲的', and user_note to be empty.
-    Args: TPU name or alias
-    """
-    tpu, user = None, None
-    data = read_data()
     assert len(args) in [1, 2], f"release_tpu: {args} is not valid"
-    if len(args) == 1:
-        tpu = args[0]
-    elif len(args) == 2:
-        tpu = args[0]
-        user = args[1]
-    spreadsheet_name = None
-    if user is not None:
-        spreadsheet_name = data['users'][user]['spreadsheet_name']
-    
-    tpu_information = get_tpu_info_sheet(tpu)
-    if tpu_information is not None:
-        if user is not None:
-            assert tpu_information['user'] == spreadsheet_name, f"TPU {tpu} is not used by {user}, but by {tpu_information['user']}"
-        tpu_information['running_status'] = '闲的'
-        tpu_information['user'] = '闲的'
-        tpu_information['user_note'] = ''
-        write_sheet_info(tpu_information)
-        print(f"{GOOD} TPU {tpu} released")
-    else:
-        print(f"{FAIL} TPU {tpu} not found in the sheet")
+    print(f"{INFO} release_tpu: ka sheet disabled; no local action for {args[0]}")
+    return True
+
 
 def set_spreadsheet_notes(tpu, notes):
-    """
-    Set the spreadsheet notes for a specific TPU.
-    Args: TPU name or alias, notes
-    """
-    tpu_information = get_tpu_info_sheet(tpu)
-    if tpu_information is not None:
-        tpu_information['user_note'] = notes
-        write_sheet_info(tpu_information)
-        print(f"{INFO} TPU {tpu} notes updated")
-    else:
-        print(f"{FAIL} TPU {tpu} not found in the sheet")
+    print(f"{INFO} set_spreadsheet_notes: ka sheet disabled; skipped {tpu}")
+    return True
+
 
 def add_spreadsheet_notes(tpu, notes):
-    """
-    Set the spreadsheet notes for a specific TPU.
-    Args: TPU name or alias, notes
-    """
-    tpu_information = get_tpu_info_sheet(tpu)
-    if tpu_information is not None:
-        tpu_information['user_note'] += notes
-        write_sheet_info(tpu_information)
-        print(f"{INFO} TPU {tpu} notes updated")
-    else:
-        print(f"{FAIL} TPU {tpu} not found in the sheet")
+    print(f"{INFO} add_spreadsheet_notes: ka sheet disabled; skipped {tpu}")
+    return True
+
 
 def keng_tpu(args):
+    """Show temporary aliases that are registered locally.
+
+    This no longer knows ka sheet's deleted/preempted marker. Use tou/zombie
+    tools for live deleted/preempted state.
     """
-    Show all deleted TPUs that start with 'v*-*-tmp*' pattern in the spreadsheet.
-    Can filter by zone (e.g., us-east5-a) or card type (e.g., v6, v6-32).
-    Note: v6e-32 is equivalent to v6-32, and v5p-32 is equivalent to v5-32.
-    Args: optional zone or card type filters
-    """
-    import re
-    
-    # Parse arguments for zone and card type filters
     zone_filter = None
     type_filter = None
-    
     for arg in args:
-        # Check if it's a zone (contains dash and starts with known zone prefixes)
-        if '-' in arg and (arg.startswith('us-') or arg.startswith('asia-') or arg.startswith('europe-')):
+        if "-" in arg and (
+            arg.startswith("us-")
+            or arg.startswith("asia-")
+            or arg.startswith("europe-")
+        ):
             zone_filter = arg
-        # Check if it's a card type (e.g., v6, v6-32, v5p-32, v6e-32)
-        elif arg.startswith('v') and re.match(r'v\d+(e|p)?(-\d+)?$', arg):
-            type_filter = arg
-    
-    # Normalize type filter (v6e-32 -> v6-32, v5p-32 -> v5-32)
-    if type_filter:
-        type_filter = re.sub(r'v(\d+)(e|p)(-\d+)?', r'v\1\3', type_filter)
-    
-    # Read all TPU information from spreadsheet
-    tpu_information = read_sheet_info()
-    
-    # Filter for deleted TPUs with tmp pattern
-    filtered_tpus = {}
-    # Updated pattern to match v5p-128-tmp, v6e-64-tmp, v6-32-tmp, etc.
-    tmp_pattern = re.compile(r'^v\d+(e|p)?-\d+-tmp', re.IGNORECASE)
-    
-    for tpu_name, info in tpu_information.items():
-        alias = info.get('alias', '')
-        
-        # Check if alias matches v*-*-tmp* pattern
+        elif arg.startswith("v") and re.match(r"v\d+(e|p)?(-\d+)?$", arg):
+            type_filter = re.sub(r"v(\d+)(e|p)(-\d+)?", r"v\1\3", arg)
+
+    tmp_pattern = re.compile(r"^v\d+(e|p)?-\d+-tmp", re.IGNORECASE)
+    rows = []
+    for full_name, info in read_sheet_info().items():
+        alias = info.get("alias", "")
         if not tmp_pattern.match(alias):
             continue
-        
-        # Check if TPU is deleted (script_note is 'not found' or 'preempted', OR running_status is '没了!')
-        script_note = info.get('script_note', '').lower()
-        running_status = info.get('running_status', '')
-        if not (script_note in ['not found', 'preempted'] or running_status == '没了!'):
+        if zone_filter and info.get("zone") != zone_filter:
             continue
-        
-        # Apply zone filter if specified
-        if zone_filter and info.get('zone') != zone_filter:
-            continue
-        
-        # Apply type filter if specified
         if type_filter:
-            # Extract type from alias (e.g., v6-32 from v6-32-tmp1, v6e-64 from v6e-64-tmp2)
-            alias_match = re.match(r'(v\d+(e|p)?-\d+)', alias, re.IGNORECASE)
-            if alias_match:
-                alias_type = alias_match.group(1)
-                # Normalize alias type (v6e-64 -> v6-64, v5p-32 -> v5-32)
-                alias_type = re.sub(r'v(\d+)(e|p)(-\d+)', r'v\1\3', alias_type)
-                
-                # Check if it matches the type filter
-                # type_filter can be 'v6' (matches v6-*) or 'v6-32' (exact match)
-                if type_filter.count('-') == 0:
-                    # Filter is like 'v6', match all v6-* types
-                    if not alias_type.startswith(type_filter):
-                        continue
-                else:
-                    # Filter is like 'v6-32', exact match
-                    if alias_type != type_filter:
-                        continue
-            else:
-                # Could not extract type from alias, skip
+            alias_match = re.match(r"(v\d+(e|p)?-\d+)", alias, re.IGNORECASE)
+            if not alias_match:
                 continue
-        
-        filtered_tpus[tpu_name] = info
-    
-    # Display the results
-    if not filtered_tpus:
-        print(f"{INFO} No deleted temporary TPUs found matching the criteria")
+            alias_type = re.sub(
+                r"v(\d+)(e|p)(-\d+)", r"v\1\3", alias_match.group(1)
+            )
+            if "-" in type_filter:
+                if alias_type != type_filter:
+                    continue
+            elif not alias_type.startswith(type_filter):
+                continue
+        rows.append((alias, info.get("zone", ""), full_name))
+
+    if not rows:
+        print(f"{INFO} No local temporary TPU aliases found matching the criteria")
         return
-    
-    print(f"{RED}Deleted Temporary TPUs{NC} (Total: {len(filtered_tpus)})")
-    print(f"{'Alias':<20} {'Zone':<20} {'User':<15} {'Note':<30}")
-    print("-" * 90)
-    
-    # Sort by alias
-    sorted_tpus = sorted(filtered_tpus.items(), key=lambda x: x[1]['alias'])
-    
-    for tpu_name, info in sorted_tpus:
-        alias = info.get('alias', 'N/A')
-        zone = info.get('zone', 'N/A')
-        user = info.get('user', 'N/A')
-        note = info.get('user_note', '')
-        
-        # Truncate note if too long
-        if len(note) > 30:
-            note = note[:27] + '...'
-        
-        print(f"{alias:<20} {zone:<20} {user:<15} {note:<30}")
+    print(f"{WARNING} ka sheet disabled; showing local tmp aliases, not deletion state.")
+    print(f"{'Alias':<20} {'Zone':<20} {'TPU':<60}")
+    print("-" * 105)
+    for alias, zone, full_name in sorted(rows):
+        print(f"{alias:<20} {zone:<20} {full_name:<60}")
+
 
 def get_tpu_usage_by_zone_and_type():
-    """
-    Use gcloud list command to get TPU usage statistics for each zone and type.
-    Returns: dict with keys like 'v6(us-central1-b)' and values as the number of chips used.
-    """
-    import subprocess
-    import re
-    from .constants import PROJECT, ZONE_DICT, NAME_TO_TYPE
-    
+    """Use gcloud list command to get TPU chip usage by zone and type."""
     usage_stats = {}
-    
-    # Get all zones
-    all_zones = ZONE_DICT['all']
-    
-    for zone in all_zones:
-        # List all TPUs in this zone (including creating state)
-        # Use CSV format for easier parsing
-        cmd = f"gcloud compute tpus tpu-vm list --zone={zone} --project={PROJECT} --format='csv(name,acceleratorType,state)'"
+    for zone in ZONE_DICT["all"]:
+        cmd = (
+            "gcloud compute tpus tpu-vm list "
+            f"--zone={zone} --project={PROJECT} "
+            "--format='csv(name,acceleratorType,state)'"
+        )
         try:
-            result = subprocess.run(cmd, shell=True, timeout=60, check=False,
-                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            result = subprocess.run(
+                cmd,
+                shell=True,
+                timeout=60,
+                check=False,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
             if result.returncode != 0:
                 print(f"{WARNING} Failed to list TPUs in zone {zone}: {result.stderr}")
                 continue
-            
             lines = result.stdout.strip().splitlines()
-            if len(lines) < 2:  # Header + no data
+            if len(lines) < 2:
                 continue
-            
-            # Parse CSV output (skip header line)
-            import csv
-            from io import StringIO
-            
-            csv_reader = csv.reader(StringIO('\n'.join(lines[1:])))
+            csv_reader = csv.reader(StringIO("\n".join(lines[1:])))
             for row in csv_reader:
                 if len(row) < 3:
                     continue
-                
-                tpu_name = row[0].strip()
                 acc_type = row[1].strip()
                 state = row[2].strip()
-                
-                # Only count READY and CREATING states
-                if state.upper() not in ['READY', 'CREATING']:
+                if state.upper() not in ["READY", "CREATING"]:
                     continue
-                
-                # Extract TPU version from accelerator type
-                # Examples: v6e-64 -> v6, v5p-256 -> v5p, v5litepod-16 -> v5e
-                tpu_version = None
-                if 'v6e' in acc_type.lower() or (acc_type.lower().startswith('v6')):
-                    tpu_version = 'v6'
-                elif 'v5p' in acc_type.lower():
-                    tpu_version = 'v5p'
-                elif 'v5litepod' in acc_type.lower() or 'v5e' in acc_type.lower():
-                    tpu_version = 'v5e'
-                elif acc_type.lower().startswith('v5'):
-                    tpu_version = 'v5'
-                elif acc_type.lower().startswith('v4'):
-                    tpu_version = 'v4'
-                elif acc_type.lower().startswith('v3'):
-                    tpu_version = 'v3'
-                elif acc_type.lower().startswith('v2'):
-                    tpu_version = 'v2'
-                
-                if tpu_version is None:
+                acc_lower = acc_type.lower()
+                if "v6e" in acc_lower or acc_lower.startswith("v6"):
+                    tpu_version = "v6"
+                elif "v5p" in acc_lower:
+                    tpu_version = "v5p"
+                elif "v5litepod" in acc_lower or "v5e" in acc_lower:
+                    tpu_version = "v5e"
+                elif acc_lower.startswith("v5"):
+                    tpu_version = "v5"
+                elif acc_lower.startswith("v4"):
+                    tpu_version = "v4"
+                elif acc_lower.startswith("v3"):
+                    tpu_version = "v3"
+                elif acc_lower.startswith("v2"):
+                    tpu_version = "v2"
+                else:
                     continue
-                
-                # Extract chip count from accelerator type (e.g., v6e-64 -> 64)
-                chip_count = 0
-                try:
-                    # Try to extract number from accelerator type
-                    numbers = re.findall(r'\d+', acc_type)
-                    if numbers:
-                        chip_count = int(numbers[-1])  # Take the last number (usually the chip count)
-                except:
-                    pass
-                
-                if chip_count == 0:
+                numbers = re.findall(r"\d+", acc_type)
+                if not numbers:
                     continue
-                
-                # Create key: v6(us-central1-b)
+                chip_count = int(numbers[-1])
                 key = f"{tpu_version}({zone})"
-                
-                if key not in usage_stats:
-                    usage_stats[key] = 0
-                usage_stats[key] += chip_count
-                
+                usage_stats[key] = usage_stats.get(key, 0) + chip_count
         except subprocess.TimeoutExpired:
             print(f"{WARNING} Timeout listing TPUs in zone {zone}")
-            continue
         except Exception as e:
             print(f"{WARNING} Error listing TPUs in zone {zone}: {e}")
-            continue
-    
     return usage_stats
 
+
 def write_tpu_usage_to_sheet(usage_stats):
-    """
-    Write TPU usage statistics to K and L columns starting from row 6.
-    K column: type (e.g., v6(us-central1-b))
-    L column: chip count (e.g., 1024)
-    """
-    secret_path = SECRET_PATH
-    sheet_id = "1MFtgLx7uzBFdiPxrIqck00ilrSslZU2w2jRwriVpKMw"
-    sheet_name = "ka[experimental]"
-    
-    # 1. authenticate
-    scopes = ["https://www.googleapis.com/auth/spreadsheets"]
-    creds = Credentials.from_service_account_file(secret_path, scopes=scopes)
-    client = gspread.authorize(creds)
-    
-    # 2. open the sheet
-    ws = client.open_by_key(sheet_id).worksheet(sheet_name)
-    
-    # 3. Prepare data - sort by type name for consistency
-    sorted_stats = sorted(usage_stats.items())
-    
-    # 4. Clear existing data in K and L columns from row 6 onwards
-    # First, find how many rows to clear (use a reasonable number, e.g., 100)
-    max_rows = max(100, len(sorted_stats) + 10)
-    ws.batch_clear([f"K6:L{max_rows}"])
-    
-    # 5. Write new data starting from row 6
-    if sorted_stats:
-        data_to_write = [[key, str(value)] for key, value in sorted_stats]
-        print(f"data_to_write: {data_to_write}")
-        ws.update(f"K6:L{5 + len(data_to_write)}", data_to_write, value_input_option='USER_ENTERED')
-        print(f"{INFO} write_tpu_usage_to_sheet: Updated {len(sorted_stats)} TPU usage statistics in K and L columns")
-    else:
-        print(f"{WARNING} write_tpu_usage_to_sheet: No TPU usage statistics to write")
-    
+    print(f"{INFO} write_tpu_usage_to_sheet: ka sheet disabled; skipped")
     return True
 
+
 def read_tpu_total_counts_from_sheet():
-    """
-    Read TPU total counts from K and L columns starting from row 6.
-    K column format: v6(asia-northeast1-b) or v5p(us-east5-a)
-    L column: count (number of chips)
-    Returns: dict with structure {version: {zone: total_cards}}
-    Example: {'v6': {'asia-northeast1-b': 128}, 'v5': {'us-east5-a': 64}}
-    """
-    import re
-    from .data_io import read_data
-    
-    secret_path = SECRET_PATH
-    sheet_id = "1MFtgLx7uzBFdiPxrIqck00ilrSslZU2w2jRwriVpKMw"
-    sheet_name = "ka[experimental]"
-    
-    # 1. authenticate
-    scopes = ["https://www.googleapis.com/auth/spreadsheets.readonly"]
-    creds = Credentials.from_service_account_file(secret_path, scopes=scopes)
-    client = gspread.authorize(creds)
-    
-    # 2. open the sheet
-    ws = client.open_by_key(sheet_id).worksheet(sheet_name)
-    
-    # 3. Read K and L columns from row 6 onwards
-    # Read up to row 200 to be safe
-    max_row = 200
-    k_col_values = ws.col_values(11)  # Column K is index 11 (1-based)
-    l_col_values = ws.col_values(12)  # Column L is index 12 (1-based)
-    
-    counts = {}  # {version: {zone: total_cards}}
-    
-    # Start from row 6 (index 5 in 0-based, since col_values[0] = row 1)
-    # Process up to the minimum of: max_row, length of K column, length of L column
-    end_row = min(max_row, len(k_col_values), len(l_col_values))
-    for i in range(5, end_row):
-        # Get values (with safe indexing)
-        k_value = (k_col_values[i].strip() if i < len(k_col_values) else '').strip()
-        l_value = (l_col_values[i].strip() if i < len(l_col_values) else '').strip()
-        
-        # Skip empty rows
-        if not k_value or not l_value:
+    """Return local registered chip counts in the legacy structure."""
+    counts = {}
+    for info in read_sheet_info().values():
+        tpu_type = info.get("type", "")
+        zone = info.get("zone")
+        if not zone:
             continue
-        
-        # Parse K column: v6(asia-northeast1-b) or v5p(us-east5-a)
-        # Pattern: v<num>[p|e]?(zone)
-        match = re.match(r'v(\d+)([pe]?)\s*\(([^)]+)\)', k_value)
-        if not match:
+        m = re.search(r"(\d+)$", tpu_type)
+        if not m:
             continue
-        
-        version_num = match.group(1)
-        version_suffix = match.group(2)  # 'p' or 'e' or ''
-        zone = match.group(3).strip()
-        
-        # Map to version: v4, v5, v6
-        # v5p, v5e -> v5, v4 -> v4, v6e, v6 -> v6
-        if version_num == '4':
-            version = 'v4'
-        elif version_num == '5':
-            version = 'v5'  # v5p and v5e both map to v5
-        elif version_num == '6':
-            version = 'v6'  # v6e maps to v6
+        chips = int(m.group(1))
+        if tpu_type.startswith("v6"):
+            version = "v6"
+        elif tpu_type.startswith("v5"):
+            version = "v5"
+        elif tpu_type.startswith("v4"):
+            version = "v4"
+        elif tpu_type.startswith("v3"):
+            version = "v3"
+        elif tpu_type.startswith("v2"):
+            version = "v2"
         else:
-            continue  # Skip unknown versions
-        
-        # Parse L column: count
-        try:
-            count = int(float(l_value))  # Handle both int and float strings
-        except (ValueError, TypeError):
             continue
-        
-        # Initialize structure
-        if version not in counts:
-            counts[version] = {}
-        if zone not in counts[version]:
-            counts[version][zone] = 0
-        
-        counts[version][zone] += count
-    
+        counts.setdefault(version, {})
+        counts[version][zone] = counts[version].get(zone, 0) + chips
     return counts
-
-
-

@@ -53,6 +53,7 @@ def _atomic_write_json(path, payload):
             file.flush()
             os.fsync(file.fileno())
         os.replace(tmp_path, path)
+        os.chmod(path, 0o666)
     finally:
         if os.path.exists(tmp_path):
             try:
@@ -246,6 +247,25 @@ def read_and_lock_data():
         print(f"Error details: {e}")
         raise
     return data
+
+
+def read_data_if_unlocked():
+    """Non-blocking variant of read_and_lock_data.
+
+    Returns (data, True) if data lock acquired; caller MUST then call
+    write_and_unlock_data() or release_lock_data() to release.
+    Returns (None, False) if another caller currently holds the lock --
+    used by lck-side opportunistic writes (write_error_to_job, ack_MONITOR)
+    so a read-style command never blocks behind concurrent xibo writers."""
+    if not _try_acquire_lock("data"):
+        return None, False
+    try:
+        with open(DATA_PATH, "r") as file:
+            data = json.load(file)
+    except Exception:
+        _clear_lock("data")
+        raise
+    return data, True
 
 
 def read_and_lock_queue():

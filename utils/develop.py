@@ -149,7 +149,6 @@ def kill_jobs_tpu_new(tpu):
             if len(parts) >= 2:
                 pid, ppid = parts[0], parts[1]
                 pids.add(pid)
-                pids.add(ppid)
 
         if not pids:
             print(f"{INFO} No processes to kill.")

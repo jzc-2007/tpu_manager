@@ -104,7 +104,15 @@ if __name__ == "__main__":
         elif cmd == "del-user":
             users.del_user()
         elif cmd == "check-env":
-            operate.check_env(args[2])
+            remote_user_arg = next(
+                (
+                    a.split("=", 1)[1]
+                    for a in args
+                    if "=" in a and a.split("=", 1)[0].lstrip("-") in REMOTE_LINUX_USER_ARG_KEYS
+                ),
+                None,
+            )
+            operate.check_env(args[2], remote_user=remote_user_arg)
         elif cmd == "list-users" or cmd == "-lu":
             users.list_users()
         elif cmd == "init":
@@ -203,13 +211,54 @@ if __name__ == "__main__":
             zone_arg = next(
                 (a.split("=", 1)[1] for a in args if a.startswith("--zone=")), None
             )
-            operate.mount_disk(args[2], force="--force" in args, zone=zone_arg)
+            remote_user_arg = next(
+                (
+                    a.split("=", 1)[1]
+                    for a in args
+                    if "=" in a and a.split("=", 1)[0].lstrip("-") in REMOTE_LINUX_USER_ARG_KEYS
+                ),
+                None,
+            )
+            operate.mount_disk(
+                args[2],
+                force="--force" in args,
+                zone=zone_arg,
+                remote_user=remote_user_arg,
+            )
         elif cmd == "mount-disk-new":
             operate.sqa_new_env(args[2])
         elif cmd == "set-wandb":
-            operate.set_wandb(args[2])
+            zone_arg = next(
+                (a.split("=", 1)[1] for a in args if a.startswith("--zone=")), None
+            )
+            remote_user_arg = next(
+                (
+                    a.split("=", 1)[1]
+                    for a in args
+                    if "=" in a and a.split("=", 1)[0].lstrip("-") in REMOTE_LINUX_USER_ARG_KEYS
+                ),
+                None,
+            )
+            operate.set_wandb(args[2], zone=zone_arg, remote_user=remote_user_arg)
         elif cmd == "kill-remote":
-            operate.kill_jobs_tpu(args[2])
+            zone_arg = next(
+                (a.split("=", 1)[1] for a in args if a.startswith("--zone=")), None
+            )
+            remote_user_arg = next(
+                (
+                    a.split("=", 1)[1]
+                    for a in args
+                    if "=" in a and a.split("=", 1)[0].lstrip("-") in REMOTE_LINUX_USER_ARG_KEYS
+                ),
+                None,
+            )
+            all_remote_users = "--all-users" in args or "--all-remote-users" in args
+            operate.kill_jobs_tpu(
+                args[2],
+                zone=zone_arg,
+                remote_user=remote_user_arg,
+                all_remote_users=all_remote_users or remote_user_arg is None,
+            )
         elif cmd == "find":
             sheet.find_tpu_from_type(args[2:])
         elif cmd == "rel" or cmd == "release":
@@ -289,7 +338,10 @@ if __name__ == "__main__":
                 else gs_buckets.copy_checkpoint(args[2], args[3], all=True)
             )  # copy checkpoint
         elif cmd == "fang":
-            logger.fang_new_tpu(args[2], args[3])
+            fang_zone = next(
+                (a.split("=", 1)[1] for a in args if a.startswith("--zone=")), None
+            )
+            logger.fang_new_tpu(args[2], args[3], zone=fang_zone)
 
         else:
             ############### JOBS that require a user ###############

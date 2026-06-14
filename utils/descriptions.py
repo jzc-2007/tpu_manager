@@ -153,7 +153,7 @@ def explain(cmd):
 
         case "check-env":
             print("Check the python env (e.g. JAX visibility) of the TPU.")
-            print("Usage: tpu check-env <tpu_name>")
+            print("Usage: tpu check-env <tpu_name> [remote_user=<linux_user>]")
 
         case "apply":
             print("Apply a new TPU VM (non-preemptible).")
@@ -165,8 +165,9 @@ def explain(cmd):
 
         case "mount-disk":
             print("Mount NFS disk in the TPU.")
-            print("Usage: tpu mount-disk <tpu_name> [--force]")
+            print("Usage: tpu mount-disk <tpu_name> [--force] [remote_user=<linux_user>]")
             print("  --force  Re-mount even if the disk is already mounted")
+            print("  remote_user defaults to sqa for legacy compatibility")
 
         case "solve" | "solve-env":
             print("Solve TPU environment issues (auto check and mount).")
@@ -174,11 +175,12 @@ def explain(cmd):
 
         case "set-wandb":
             print("Setup wandb key on remote TPU.")
-            print("Usage: tpu set-wandb <tpu_name>")
+            print("Usage: tpu set-wandb <tpu_name> [remote_user=<linux_user>]")
 
         case "kill-jobs" | "-kj":
-            print("Kill all jobs on a TPU across all workers.")
-            print("Usage: tpu -kj <tpu_name>")
+            print("Kill jobs on a TPU across all workers.")
+            print("Usage: tpu -kj <tpu_name> [remote_user=<linux_user>] [--all-users]")
+            print("  default xibo-user kill is scoped to the caller's remote Linux user")
 
         # ========== Locks ==========
         case "lock-code" | "-lc":

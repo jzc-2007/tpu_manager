@@ -29,6 +29,7 @@ class User():
             "monitor_dir": True,
             "monitor_tpu": True,
             "monitor_verbose": False,
+            "monitor_zone": False,
             "show_length": 200,
             "time_zone": "us",
             "extra_settings": {}
@@ -71,6 +72,7 @@ def user_from_dict(config_dict):
             "monitor_dir": True,
             "monitor_tpu": True,
             "monitor_verbose": False,
+            "monitor_zone": False,
             "show_length": 200,
             "time_zone": "us",
             "extra_settings": {}

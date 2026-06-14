@@ -29,7 +29,7 @@ def get_zone_pre(tpu):
         return None, None, None
     return zone, tpu in data['pre_info']['preemptible'], tpu
 
-def get_zone_pre_spot(tpu):
+def get_zone_pre_spot(tpu, quiet=False):
     """
     Get the zone of the TPU, and check if it is preemptible/spot.
     If the input is alias, it will be replaced with the real TPU name.
@@ -43,7 +43,8 @@ def get_zone_pre_spot(tpu):
         all_tpus.extend(tpu_list)
     if tpu in tpu_aliases: tpu = tpu_aliases[tpu]
     if tpu not in all_tpus:
-        print(f"{FAIL} get_zone_pre: TPU {tpu} not found")
+        if not quiet:
+            print(f"{FAIL} get_zone_pre: TPU {tpu} not found")
         return None, None, None, None
     zone = None
     for z, tpu_list in data['all_tpus'].items():
@@ -51,7 +52,8 @@ def get_zone_pre_spot(tpu):
             zone = z
             break
     if zone is None:
-        print(f"{FAIL} get_zone_pre: TPU {tpu} not found in any zone")
+        if not quiet:
+            print(f"{FAIL} get_zone_pre: TPU {tpu} not found in any zone")
         return None, None, None
     return zone, tpu in data['pre_info']['preemptible'], tpu in data['pre_info']['spot'], tpu
 

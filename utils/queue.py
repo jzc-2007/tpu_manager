@@ -8,6 +8,7 @@ from .sheet import read_sheet_info, write_sheet_info, get_tpu_info_sheet
 from .operate import kill_jobs_tpu, check_tpu_status
 from .users import user_from_dict
 from .logger import get_wandb_notes
+from .gs_buckets import mirror_latest_checkpoint_to_pretrained
 
 import os
 import shlex
@@ -645,7 +646,9 @@ def visualize_queue(limit: int = None, truncate_tpus: int = 6, return_rows: bool
 def finish_job(window):
     session_name, window_num = window.split(':')
     window_num = int(window_num)
+    tpu = None
     data = read_and_lock_data()
+    finished_job = None
     try:
         for user in data['users']:
             if data['users'][user]['tmux_name'] == session_name:
@@ -655,20 +658,32 @@ def finish_job(window):
                         job['extra_msgs']['finish_time_abs'] = get_abs_time_str()
                         job['extra_msgs']['finish_time_chn'] = get_chn_time_str()
                         job['extra_msgs']['finish_time_edt'] = get_edt_time_str()
+                        finished_job = job
                         break
                 break
         write_and_unlock_data(data)
         # set the status to be reserved for this TPU
-        tpu = job['tpu']
+        if finished_job is None:
+            raise ValueError(f"Job {window_num} in session {session_name} not found")
+        tpu = finished_job['tpu']
         if tpu is not None:
             tpu_info = get_tpu_info_sheet(tpu)
             tpu_info['running_status'] = 'free'
             write_sheet_info(tpu_info)
+        if finished_job.get('log_dir') and finished_job.get('tpu'):
+            zone, _, _, _ = get_zone_pre_spot(finished_job['tpu'])
+            if zone is not None:
+                try:
+                    mirror_latest_checkpoint_to_pretrained(finished_job['log_dir'], zone)
+                except Exception as e:
+                    print(f"{WARNING} finish_job: failed to mirror checkpoint to pretrained-ckpts: {e}")
         print(f"{INFO} finish_job: Finished job {window_num} in session {session_name}")
     except:
         release_lock_data()
+        return False
 
-    ack_queue({'tpu': tpu, 'status': 'finished', 'window':{'session': session_name, 'window': window_num}})
+    if tpu is not None:
+        ack_queue({'tpu': tpu, 'status': 'finished', 'window':{'session': session_name, 'window': window_num}})
 
 def fail_job(window):
     session_name, window_num = window.split(':')

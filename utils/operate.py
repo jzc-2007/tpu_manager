@@ -1,9 +1,100 @@
-import os, random, time, fcntl
+import os, random, time, fcntl, re
 import subprocess, shlex
 from .data_io import read_and_lock_data, write_and_unlock_data, release_lock_data, read_data
 from .helpers import *
 from .constants import *
 from .sheet import read_sheet_info, write_sheet_info, get_tpu_info_sheet, get_tpu_usage_by_zone_and_type, write_tpu_usage_to_sheet
+
+REMOTE_LINUX_USERNAME_RE = re.compile(r"^[a-z_][a-z0-9_-]*[$]?$")
+
+def normalize_remote_linux_user(remote_user=None):
+    """Return a safe TPU VM Linux user name, defaulting old jobs to sqa."""
+    user = str(remote_user or DEFAULT_REMOTE_LINUX_USER).strip()
+    if not REMOTE_LINUX_USERNAME_RE.fullmatch(user):
+        raise ValueError(f"Unsafe remote Linux user: {remote_user!r}")
+    return user
+
+def remote_ssh_target(tpu, remote_user=None):
+    """Return the gcloud TPU SSH target, optionally as `<linux_user>@<tpu>`."""
+    if remote_user is None:
+        return tpu
+    return f"{normalize_remote_linux_user(remote_user)}@{tpu}"
+
+def _gcloud_tpu_ssh_cmd(tpu, zone, remote_cmd, remote_user=None, worker="all"):
+    target = shlex.quote(remote_ssh_target(tpu, remote_user))
+    return (
+        f"gcloud compute tpus tpu-vm ssh {target} --zone {shlex.quote(zone)} "
+        f"--project {shlex.quote(PROJECT)} --worker={shlex.quote(str(worker))} "
+        f"--command {shlex.quote(remote_cmd)}"
+    )
+
+def ensure_remote_linux_user(tpu, zone, remote_user=None, quiet=False):
+    """Ensure a TPU VM Linux user exists and can sudo on every worker.
+
+    gcloud can SSH as `user@tpu`, but the user must exist and the launch
+    scripts need passwordless sudo for staging and environment setup.
+    """
+    remote_user = normalize_remote_linux_user(remote_user)
+    setup_cmd = f"""
+set -e
+u={shlex.quote(remote_user)}
+if ! id -u "$u" >/dev/null 2>&1; then
+  sudo useradd -m -s /bin/bash "$u"
+fi
+sudo usermod -aG sudo "$u" || true
+echo "$u ALL=(ALL) NOPASSWD:ALL" | sudo tee "/etc/sudoers.d/xibo-$u" >/dev/null
+sudo chmod 440 "/etc/sudoers.d/xibo-$u"
+sudo mkdir -p "/home/$u/.ssh"
+if [ -f "$HOME/.ssh/authorized_keys" ]; then
+  sudo cp "$HOME/.ssh/authorized_keys" "/home/$u/.ssh/authorized_keys" || true
+fi
+sudo chmod 700 "/home/$u/.ssh"
+sudo chmod 600 "/home/$u/.ssh/authorized_keys" 2>/dev/null || true
+# Do not recursively chown the whole home directory here: mount-disk may be
+# installing/removing Python packages concurrently, and chown can fail on files
+# that disappear mid-walk. We only need the login home and SSH files to be owned
+# by the remote Linux user before verification.
+sudo chown "$u:$u" "/home/$u" || true
+sudo chown -R "$u:$u" "/home/$u/.ssh" || true
+sudo chmod 755 "/home/$u"
+""".strip()
+    cmd = _gcloud_tpu_ssh_cmd(tpu, zone, setup_cmd)
+    if not quiet:
+        print(f"{INFO} ensure_remote_linux_user: ensuring {remote_user} on {tpu}")
+    try:
+        subprocess.run(
+            cmd,
+            shell=True,
+            timeout=120,
+            check=True,
+            stdout=subprocess.DEVNULL if quiet else None,
+            stderr=subprocess.DEVNULL if quiet else None,
+        )
+    except subprocess.TimeoutExpired:
+        print(f"{FAIL} ensure_remote_linux_user: timed out for {remote_user}@{tpu}")
+        return 'timeout'
+    except subprocess.CalledProcessError as e:
+        print(f"{FAIL} ensure_remote_linux_user: failed for {remote_user}@{tpu}: {e}")
+        return 'failed'
+
+    verify_cmd = "test \"$(whoami)\" = " + shlex.quote(remote_user) + " && sudo -n true"
+    cmd = _gcloud_tpu_ssh_cmd(tpu, zone, verify_cmd, remote_user=remote_user)
+    try:
+        subprocess.run(
+            cmd,
+            shell=True,
+            timeout=60,
+            check=True,
+            stdout=subprocess.DEVNULL if quiet else None,
+            stderr=subprocess.DEVNULL if quiet else None,
+        )
+    except subprocess.TimeoutExpired:
+        print(f"{FAIL} ensure_remote_linux_user: verify timed out for {remote_user}@{tpu}")
+        return 'timeout'
+    except subprocess.CalledProcessError as e:
+        print(f"{FAIL} ensure_remote_linux_user: verify failed for {remote_user}@{tpu}: {e}")
+        return 'failed'
+    return 'success'
 
 def update_tpu_status_for_spreadsheet():
 
@@ -39,16 +130,54 @@ def update_tpu_status_for_spreadsheet():
             write_sheet_info(info)
     
  
-def kill_jobs_tpu(tpu, username = None, ignore_window = None):
-    zone, pre, spot, tpu = get_zone_pre_spot(tpu)
+def _remote_users_for_jobs_on_tpu(data, tpu, username=None):
+    users_on_tpu = set()
+    for user, user_data in data.get("users", {}).items():
+        if username is not None and username != user:
+            continue
+        for job in user_data.get("job_data", []):
+            if job.get("tpu") != tpu:
+                continue
+            extra = job.get("extra_msgs") or {}
+            users_on_tpu.add(normalize_remote_linux_user(extra.get(REMOTE_LINUX_USER_FIELD)))
+    return users_on_tpu
+
+def _format_remote_user_scope(target_remote_users):
+    if target_remote_users is None:
+        return "all remote Linux users"
+    return ", ".join(sorted(target_remote_users))
+
+def kill_jobs_tpu(
+    tpu,
+    username=None,
+    ignore_window=None,
+    zone=None,
+    remote_user=None,
+    all_remote_users=False,
+):
+    if zone is None:
+        zone, pre, spot, tpu = get_zone_pre_spot(tpu)
+    else:
+        tpu = tpu.strip()
     if zone is None:
         print(f"{FAIL} kill_jobs_tpu: Could not determine zone.")
         return
 
-    print(f"{INFO} kill_jobs_tpu: Killing jobs on TPU {tpu} zone {zone}...")
-
     try:
         data = read_data()
+        if all_remote_users or (remote_user is None and username is None):
+            target_remote_users = None
+        elif remote_user is not None:
+            target_remote_users = {normalize_remote_linux_user(remote_user)}
+        else:
+            target_remote_users = _remote_users_for_jobs_on_tpu(data, tpu, username=username)
+            if not target_remote_users and username is not None:
+                target_remote_users = {normalize_remote_linux_user(username)}
+
+        print(
+            f"{INFO} kill_jobs_tpu: Killing jobs on TPU {tpu} zone {zone}; "
+            f"remote scope={_format_remote_user_scope(target_remote_users)}"
+        )
         print(f"{INFO} kill_jobs_tpu: Sending C-c to all jobs on TPU {tpu}...")
         for user in data["users"]:
             if username is not None and username != user:
@@ -56,6 +185,11 @@ def kill_jobs_tpu(tpu, username = None, ignore_window = None):
             user_tmux_name = data["users"][user]["tmux_name"]
             for job in data["users"][user]["job_data"]:
                 if job["tpu"] == tpu:
+                    job_remote_user = normalize_remote_linux_user(
+                        (job.get("extra_msgs") or {}).get(REMOTE_LINUX_USER_FIELD)
+                    )
+                    if target_remote_users is not None and job_remote_user not in target_remote_users:
+                        continue
                     window = job["windows_id"]
                     if ignore_window is not None and window == ignore_window['window'] and ignore_window['session'] == user_tmux_name:
                         print(f"{INFO} kill_jobs_tpu: Ignoring window {window} for user {user}")
@@ -67,7 +201,7 @@ def kill_jobs_tpu(tpu, username = None, ignore_window = None):
 
         list_cmd = (
             f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --project {PROJECT} --worker=all "
-            "--command \"ps -eo pid,ppid,stat,cmd | grep 'python' | grep -v 'grep' || true\""
+            "--command \"ps -eo user=,pid=,ppid=,stat=,cmd= | grep '[p]ython' || true\""
         )
         result = subprocess.run(list_cmd, shell=True, timeout=60, check=False,
                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
@@ -80,48 +214,69 @@ def kill_jobs_tpu(tpu, username = None, ignore_window = None):
         pids = set()
 
         for line in lines:
-            parts = line.strip().split(None, 3)
-            if len(parts) >= 2:
-                pid, ppid = parts[0], parts[1]
+            parts = line.strip().split(None, 4)
+            if len(parts) >= 3:
+                proc_user, pid, ppid = parts[0], parts[1], parts[2]
+                if target_remote_users is not None and proc_user not in target_remote_users:
+                    continue
                 pids.add(pid)
-                pids.add(ppid)
 
         if not pids:
             print(f"{INFO} No processes to kill.")
             # return 'success'
 
-        pid_list = " ".join(pids)
-        print(f"{INFO} Killing PIDs: {pid_list}")
-        
-        kill_cmd = (
-            f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --project {PROJECT} --worker=all "
-            f"--command \"sudo kill -9 {pid_list} || true\""
-        )
-        subprocess.run(kill_cmd, shell=True, timeout=60, check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if pids:
+            pid_list = " ".join(sorted(pids, key=str))
+            print(f"{INFO} Killing PIDs: {pid_list}")
+            kill_cmd = (
+                f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --project {PROJECT} --worker=all "
+                f"--command \"sudo kill -9 {pid_list} || true\""
+            )
+            subprocess.run(kill_cmd, shell=True, timeout=60, check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
         # 根据 TPU 版本选择不同的设备路径
-        if 'v5' in tpu or 'v6' in tpu:
-            print(f"{INFO} Cleaning /dev/vfio/* occupation...")
-            kill_accel_cmd = (
-                f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --project {PROJECT} --worker=all "
-                "--command \"pids=$(sudo lsof -w /dev/vfio/vfio 2>/dev/null | grep 'python' | grep -v 'grep' | awk '{print $2}'); "
-                "if [ ! -z \\\"$pids\\\" ]; then sudo kill -9 $pids; fi\""
-            )
-        else:
-            print(f"{INFO} Cleaning /dev/accel0 occupation...")
-            kill_accel_cmd = (
-                f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --project {PROJECT} --worker=all "
-                "--command \"pids=$(sudo lsof -w /dev/accel0 | grep 'python' | grep -v 'grep' | awk '{print $2}'); "
-                "if [ ! -z \\\"$pids\\\" ]; then sudo kill -9 $pids; fi\""
-            )
-        subprocess.run(kill_accel_cmd, shell=True, timeout=60, check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-
-        print(f"{INFO} Cleaning /tmp/tpu_logs occupation...")
-        kill_accel_cmd = (
+        print(f"{INFO} Checking TPU device holders...")
+        lsof_cmd = (
             f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --project {PROJECT} --worker=all "
-            "--command \"sudo rm -rf /tmp/tpu_logs ; sudo rm /tmp/libtpu_lockfile; sudo rm -rf /tmp/* \""
+            "--command \"sudo lsof -w /dev/vfio/vfio /dev/vfio/* /dev/accel0 2>/dev/null "
+            "| awk 'NR>1 && $1 ~ /python/ {print $3, $2}' || true\""
         )
-        subprocess.run(kill_accel_cmd, shell=True, timeout=60, check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        result = subprocess.run(
+            lsof_cmd,
+            shell=True,
+            timeout=60,
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        device_pids = set()
+        for line in result.stdout.strip().splitlines():
+            parts = line.strip().split()
+            if len(parts) < 2:
+                continue
+            proc_user, pid = parts[0], parts[1]
+            if target_remote_users is not None and proc_user not in target_remote_users:
+                continue
+            device_pids.add(pid)
+        if device_pids:
+            pid_list = " ".join(sorted(device_pids, key=str))
+            print(f"{INFO} Killing TPU device holder PIDs: {pid_list}")
+            kill_accel_cmd = (
+                f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --project {PROJECT} --worker=all "
+                f"--command \"sudo kill -9 {pid_list} || true\""
+            )
+            subprocess.run(kill_accel_cmd, shell=True, timeout=60, check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+        if target_remote_users is None:
+            print(f"{INFO} Cleaning global /tmp TPU state after all-user kill...")
+            cleanup_cmd = (
+                f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --project {PROJECT} --worker=all "
+                "--command \"sudo rm -rf /tmp/tpu_logs ; sudo rm -f /tmp/libtpu_lockfile; sudo rm -rf /tmp/* \""
+            )
+            subprocess.run(cleanup_cmd, shell=True, timeout=60, check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        else:
+            print(f"{INFO} Skipping global /tmp cleanup for scoped kill.")
 
     except subprocess.TimeoutExpired:
         print(f"{FAIL} kill_jobs_tpu: Timeout.")
@@ -172,7 +327,7 @@ def kill_jobs_tpu_old(tpu):
     print(f"{GOOD} kill_jobs_tpu: Killing jobs done")
     return 'success'
 
-def set_wandb(tpu, zone=None):
+def set_wandb(tpu, zone=None, remote_user=None):
     '''
     if zone is not Zone, we support set wandb for a tpu that has not been registered yet.
     '''
@@ -184,8 +339,9 @@ def set_wandb(tpu, zone=None):
     if zone is None:
         print(f"{FAIL} set_wandb: TPU {tpu} not found")
         return
+    remote_user = normalize_remote_linux_user(remote_user)
     
-    print(f"{INFO} Setting up remote wandb in TPU {tpu}...")
+    print(f"{INFO} Setting up remote wandb in TPU {tpu} as {remote_user}...")
 
     data = read_data()
     wandb_key = data["wandb_api_key"]
@@ -193,7 +349,7 @@ def set_wandb(tpu, zone=None):
 
     remote_cmd = f'{conda_path} -m wandb login {wandb_key}'
 
-    cmd = f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --project {PROJECT} --worker=all --command \"{remote_cmd}\" "
+    cmd = _gcloud_tpu_ssh_cmd(tpu, zone, remote_cmd, remote_user=remote_user)
 
     try:
         setup_process = subprocess.run(cmd, shell=True, timeout=300, check=True,
@@ -598,7 +754,7 @@ def describe_tpu(tpu, quiet = False):
             print(f"{FAIL} describe_tpu: Timeout expired. This may probably because the TPU is deleted.")
         return 'timeout'
 
-def check_env(tpu, quiet = False, recurse=0, zone=None):
+def check_env(tpu, quiet = False, recurse=0, zone=None, remote_user=None):
     """
     Check if the environment in the TPU is good.
     Return value: ['no tpu found', 'success', 'failed', 'file error', 'unknown', 'timeout', 'occupied']
@@ -609,10 +765,16 @@ def check_env(tpu, quiet = False, recurse=0, zone=None):
         if zone is None: return 'no tpu found'
     else:
         tpu = tpu.strip()
+    remote_user = normalize_remote_linux_user(remote_user)
     
     conda_path = '/kmh-nfs-ssd-us-mount/code/hanhong/miniforge3/bin/python' if 'us-central2' in zone else 'python'
 
-    cmd = f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --project {PROJECT} --worker=all --command \"{conda_path} -c 'import jax; print(jax.devices())'\""
+    cmd = _gcloud_tpu_ssh_cmd(
+        tpu,
+        zone,
+        f"{conda_path} -c 'import jax; print(jax.devices())'",
+        remote_user=remote_user,
+    )
     if not quiet:
         print(f"{INFO} check_env: Checking environment in TPU {tpu}... This may take a while...")
     try:
@@ -647,7 +809,12 @@ def check_env(tpu, quiet = False, recurse=0, zone=None):
         # return 'success'
     
     # check again whether the NFS is mounted properly
-    cmd = f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --project {PROJECT} --worker=all --command \"ls /kmh-nfs-ssd-us-mount/code/qiao/work; echo 'success'\""
+    cmd = _gcloud_tpu_ssh_cmd(
+        tpu,
+        zone,
+        "ls /kmh-nfs-ssd-us-mount/code/qiao/work; echo 'success'",
+        remote_user=remote_user,
+    )
     if not quiet:
         print(f"{INFO} check_env: Checking environment in TPU {tpu}... This may take a while...")
     try:
@@ -671,8 +838,8 @@ def check_env(tpu, quiet = False, recurse=0, zone=None):
             print(f"{FAIL} check_remote_env: Can't find directory.")
         if recurse == 0:
             print(f"{INFO} check_env: Trying to mount disk and check again...")
-            mount_disk(tpu, quiet=quiet, zone=zone)
-            return check_env(tpu, quiet=quiet, recurse=recurse+1, zone=zone)
+            mount_disk(tpu, quiet=quiet, zone=zone, remote_user=remote_user)
+            return check_env(tpu, quiet=quiet, recurse=recurse+1, zone=zone, remote_user=remote_user)
         else:
             return 'file error'
     
@@ -703,18 +870,21 @@ def sqa_new_env(tpu):
     print(f"{GOOD} sqa_new_env: running command 新 done")
     return 'success'
 
-def _write_disk_mounted(tpu, zone):
-    cmd = f'gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --project {PROJECT} --worker=all --command "touch /home/sqa/.disk_mounted"'
+def _write_disk_mounted(tpu, zone, remote_user=None):
+    remote_user = normalize_remote_linux_user(remote_user)
+    marker = f"/home/{remote_user}/.disk_mounted"
+    cmd = _gcloud_tpu_ssh_cmd(tpu, zone, f"touch {shlex.quote(marker)}", remote_user=remote_user)
     try:
         subprocess.run(cmd, shell=True, timeout=60, check=True)
-        print(f"{GOOD} _write_disk_mounted: wrote /home/sqa/.disk_mounted on {tpu}")
+        print(f"{GOOD} _write_disk_mounted: wrote {marker} on {tpu}")
     except Exception as e:
         print(f"{FAIL} _write_disk_mounted: failed to write .disk_mounted: {e}")
 
-def mount_disk(tpu, quiet=False, force=False, zone=None):
+def mount_disk(tpu, quiet=False, force=False, zone=None, remote_user=None):
     """
-    Mount the disk and setup remote wandb.
-    If force=False, skip mounting when /home/sqa/.disk_mounted already exists on the TPU.
+    Mount the shared NFS disk and set up the per-Linux-user Python env.
+    If force=False, skip per-user setup only when /home/<remote_user>/.disk_mounted
+    exists and the shared NFS mount is currently present.
     If zone is provided directly, skip the data.json lookup so the TPU does not need to be
     registered first.
     A per-TPU local lock prevents concurrent mount_disk calls for the same TPU from racing.
@@ -725,6 +895,7 @@ def mount_disk(tpu, quiet=False, force=False, zone=None):
         tpu = tpu.strip()
 
     if zone is None: return
+    remote_user = normalize_remote_linux_user(remote_user)
 
     lock_path = f'/tmp/xibo_mount_{tpu}.lock'
     lock_file = open(lock_path, 'w')
@@ -736,22 +907,28 @@ def mount_disk(tpu, quiet=False, force=False, zone=None):
         return 'already mounting'
 
     try:
-        return _mount_disk_locked(tpu, quiet=quiet, force=force, zone=zone)
+        return _mount_disk_locked(tpu, quiet=quiet, force=force, zone=zone, remote_user=remote_user)
     finally:
         fcntl.flock(lock_file, fcntl.LOCK_UN)
         lock_file.close()
 
-def _mount_disk_locked(tpu, quiet=False, force=False, zone=None):
+def _mount_disk_locked(tpu, quiet=False, force=False, zone=None, remote_user=None):
+    remote_user = normalize_remote_linux_user(remote_user)
+    ensure_state = ensure_remote_linux_user(tpu, zone, remote_user=remote_user, quiet=quiet)
+    if ensure_state != 'success':
+        return f'ensure remote user failed: {ensure_state}'
 
-    _guard_open  = '' if force else 'if [ ! -f /home/sqa/.disk_mounted ]; then'
+    # NFS is global to the VM; Python packages and markers are per Linux user.
+    _global_guard_open  = '' if force else 'if ! mountpoint -q /kmh-nfs-ssd-us-mount; then'
+    _env_guard_open = '' if force else f'if [ ! -f /home/{remote_user}/.disk_mounted ] || ! mountpoint -q /kmh-nfs-ssd-us-mount; then'
     _guard_close = '' if force else 'fi'
 
-    print(f"{INFO} Mounting disk in TPU {tpu}...")
+    print(f"{INFO} Mounting disk in TPU {tpu} for remote Linux user {remote_user}...")
 
     cmd1 = f'''
     gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --project {PROJECT} --worker=all \
       --command "
-        {_guard_open}
+        {_global_guard_open}
         systemctl status unattended-upgrades.service || true
         ps -ef | grep unattended-upgrade | grep -v grep || true
         systemctl stop unattended-upgrades || true
@@ -766,17 +943,13 @@ def _mount_disk_locked(tpu, quiet=False, force=False, zone=None):
         ps -ef | grep -i unattended | grep -v 'grep' | awk '{{print \\$2}}' | xargs -r sudo kill -9
         sleep 2
 
-        sudo rm -rf /home/zak 2>/dev/null || true
-        sudo rm -rf /home/dmy 2>/dev/null || true
-        sudo rm -rf /mnt/zhhm 2>/dev/null || true
-        sudo rm -rf /home/linluqiu 2>/dev/null || true
         {_guard_close}
       "
     '''
 
     cmd2 = f"""
     gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --project {PROJECT} --worker=all --command "
-    {_guard_open}
+    {_global_guard_open}
 
     sudo mkdir -p /kmh-nfs-ssd-us-mount
     sudo mount -o vers=3 10.97.81.98:/kmh_nfs_ssd_us /kmh-nfs-ssd-us-mount
@@ -799,23 +972,29 @@ def _mount_disk_locked(tpu, quiet=False, force=False, zone=None):
         else: raise ValueError(f"{FAIL} mount_disk: Unknown zone {zone}")
 
         v = 'v6' if 'v6' in tpu else 'v5'
+        wheel_object = (
+            f"{bucket}/hanhong/env_wheels/20260614_wandb0272_standard/"
+            "v5_wheels_xin_20260614_wandb0272.tar.gz"
+        )
 
         cmd2 += f'''
-    gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} --project {PROJECT} \
+    gcloud compute tpus tpu-vm ssh {remote_user}@{tpu} --zone {zone} --project {PROJECT} \
     --worker=all --command "
-    {_guard_open}
+    {_env_guard_open}
     sudo rm -rf /home/\$(whoami)/.local
     echo 'Current dir: '
     pwd
     cd
     gcloud auth activate-service-account --key-file=/kmh-nfs-ssd-us-mount/code/qiao/{zone[:-2]}.json
-    gsutil -m cp -r {bucket}/hanhong/v5_wheels_xin.tar.gz ./wheels.tar.gz
+    # This tar already includes the post-wheel packages that used to be
+    # installed below (datasets/transformers/wandb/promise/torchdata/etc.).
+    # Keep it as a standard GCS object; TPU gsutil may reject composite objects.
+    gsutil -m cp -r {wheel_object} ./wheels.tar.gz
     tar -xvf wheels.tar.gz
     rm -rf .local || true
     pip install --no-index --find-links=wheels wheels/*.whl --no-deps --force-reinstall
     rm -rf wheels wheels.tar.gz
-    pip install numpy==1.26.4
-    pip install datasets==4.4.2
+    touch /home/\$(whoami)/.disk_mounted
     echo 补 > ~/sqa冲
     {_guard_close}
     "
@@ -844,56 +1023,25 @@ def _mount_disk_locked(tpu, quiet=False, force=False, zone=None):
         print(f"stdout: {e.stdout}")
         return 'mounting failed'
 
-#     v5_cmd = f"""
-#     gcloud compute tpus tpu-vm ssh {tpu} \
-#   --zone {zone} \
-#   --worker=all \
-#   --command='
-#     rm -rf ~/.local && \
-#     export PIP_DEFAULT_TIMEOUT=120 && \
-#     pip install setuptools==65.5.1 && \
-#     pip install jax[tpu]==0.4.37 jaxlib -f https://storage.googleapis.com/jax-releases/libtpu_releases.html && \
-#     pip install flax>=0.8 && \
-#     pip install pillow clu tensorflow==2.15.0 "keras<3" "torch<=2.4" torchvision tensorflow_datasets matplotlib==3.9.2 && \
-#     pip install orbax-checkpoint==0.4.4 ml-dtypes==0.5.0 tensorstore==0.1.67 && \
-#     pip install diffusers dm-tree cached_property ml-collections transformers==4.38.2 lpips_j && \
-#     pip install wandb
-#     pip install gcsfs
-#   '
-#   """
-#     if 'v5' in tpu:
-#         print(f"{INFO} Running birdy v5 command for {tpu}...")
-#         try:
-#             subprocess.run(v5_cmd, shell=True, timeout=600, check=True,
-#                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-#         except subprocess.TimeoutExpired:
-#             print(f"{FAIL} mount_disk: v5 mounting timed out")
-#             return 'v5 mounting timeout'
-#         except subprocess.CalledProcessError as e:
-#             print(f"{FAIL} mount_disk: v5 mounting failed: {e}")
-#             print(f"stderr: {e.stderr}")
-#             print(f"stdout: {e.stdout}")
-#             return 'v5 mounting failed'
-    
     print(f"{INFO} Mounting disk in TPU {tpu} done")
     print(f"{INFO} Checking environment in TPU {tpu}...")
 
     print(f"{INFO} Setting wandb again to make sure it works...")
-    res = set_wandb(tpu, zone=zone)
+    res = set_wandb(tpu, zone=zone, remote_user=remote_user)
     if res != 'success':
         print(f"{FAIL} mount_disk: setting wandb failed")
         return 'wandb failed'
 
     if 'v5p' in tpu:
         print(f'skip checking env for v5p')
-        _write_disk_mounted(tpu, zone)
+        _write_disk_mounted(tpu, zone, remote_user=remote_user)
         return 'success'
 
-    state = check_env(tpu, zone=zone)
+    state = check_env(tpu, zone=zone, remote_user=remote_user)
 
     if state == 'success':
         print(f"{GOOD} Environment in TPU {tpu} is good, done mounting disk")
-        _write_disk_mounted(tpu, zone)
+        _write_disk_mounted(tpu, zone, remote_user=remote_user)
         return 'success'
     else:
         print(f"{FAIL} Environment in TPU {tpu} is not good")
@@ -926,10 +1074,6 @@ def mount_disk_v5(tpu, quiet = False):
         ps -ef | grep -i unattended | grep -v 'grep' | awk '{{print \\$2}}' | xargs -r sudo kill -9
         sleep 2
 
-        sudo rm -rf /home/zak 2>/dev/null || true
-        sudo rm -rf /home/dmy 2>/dev/null || true
-        sudo rm -rf /mnt/zhhm 2>/dev/null || true
-        sudo rm -rf /home/linluqiu 2>/dev/null || true
       "
     '''
 
@@ -950,7 +1094,7 @@ def mount_disk_v5(tpu, quiet = False):
     sudo chmod go+rw /kmh-nfs-ssd-us-mount
     ls /kmh-nfs-ssd-us-mount
 
-    touch /home/sqa/.disk_mounted
+    touch /home/\$(whoami)/.disk_mounted
     "
 
     """
@@ -998,6 +1142,7 @@ def mount_disk_v5(tpu, quiet = False):
     rm -rf .local || true
     pip install --no-index --find-links=wheels wheels/*.whl --no-deps --force-reinstall
     rm -rf wheels wheels.tar.gz
+    pip install --no-deps torchdata==0.8.0
     "
     '''
 

@@ -96,14 +96,16 @@ def restart_worker(ka, result_queue):
 def kill_resume(job):
     ka = job["tpu"]
     # print(f"{INFO} kill_resume: Killing jobs  TPU {ka}...")
-    operate.kill_jobs_tpu(ka)
+    remote_user = (job.get("extra_msgs") or {}).get(REMOTE_LINUX_USER_FIELD) or DEFAULT_REMOTE_LINUX_USER
+    operate.kill_jobs_tpu(ka, username=job["user"], remote_user=remote_user)
     print(f"{INFO} resume job...")
     jobs.resume_rerun_job(job, load_ckpt=True)
 
 def kill_rerun(job):
     ka = job["tpu"]
     # print(f"{INFO} kill_rerun: Killing jobs  TPU {ka}...")
-    operate.kill_jobs_tpu(ka)
+    remote_user = (job.get("extra_msgs") or {}).get(REMOTE_LINUX_USER_FIELD) or DEFAULT_REMOTE_LINUX_USER
+    operate.kill_jobs_tpu(ka, username=job["user"], remote_user=remote_user)
     print(f"{INFO} rerun job...")
     jobs.resume_rerun_job(job, load_ckpt=False)
 

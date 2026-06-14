@@ -1,13 +1,13 @@
-import os, re, time, json, copy, subprocess
+import os, re, time, json, copy, subprocess, shlex, yaml
 from .helpers import *
 from .constants import *
 from . import users
-from .data_io import read_and_lock_data, write_and_unlock_data, release_lock_data, read_data, read_and_lock_legacy, write_legacy, write_and_unlock_legacy, release_lock_legacy
-from .operate import check_tpu_status, apply_and_set_env, kill_jobs_tpu, restart, check_tpu_running, mount_disk
+from .data_io import read_and_lock_data, write_and_unlock_data, release_lock_data, read_data_if_unlocked, read_data, read_and_lock_legacy, write_legacy, write_and_unlock_legacy, release_lock_legacy
+from .operate import check_tpu_status, apply_and_set_env, kill_jobs_tpu, restart, check_tpu_running, mount_disk, normalize_remote_linux_user
 from .sheet import get_tpu_info_sheet, write_sheet_info, read_tpu_info_from_type, find_tpu_from_type
 from .logger import get_wandb_notes, register_tpu_and_write_spreadsheet, register_tpu_quick, check_reserved_user, zhan
 from .autenticate import autenticate
-from .gs_buckets import check_gs_logdir_exists
+from .gs_buckets import check_gs_logdir_exists, ensure_pretrained_checkpoint_for_launch
 
 # --- ANSI helpers ---
 ANSI_RE = re.compile(r'\x1B\[[0-?]*[ -/]*[@-~]')
@@ -388,12 +388,114 @@ def _resolve_tpu_for_run_or_resume(tpu, operation='run'):
     print(f"{FAIL} {operation}: TPU {tpu} not found (also tried {prefixed_tpu})")
     return None
 
+def _strip_resume_config_overrides(config_args):
+    """Remove stale resume-only config flags inherited from a parent job."""
+    if not config_args:
+        return ""
+    return re.sub(
+        r"\s*--config\.(?:load_from|wandb_resume_id|stage)=(?:'[^']*'|\"[^\"]*\"|\S+)",
+        "",
+        config_args,
+    ).strip()
+
+def _parse_config_overrides(config_args):
+    overrides = {}
+    if not config_args:
+        return overrides
+    for token in shlex.split(config_args):
+        if token.startswith("--config."):
+            key_value = token[len("--config."):]
+            if "=" in key_value:
+                key, value = key_value.split("=", 1)
+                overrides[key] = value
+        elif token.startswith("--config="):
+            overrides["__config__"] = token.split("=", 1)[1]
+    return overrides
+
+def _as_bool(value):
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    return str(value).strip().lower() in {"1", "true", "yes", "y"}
+
+def _load_yaml_if_exists(path):
+    if not os.path.exists(path):
+        return {}
+    with open(path, "r") as f:
+        return yaml.safe_load(f) or {}
+
+def _maybe_prepare_pretrained_checkpoint_for_launch(dir_path, config_args, zone):
+    remote_config = _load_yaml_if_exists(os.path.join(dir_path, "configs", "remote_run_config.yml"))
+    overrides = _parse_config_overrides(config_args)
+    config_mode = str(overrides.get("__config__", ""))
+    finetune = _as_bool(overrides.get("finetune", remote_config.get("finetune", False)))
+    if "finetune" in config_mode:
+        finetune = True
+    if not finetune:
+        return
+
+    config = remote_config
+    finetune_config_path = os.path.join(dir_path, "configs", "finetune_config.yml")
+    if os.path.exists(finetune_config_path):
+        config = _load_yaml_if_exists(finetune_config_path)
+
+    load_from = overrides.get("load_from", config.get("load_from", ""))
+    load_from_pretrained = overrides.get(
+        "load_from_pretrained",
+        config.get("load_from_pretrained", ""),
+    )
+    if load_from:
+        print(f"{INFO} launch pretrained check: config.load_from is set; skip load_from_pretrained copy")
+        return
+    if not load_from_pretrained:
+        print(f"{INFO} launch pretrained check: finetune config has no load_from_pretrained; skip")
+        return
+    print(
+        f"{INFO} launch pretrained check: ensuring durable checkpoint for "
+        f"load_from_pretrained={load_from_pretrained} in zone={zone}"
+    )
+    ensure_pretrained_checkpoint_for_launch(load_from_pretrained, zone)
+
+def _remote_linux_user_from_job(job, fallback=DEFAULT_REMOTE_LINUX_USER, override=None):
+    """Resolve the Linux user used on TPU VMs for an existing job.
+
+    Missing metadata means a legacy job; those must keep using sqa for
+    compatibility with already-running/resumable chains.
+    """
+    if override:
+        return normalize_remote_linux_user(override)
+    extra = job.get("extra_msgs") or {}
+    return normalize_remote_linux_user(extra.get(REMOTE_LINUX_USER_FIELD) or fallback)
+
+def _remote_linux_user_for_new_job(user_obj, override=None):
+    """New jobs default to the xibo user name as their TPU VM Linux user."""
+    return normalize_remote_linux_user(override or user_obj.name or DEFAULT_REMOTE_LINUX_USER)
+
+def _parse_remote_linux_user_override(args):
+    for arg in args:
+        if "=" not in arg:
+            continue
+        key, value = arg.split("=", 1)
+        if key.lstrip("-") in REMOTE_LINUX_USER_ARG_KEYS:
+            return normalize_remote_linux_user(value)
+    return None
+
+def _staging_cmd(remote_linux_user, body):
+    remote_linux_user = normalize_remote_linux_user(remote_linux_user)
+    return f"export TPU_REMOTE_USER={remote_linux_user}; {body}"
+
+def _send_tmux_command(session_name, window_id, command):
+    target = shlex.quote(f"{session_name}:{window_id}")
+    os.system(f"tmux send-keys -t {target} {shlex.quote(command)} Enter")
+
 def parse_args_resume_rerun(args):
     """
     Parse the arguments for resume and rerun commands.
     """
     windows_id = None
     new_tpu = None
+    remote_linux_user = _parse_remote_linux_user_override(args)
     for arg in args:
         if arg.startswith('tpu=') or arg.startswith('ka='):
             new_tpu = arg.split('=', 1)[1]
@@ -401,15 +503,15 @@ def parse_args_resume_rerun(args):
             windows_id = arg.split('=', 1)[1]
     if windows_id is None:
         print(f"{FAIL} No window id provided")
-        return None, None
+        return None, None, None
     if not is_integer(windows_id):
         print(f"{FAIL} Window id {windows_id} is not an integer")
-        return None, None
-    return windows_id, new_tpu
+        return None, None, None
+    return windows_id, new_tpu, remote_linux_user
 
 def resume(user_obj, args):
     # Check if the window is in the job data, if it is, then resume the job
-    windows_id, new_tpu = parse_args_resume_rerun(args)
+    windows_id, new_tpu, remote_linux_user = parse_args_resume_rerun(args)
 
     data = read_data()
     for user in data['users']:
@@ -418,7 +520,7 @@ def resume(user_obj, args):
                 if str(job['windows_id']) == str(windows_id):
                     print(f"{INFO} Resuming job {windows_id} for user {user}")
                     # check the status of the job
-                    resume_rerun_job(job, new_tpu, load_ckpt=True)
+                    resume_rerun_job(job, new_tpu, load_ckpt=True, remote_linux_user_override=remote_linux_user)
                     return
     else:
         print(f"{FAIL} resume: Job {windows_id} not found")
@@ -457,7 +559,7 @@ def ignore_error(user_obj, args):
 
 def rerun(user_obj, args):
     # Check if the window is in the job data, if it is, then rerun the job
-    windows_id, new_tpu = parse_args_resume_rerun(args)
+    windows_id, new_tpu, remote_linux_user = parse_args_resume_rerun(args)
 
     data = read_data()
     for user in data['users']:
@@ -466,13 +568,13 @@ def rerun(user_obj, args):
                 if str(job['windows_id']) == str(windows_id):
                     print(f"{INFO} Rerunning job {windows_id} for user {user}")
                     # check the status of the job
-                    resume_rerun_job(job, new_tpu, load_ckpt=False)
+                    resume_rerun_job(job, new_tpu, load_ckpt=False, remote_linux_user_override=remote_linux_user)
                     return
     else:
         print(f"{FAIL} rerun: Job {windows_id} not found")
         return
 
-def resume_rerun_job(job, new_tpu = None, load_ckpt = True):
+def resume_rerun_job(job, new_tpu = None, load_ckpt = True, remote_linux_user_override=None):
     """
     Resume/Rerun a job in the tmux session.
     If load_ckpt is True, it will resume the job from the checkpoint.
@@ -492,12 +594,13 @@ def resume_rerun_job(job, new_tpu = None, load_ckpt = True):
             return
     tpu = job["tpu"] if new_tpu is None else new_tpu
     zone, _, _, _ = get_zone_pre_spot(tpu)
+    remote_linux_user = _remote_linux_user_from_job(job, override=remote_linux_user_override)
+    print(f"{INFO} {operation}_job: Using remote Linux user {remote_linux_user}")
 
     # first zhan the tpu
     ret = zhan(job["user"], tpu)
     if ret != 'success':
         print(f"{FAIL} {operation}_job: Failed to zhan tpu {tpu}, error: {ret}")
-        release_lock_data()
         return
 
     # make sure that the tpu is ready
@@ -510,7 +613,6 @@ def resume_rerun_job(job, new_tpu = None, load_ckpt = True):
                 print(f"{GOOD} {operation}_job: Reapply TPU {tpu} done")
             else:
                 print(f"{FAIL} {operation}_job: Reapply TPU {tpu} failed, please contact the admin")
-                release_lock_data()
                 return
         elif tpu_status == 'failed':
             print(f"{FAIL} {operation}_job: Failed to query status")
@@ -518,8 +620,20 @@ def resume_rerun_job(job, new_tpu = None, load_ckpt = True):
             
         tpu_status = check_tpu_status(tpu)
         assert tpu_status == 'ready', f"TPU {tpu} is not ready, status: {tpu_status}"
-        
+
+    kill_state = kill_jobs_tpu(tpu, username=job["user"], remote_user=remote_linux_user)
+    if kill_state != 'success':
+        print(f"{FAIL} {operation}_job: failed to kill old remote processes: {kill_state}")
+        return
+
+    mount_state = mount_disk(tpu, zone=zone, remote_user=remote_linux_user)
+    if mount_state != 'success':
+        print(f"{FAIL} {operation}_job: failed to mount disk for {remote_linux_user}: {mount_state}")
+        return
+
+    data_locked = False
     data = read_and_lock_data()
+    data_locked = True
     try:
         user = data['users'][job["user"]]
         user_obj = users.user_from_dict(user)
@@ -529,9 +643,11 @@ def resume_rerun_job(job, new_tpu = None, load_ckpt = True):
         # if new_stage > 12:
             print(f"{FAIL} {operation}_job: job {job['windows_id']} for user {user_obj.name} has reached max stage, cannot {operation}")
             release_lock_data()
+            data_locked = False
             return
         id = user_obj.windows_offset
         data['users'][user_obj.name]['windows_offset'] = id + 1
+        config_args = _strip_resume_config_overrides(job["extra_configs"])
         new_job = {
             'user': user_obj.name,
             'windows_id': id,
@@ -541,13 +657,16 @@ def resume_rerun_job(job, new_tpu = None, load_ckpt = True):
             'job_tags': job["job_tags"],
             'log_dir': None,
             'stage_dir': None,
-            'extra_configs': job["extra_configs"],
+            'extra_configs': config_args,
             'status': None,
             'stage': new_stage,
             'monitor': job["monitor"],
             'rules': job["rules"],
             'error': None,
-            'extra_msgs': job["extra_msgs"] | {"father": job["windows_id"]},
+            'extra_msgs': (job.get("extra_msgs") or {}) | {
+                "father": job["windows_id"],
+                REMOTE_LINUX_USER_FIELD: remote_linux_user,
+            },
             'customized_settings': job.get("customized_settings", {}),
         }
 
@@ -592,32 +711,39 @@ def resume_rerun_job(job, new_tpu = None, load_ckpt = True):
                 jb["extra_msgs"].update({"child": id})
         
         session_name = user_obj.tmux_name
-        config_args = job["extra_configs"]
         tags = job["job_tags"]
         stage_dir = job["stage_dir"]
         assert stage_dir is not None, f"Job {job['windows_id']} for user {user_obj.name} has no stage dir"
         log_dir = job["log_dir"]
         print(f"{INFO} {operation} job {job['windows_id']} for user {user_obj.name} with new windows id {id}")
 
-
-        # kill the old job
-        kill_jobs_tpu(tpu)
-
         # create the tmux window
         os.system(f"tmux new-window -t {session_name}:{id}")
         time.sleep(4.5)
-        os.system(f"tmux send-keys -t {session_name}:{id} 'cd {stage_dir}' Enter")
+        _send_tmux_command(session_name, id, f"cd {stage_dir}")
         time.sleep(4.5)
         wandb_resume_arg = f" --config.wandb_resume_id={wandb_resume_id}" if wandb_resume_id else ""
         if load_ckpt_path:
             if job.get("customized_settings", {}).get("log_stage", False):
-                os.system(f"tmux send-keys -t {session_name}:{id} 'source staging.sh ka={tpu} zone={zone} {config_args} --config.load_from={load_ckpt_path} --config.stage={new_stage}{wandb_resume_arg}' Enter")
+                launch_cmd = _staging_cmd(
+                    remote_linux_user,
+                    f"source staging.sh ka={tpu} zone={zone} {config_args} --config.load_from={load_ckpt_path} --config.stage={new_stage}{wandb_resume_arg}",
+                )
+                _send_tmux_command(session_name, id, launch_cmd)
                 new_job['extra_configs'] += f" --config.load_from={load_ckpt_path} --config.stage={new_stage}{wandb_resume_arg}"
             else:
-                os.system(f"tmux send-keys -t {session_name}:{id} 'source staging.sh ka={tpu} zone={zone} {config_args} --config.load_from={load_ckpt_path}{wandb_resume_arg}' Enter")
+                launch_cmd = _staging_cmd(
+                    remote_linux_user,
+                    f"source staging.sh ka={tpu} zone={zone} {config_args} --config.load_from={load_ckpt_path}{wandb_resume_arg}",
+                )
+                _send_tmux_command(session_name, id, launch_cmd)
                 new_job['extra_configs'] += f" --config.load_from={load_ckpt_path}{wandb_resume_arg}"
         else:
-            os.system(f"tmux send-keys -t {session_name}:{id} 'source staging.sh ka={tpu} zone={zone} {config_args}{wandb_resume_arg}' Enter")
+            launch_cmd = _staging_cmd(
+                remote_linux_user,
+                f"source staging.sh ka={tpu} zone={zone} {config_args}{wandb_resume_arg}",
+            )
+            _send_tmux_command(session_name, id, launch_cmd)
             if wandb_resume_arg:
                 new_job['extra_configs'] += wandb_resume_arg
         
@@ -629,6 +755,7 @@ def resume_rerun_job(job, new_tpu = None, load_ckpt = True):
         
 
         write_and_unlock_data(data)
+        data_locked = False
         spreadsheet_notes = new_job.get("extra_msgs", {}).get("spreadsheet_notes", None)
         tpu_info = get_tpu_info_sheet(tpu)
         tpu_info['running_status'] = 'running'
@@ -639,12 +766,15 @@ def resume_rerun_job(job, new_tpu = None, load_ckpt = True):
 
 
     except Exception as e:
-        print(f"{FAIL} {operation}_job: Failed to {operation} job {job['windows_id']} for user {user_obj.name}, error: {e}")
-        release_lock_data()
+        user_name = user_obj.name if 'user_obj' in locals() else job.get("user", "<unknown>")
+        print(f"{FAIL} {operation}_job: Failed to {operation} job {job['windows_id']} for user {user_name}, error: {e}")
+        if data_locked:
+            release_lock_data()
 
     except KeyboardInterrupt:
         print(f"{INFO} {operation}_job: Stopping {operation}...")
-        release_lock_data()
+        if data_locked:
+            release_lock_data()
         return
 
 def kill_job_or_tpu(user_obj, args):
@@ -652,6 +782,8 @@ def kill_job_or_tpu(user_obj, args):
     Kill a job in the tmux session with specified window id. Need to acquire the lock.
     """
     windows_id = None
+    remote_linux_user_override = _parse_remote_linux_user_override(args)
+    all_remote_users = any(arg in {"--all-users", "--all-remote-users", "--kill-all-users"} for arg in args)
     data = read_data()
     all_tpu_list = []
     for alias, tpu_name in data['tpu_aliases'].items():
@@ -664,8 +796,14 @@ def kill_job_or_tpu(user_obj, args):
         if is_integer(arg):
             windows_id = arg
         if arg in all_tpu_list:
-            print(f"{INFO} kill_job: Killing all jobs using tpu {arg}")
-            kill_jobs_tpu(arg, username=user_obj.name)
+            scope = "all remote users" if all_remote_users else (remote_linux_user_override or f"{user_obj.name}'s remote users")
+            print(f"{INFO} kill_job: Killing jobs using tpu {arg}; scope={scope}")
+            kill_jobs_tpu(
+                arg,
+                username=None if all_remote_users else user_obj.name,
+                remote_user=remote_linux_user_override,
+                all_remote_users=all_remote_users,
+            )
             return
         
     if windows_id is None:
@@ -785,7 +923,10 @@ def parse_config_args(user_obj, args):
     config_args = ""
     tag, rule, tpu = None, None, None
     monitor = True
-    ignore_keys = ['dir', 'user', 'id', 'tag', 'rule', 'monitor', 'ssn', 'zone', 'sname', 'tpu', 'pre', 'spot']
+    ignore_keys = {
+        'dir', 'user', 'id', 'tag', 'rule', 'monitor', 'ssn', 'zone', 'sname',
+        'tpu', 'pre', 'spot',
+    } | set(REMOTE_LINUX_USER_ARG_KEYS)
     customized_settings = {}
     dir_id = '1'
     spreadsheet_notes = None
@@ -798,13 +939,15 @@ def parse_config_args(user_obj, args):
 
     for arg in args:
         if '=' in arg:
-            key, value = arg.split('=')[0], arg.split('=')[1]
+            key, value = arg.split('=', 1)[0].lstrip('-'), arg.split('=', 1)[1]
             if key not in ignore_keys:
                 if key in user_obj.config_aliases:
                     config_args += f" --{user_obj.config_aliases[key]}={value}"
                 else:
                     assert key.startswith('config'), f"Unknown config key {key}"
                     config_args += f" --{key}={value}"
+            if key in REMOTE_LINUX_USER_ARG_KEYS:
+                customized_settings[REMOTE_LINUX_USER_FIELD] = normalize_remote_linux_user(value)
             if key == 'tag':
                 tag = value
             if key == 'rule':
@@ -915,6 +1058,7 @@ def run(user_obj, args, monitor_job = True):
         alias = None
         spreadsheet_name = None
         tpu = None
+        remote_linux_user = _remote_linux_user_for_new_job(user_obj, _parse_remote_linux_user_override(args))
         for arg in args:
             if 'zone=' in arg:
                 zone = arg.split('zone=')[1]
@@ -944,7 +1088,7 @@ def run(user_obj, args, monitor_job = True):
         print(f"{GOOD} run: Registered TPU {tpu} successfully")
 
         print(f"{INFO} run: Mounting disk for this TPU...")
-        try: mount_disk(tpu, zone)
+        try: mount_disk(tpu, zone=zone, remote_user=remote_linux_user)
         except Exception as e:
             print(f"{FAIL} run: Failed to mount disk for TPU {tpu}: {e}")
             return
@@ -954,6 +1098,13 @@ def run(user_obj, args, monitor_job = True):
         print(f"{GOOD} run: Mounted disk for TPU {tpu} successfully")
     
     dir_id, dir_path, tpu, tag, rule, monitor, config_args, customized_settings, spreadsheet_notes = parse_config_args(user_obj, args)
+    remote_linux_user = _remote_linux_user_for_new_job(
+        user_obj,
+        customized_settings.get(REMOTE_LINUX_USER_FIELD),
+    )
+    print(f"{INFO} run: Using remote Linux user {remote_linux_user}")
+    if not monitor:
+        monitor_job = False
 
     # Check the status of the TPU, and reapply if needed
     if tpu is not None:
@@ -979,15 +1130,15 @@ def run(user_obj, args, monitor_job = True):
 
         try:
             _ssh_check_cmd = (
-                f"gcloud compute tpus tpu-vm ssh {tpu} --zone {zone} "
+                f"gcloud compute tpus tpu-vm ssh {remote_linux_user}@{tpu} --zone {zone} "
                 f"--project {PROJECT} --worker=0 "
-                f'--command "test -f /home/sqa/.disk_mounted && echo DISK_MOUNTED || echo DISK_NOT_MOUNTED"'
+                f'--command "test -f /home/{remote_linux_user}/.disk_mounted && mountpoint -q /kmh-nfs-ssd-us-mount && echo DISK_MOUNTED || echo DISK_NOT_MOUNTED"'
             )
             _ssh_result = subprocess.run(
                 _ssh_check_cmd, shell=True, capture_output=True, text=True, timeout=30
             )
             _ssh_output = _ssh_result.stdout + _ssh_result.stderr
-            if "DISK_MOUNTED" in _ssh_output:
+            if any(line.strip() == "DISK_MOUNTED" for line in _ssh_output.splitlines()):
                 print(f"{GOOD} run: TPU {tpu} disk has been mounted")
             else:
                 print(f"{WARNING} run: TPU {tpu} disk has NOT been mounted")
@@ -998,50 +1149,52 @@ def run(user_obj, args, monitor_job = True):
 
         if tpu_status == 'preempted':
             print(f"{WARNING} run: TPU {tpu} is preempted")
-            REAPPLY = False
-            if '-apply' in args:
-                print(f"{INFO} run: Re-applying preempted TPU {tpu}...")
-                REAPPLY = True
-            else:
-                print(f"DO YOU WANT TO REAPPLY? (y/n)")
-                res = input()
-                if res == 'y' or res == 'Y':
-                    print(f"{INFO} run: Re-applying preempted TPU {tpu}...")
-                    REAPPLY = True
-                else:
-                    print(f"{INFO} run: Quiting... {tpu}")
-                    REAPPLY = False
-            if not REAPPLY: return
-            try:
-                apply_and_set_env(tpu, preemptible=True, delete=True)
-            except Exception as e:
-                print(f"{FAIL} run: Failed to reapply TPU {tpu}: {e}")
-                return
-            except KeyboardInterrupt:
-                print(f"{INFO} run: Stopping reapply...")
-                return
-            print(f"{GOOD} run: Re-applying TPU {tpu} successfully")
+            exit(114)
+            # REAPPLY = False
+            # if '-apply' in args:
+            #     print(f"{INFO} run: Re-applying preempted TPU {tpu}...")
+            #     REAPPLY = True
+            # else:
+            #     print(f"DO YOU WANT TO REAPPLY? (y/n)")
+            #     res = input()
+            #     if res == 'y' or res == 'Y':
+            #         print(f"{INFO} run: Re-applying preempted TPU {tpu}...")
+            #         REAPPLY = True
+            #     else:
+            #         print(f"{INFO} run: Quiting... {tpu}")
+            #         REAPPLY = False
+            # if not REAPPLY: return
+            # try:
+            #     apply_and_set_env(tpu, preemptible=True, delete=True)
+            # except Exception as e:
+            #     print(f"{FAIL} run: Failed to reapply TPU {tpu}: {e}")
+            #     return
+            # except KeyboardInterrupt:
+            #     print(f"{INFO} run: Stopping reapply...")
+            #     return
+            # print(f"{GOOD} run: Re-applying TPU {tpu} successfully")
 
         elif tpu_status == 'ready':
             print(f"{GOOD} run: TPU {tpu} is ready, starting job...")
 
         elif tpu_status == 'failed':
             print(f"{WARNING} run: Failed to query status")
-            print(f"This may indicate that this TPU is deleted, do you want to apply? (y/n)")
-            res = input()
-            if res == 'y' or res == 'Y':
-                print(f"{INFO} run: Re-applying TPU {tpu}...")
-                try: apply_and_set_env(tpu, preemptible=True, delete=False)
-                except Exception as e:
-                    print(f"{FAIL} run: Failed to reapply TPU {tpu}: {e}")
-                    return
-                except KeyboardInterrupt:
-                    print(f"{INFO} run: Stopping reapply...")
-                    return
-                print(f"{GOOD} run: Applying TPU {tpu} successfully")
-            else:
-                print(f"{INFO} run: Quiting... {tpu}")
-                return
+            print(f"This may indicate that this TPU is deleted.")
+            exit(114)
+            # res = input()
+            # if res == 'y' or res == 'Y':
+            #     print(f"{INFO} run: Re-applying TPU {tpu}...")
+            #     try: apply_and_set_env(tpu, preemptible=True, delete=False)
+            #     except Exception as e:
+            #         print(f"{FAIL} run: Failed to reapply TPU {tpu}: {e}")
+            #         return
+            #     except KeyboardInterrupt:
+            #         print(f"{INFO} run: Stopping reapply...")
+            #         return
+            #     print(f"{GOOD} run: Applying TPU {tpu} successfully")
+            # else:
+            #     print(f"{INFO} run: Quiting... {tpu}")
+            #     return
 
         elif tpu_status == 'restarting' or tpu_status == 'creating' or tpu_status == 'stopping':
             print(f"{WARNING} run: TPU {tpu} is {tpu_status.lower()}")
@@ -1052,6 +1205,8 @@ def run(user_obj, args, monitor_job = True):
             print(f"{WARNING} run: TPU {tpu} is in unknown state {tpu_status}")
             print(f"{INFO} run: Quiting... {tpu}")
             return
+
+        _maybe_prepare_pretrained_checkpoint_for_launch(dir_path, config_args, zone)
 
     # Check the spreadsheet for the TPU information
     print(f"{INFO} run: Checking the TPU information in the spreadsheet..., tpu: {tpu}")
@@ -1123,8 +1278,22 @@ def run(user_obj, args, monitor_job = True):
                             break
                     write_and_unlock_data(data)
         
+    data_locked = False
     try:
-        kill_jobs_tpu(tpu)
+        if tpu is not None:
+            all_remote_users = any(arg in {"--all-users", "--all-remote-users", "--kill-all-users"} for arg in args)
+            kill_state = kill_jobs_tpu(
+                tpu,
+                username=None if all_remote_users else user_obj.name,
+                remote_user=None if all_remote_users else remote_linux_user,
+                all_remote_users=all_remote_users,
+            )
+            if kill_state != 'success':
+                raise RuntimeError(f"failed to kill remote processes: {kill_state}")
+
+            mount_state = mount_disk(tpu, zone=zone, remote_user=remote_linux_user)
+            if mount_state != 'success':
+                raise RuntimeError(f"failed to mount disk for {remote_linux_user}: {mount_state}")
 
         # # conduct 新
         # # condition: there exists 新.sh in the directory and the tpu has not 新 (by checking whether there is a file named ~/sqa冲 on the remote VM)
@@ -1142,6 +1311,7 @@ def run(user_obj, args, monitor_job = True):
         #         raise RuntimeError(f"Failed to check whether TPU {tpu} has 新")
         
         data = read_and_lock_data()
+        data_locked = True
 
         session_name = user_obj.tmux_name
 
@@ -1163,7 +1333,8 @@ def run(user_obj, args, monitor_job = True):
             'monitor': monitor,
             'rules': copy.deepcopy(RULE_DICT[rule]),
             'extra_msgs': {
-                "spreadsheet_notes": spreadsheet_notes
+                "spreadsheet_notes": spreadsheet_notes,
+                REMOTE_LINUX_USER_FIELD: remote_linux_user,
             },
             'customized_settings': customized_settings
         })
@@ -1188,31 +1359,43 @@ def run(user_obj, args, monitor_job = True):
             print(f"{FAIL} run: Window {window_id} not found")
             print(f"{FAIL} run: This may indicate that this window is already created, please check the tmux session")
             release_lock_data()
+            data_locked = False
             return
         time.sleep(2)
-        os.system(f"tmux send-keys -t {session_name}:{window_id} 'cd {dir_path}' Enter")
+        _send_tmux_command(session_name, window_id, f"cd {dir_path}")
         if tpu is None:
             raise RuntimeError('zhh does not how to handle this case')
-            os.system(f"tmux send-keys -t {session_name}:{window_id} 'source staging.sh {config_args}' Enter")
+            _send_tmux_command(
+                session_name,
+                window_id,
+                _staging_cmd(remote_linux_user, f"source staging.sh {config_args}"),
+            )
         else:
             zone, _, _, _ = get_zone_pre_spot(tpu)
-            os.system(f"tmux send-keys -t {session_name}:{window_id} 'source staging.sh ka={tpu} zone={zone} {config_args}' Enter") 
+            _send_tmux_command(
+                session_name,
+                window_id,
+                _staging_cmd(remote_linux_user, f"source staging.sh ka={tpu} zone={zone} {config_args}"),
+            ) 
         
         print(f"{GOOD} run: Successfully created job in tmux window {session_name}:{window_id}")
 
         time.sleep(4)
 
         write_and_unlock_data(data)
+        data_locked = False
     
     except KeyboardInterrupt:
         print(f"\n{INFO} run: Stopping job creation...")
-        release_lock_data()
+        if data_locked:
+            release_lock_data()
         return
 
     except BaseException as e:
         print(f"{FAIL} run: Failed to create job in tmux window")
         print(f"Error: {e}")
-        release_lock_data()
+        if data_locked:
+            release_lock_data()
 
     time.sleep(3)
 
@@ -1259,16 +1442,34 @@ def write_error_to_job(user_obj, job_data, error):
     """
     Write the error to the job data
     """
-    data = read_and_lock_data()
-    for user in data['users']:
-        if data['users'][user]['tmux_name'] == user_obj.tmux_name:
-            for job in data['users'][user]['job_data']:
-                if str(job['windows_id']) == str(job_data['windows_id']):
-                    job['status'] = 'error'
-                    job['error'] = error
-                    break
-            break
-    write_and_unlock_data(data)
+    # Idempotency: skip lock+write if state already matches. check_jobs
+    # re-detects the same error pattern every lck — avoids hammering the
+    # data lock from a read-style command.
+    if job_data.get('status') == 'error' and job_data.get('error') == error:
+        return
+    # Opportunistic write: lck is read-style; if another xibo writer holds
+    # the data lock (lrun/resume/mount-disk/etc.), silently skip this write
+    # instead of blocking. Next lck re-detects and retries -- eventual
+    # consistency. MONITOR also re-sweeps on its own checking_freq cycle.
+    data, acquired = read_data_if_unlocked()
+    if not acquired:
+        return
+    try:
+        for user in data['users']:
+            if data['users'][user]['tmux_name'] == user_obj.tmux_name:
+                for job in data['users'][user]['job_data']:
+                    if str(job['windows_id']) == str(job_data['windows_id']):
+                        job['status'] = 'error'
+                        job['error'] = error
+                        break
+                break
+        write_and_unlock_data(data)
+    except Exception:
+        # write_and_unlock_data only clears lock on success; on any raise
+        # above, status would stay True forever (30-min poll stalls for
+        # every subsequent xibo write). Release explicitly.
+        release_lock_data()
+        raise
 
 def is_monitor_config(arg):
     """
@@ -1298,6 +1499,8 @@ def check_jobs(user_obj, args, config = None):
             config += 't'
         if user_obj.settings.get("monitor_verbose", False):
             config += 'v'
+        if user_obj.settings.get("monitor_zone", False):
+            config += 'z'
     # print(f'config: {config}')
 
     if '-nt' in args:
@@ -1367,9 +1570,14 @@ def check_jobs(user_obj, args, config = None):
             if 'd' in config:
                 print(f"DIR: {job_data['job_dir'].split('/')[-1]}")
             if 't' in config:
-                print(f"TPU: {job_data['tpu'][10:]}")
-            if 'z' in config:
-                zone, _, _, _ = get_zone_pre_spot(job_data['tpu'])
+                tpu_short = job_data['tpu'][10:]
+                if 'z' in config:
+                    zone, _, _, _ = get_zone_pre_spot(job_data['tpu'], quiet=True)
+                    print(f"TPU: {tpu_short} ({zone})")
+                else:
+                    print(f"TPU: {tpu_short}")
+            elif 'z' in config:
+                zone, _, _, _ = get_zone_pre_spot(job_data['tpu'], quiet=True)
                 print(f"ZONE: {zone}")
         last_line = os.popen(f"tmux capture-pane -t {session_name}:{window_id} -p -S -").read()
         last_line = last_line.rstrip()
@@ -1427,7 +1635,7 @@ def check_jobs(user_obj, args, config = None):
                     if not found: break
                 if (re.search(r'Job failed', last_line_cut) or re.search(r'[eE]rror', last_line_cut) or re.search(r'FAIL', last_line_cut)) and 's' in config:
                     # read the logdir
-                    logfile = read_head_tail(job_data['log_dir']+'/output.log', n=500)
+                    logfile = read_head_tail(job_data['log_dir']+'/output.log', n=500) if job_data.get('log_dir') else ''
                     if re.search(r'Allocation type', last_line):
                         print(f"Status: {RED}OOM Error{NC}\nmsg: {msg}")
                         write_error_to_job(user_obj, job_data, 'OOM')
@@ -1568,7 +1776,7 @@ def check_jobs_simp(user_obj, args, config = None, num_columns = 3):
             except Exception:
                 rows_meta.append(("TPU", "(unknown)"))
         if 'z' in config:
-            zone, _, _, _ = get_zone_pre_spot(job_data['tpu'])
+            zone, _, _, _ = get_zone_pre_spot(job_data['tpu'], quiet=True)
             try:
                 rows_meta.append(("ZONE", zone))
             except Exception:
@@ -1633,15 +1841,44 @@ def kill_window(user_obj, args):
 
 
 def run_job_on_tpu(job: Job, tpu, quiet = True, ignore_window = None):
-    data = read_and_lock_data()
+    data = None
+    user_obj = None
     try:
+        zone, pre, spot, tpu = get_zone_pre_spot(tpu)
+        assert job.stage_dir is not None, f"run_job_on_tpu: Job don't have stagedir"
+        _maybe_prepare_pretrained_checkpoint_for_launch(job.stage_dir, job.extra_configs, zone)
+
+        read_only_data = read_data()
+        user_obj = users.user_from_dict(read_only_data['users'][job.user])
+        remote_linux_user = _remote_linux_user_for_new_job(
+            user_obj,
+            (job.extra_msgs or {}).get(REMOTE_LINUX_USER_FIELD),
+        )
+
+        tpu_status = check_tpu_status(tpu)
+        assert tpu_status == 'ready', f"run_job_on_tpu: TPU {tpu} is not ready, status: {tpu_status}"
+
+        kill_state = kill_jobs_tpu(
+            tpu,
+            username=user_obj.name,
+            remote_user=remote_linux_user,
+            ignore_window=ignore_window,
+        )
+        if kill_state != 'success':
+            raise RuntimeError(f"failed to kill remote processes: {kill_state}")
+
+        mount_state = mount_disk(tpu, zone=zone, remote_user=remote_linux_user)
+        if mount_state != 'success':
+            raise RuntimeError(f"failed to mount disk for {remote_linux_user}: {mount_state}")
+
+        data = read_and_lock_data()
         # update logs
         user = job.user
         user_obj = users.user_from_dict(data['users'][user])
+        job.extra_msgs[REMOTE_LINUX_USER_FIELD] = remote_linux_user
         window_id = user_obj.windows_offset
         data['users'][user_obj.name]['windows_offset'] = window_id + 1
         user_obj.windows_offset = window_id + 1
-        zone, pre, spot, tpu = get_zone_pre_spot(tpu)
         if not job.rules:
             job.rules = RULE_DICT["pre"] if pre else RULE_DICT["pass"]
         
@@ -1651,19 +1888,17 @@ def run_job_on_tpu(job: Job, tpu, quiet = True, ignore_window = None):
 
         # sanity check
         session_name = user_obj.tmux_name
-        assert job.stage_dir is not None, f"run_job_on_tpu: Job don't have stagedir"
-
-        tpu_status = check_tpu_status(tpu)
-        assert tpu_status == 'ready', f"run_job_on_tpu: TPU {tpu} is not ready, status: {tpu_status}"
-
-        kill_jobs_tpu(tpu, ignore_window=ignore_window)
 
         # run the job
         os.system(f"tmux new-window -t {session_name}:{window_id}")
         time.sleep(8.5)
-        os.system(f"tmux send-keys -t {session_name}:{window_id} 'cd {job.stage_dir}' Enter")
+        _send_tmux_command(session_name, window_id, f"cd {job.stage_dir}")
         time.sleep(8.5)
-        os.system(f"tmux send-keys -t {session_name}:{window_id} 'source staging.sh ka={tpu} zone={zone} {job.extra_configs}' Enter")
+        _send_tmux_command(
+            session_name,
+            window_id,
+            _staging_cmd(remote_linux_user, f"source staging.sh ka={tpu} zone={zone} {job.extra_configs}"),
+        )
 
         if not quiet:
             print(f"{GOOD} run_job_on_tpu: Successfully created job in tmux window {session_name}:{window_id}")
@@ -1671,6 +1906,7 @@ def run_job_on_tpu(job: Job, tpu, quiet = True, ignore_window = None):
             print(f"{INFO} run_job_on_tpu: new job {job.to_dict()}")
 
         write_and_unlock_data(data)
+        data = None
 
         tpu_info = get_tpu_info_sheet(tpu)
         tpu_info['running_status'] = 'running'
@@ -1679,13 +1915,15 @@ def run_job_on_tpu(job: Job, tpu, quiet = True, ignore_window = None):
         write_sheet_info(tpu_info)
 
     except Exception as e:
-        print(f"{FAIL} run_job_on_tpu: Failed to run job for user {user_obj.name}, error: {e}")
+        user_name = user_obj.name if user_obj is not None else getattr(job, "user", "<unknown>")
+        print(f"{FAIL} run_job_on_tpu: Failed to run job for user {user_name}, error: {e}")
 
     except KeyboardInterrupt:
         print(f"{INFO} run_job_on_tpu: Stopping ...")
 
     finally:
-        release_lock_data()
+        if data is not None:
+            release_lock_data()
 
 def monitor_jobs(user_obj, args):
     config = None
@@ -1707,6 +1945,8 @@ def monitor_jobs(user_obj, args):
             config += 't'
         if user_obj.settings.get("monitor_verbose", False):
             config += 'v'
+        if user_obj.settings.get("monitor_zone", False):
+            config += 'z'
     
     if '-nt' in args:
         config += 'T'
@@ -1929,7 +2169,13 @@ def ack_MONITOR():
     """
     Acknowledge the monitor command
     """
-    data = read_and_lock_data()
+    # Opportunistic write: ack_MONITOR is just an early-wake signal for the
+    # MONITOR daemon. If lock is held, skip -- MONITOR wakes on its natural
+    # checking_freq cycle anyway. Avoids blocking lck behind concurrent xibo
+    # writers.
+    data, acquired = read_data_if_unlocked()
+    if not acquired:
+        return
     try:
         data["ack_MONITOR"] = True
         write_and_unlock_data(data)
@@ -1954,4 +2200,3 @@ def read_head_tail(path, n=1000, encoding="utf-8"):
     with open(path, 'r') as f:
         x = f.read()
     return x
-
