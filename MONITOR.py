@@ -51,6 +51,7 @@ TPU_PROJECT = "he-vision-group"
 TPU_ENV_CHECK_TIMEOUT_SECONDS = 300
 TPU_JAX_CHECK_REMOTE_CMD = "python -c \"import jax; print('JAX_OK', jax.__version__)\""
 _ASIA_RESERVED_ZONE = 'asia-northeast1-b'
+_LAION400M_TOKEN = 'laion-400m'
 STALE_REGISTERED_TPU_CLEANUP_EVERY_LOOPS = 20
 
 
@@ -1695,13 +1696,22 @@ def _type_constraint_text(low_cost=False, gpt_b_only=False, v5_only=False, allow
         return "v6e-32 / v5/v5p-64" if not allow_larger else "v6e>=32 / v5/v5p>=64"
     return "v6e-64 / v5/v5p-128" if not allow_larger else "v6e>=64 / v5/v5p>=128"
 
-def _queue_constraint_text(low_cost=False, gpt_b_only=False, v5_only=False, preferred_type=None, preferred_zone=None):
+def _queue_constraint_text(
+    low_cost=False,
+    gpt_b_only=False,
+    v5_only=False,
+    preferred_type=None,
+    preferred_zone=None,
+    required_zone=None,
+):
     """Describe queue launch constraints without implying resume constraints."""
     parts = [
         "mode=queue-from-zero",
         f"type={_type_constraint_text(low_cost=low_cost, gpt_b_only=gpt_b_only, v5_only=v5_only)}",
         f"zones={RESUME_QUEUE_ALLOWED_ZONE_LABEL}",
     ]
+    if required_zone:
+        parts.append(f"required_zone={required_zone}")
     if preferred_type:
         parts.append(f"preferred_type={preferred_type}")
     if preferred_zone:
@@ -1717,19 +1727,21 @@ def _resume_constraint_text(
     gpt_b_only=False,
     v5_only=False,
     allow_larger=False,
+    required_zone=None,
 ):
     """Describe resume/rerun TPU constraints for failure logs."""
+    required_text = f", required_zone={required_zone}" if required_zone else ""
     if same_zone_only:
-        return f"mode=training-checkpoint-resume, type={target_type}, zone={target_zone}"
+        return f"mode=training-checkpoint-resume, type={target_type}, zone={target_zone}{required_text}"
     if same_type_only:
         return (
             f"mode=training-resume, type={target_type}, "
-            f"zones={RESUME_QUEUE_ALLOWED_ZONE_LABEL}"
+            f"zones={RESUME_QUEUE_ALLOWED_ZONE_LABEL}{required_text}"
         )
     return (
         "mode=rerun-or-eval-flex, "
         f"type={_type_constraint_text(low_cost=low_cost, gpt_b_only=gpt_b_only, v5_only=v5_only, allow_larger=allow_larger)}, "
-        f"zones={RESUME_QUEUE_ALLOWED_ZONE_LABEL}"
+        f"zones={RESUME_QUEUE_ALLOWED_ZONE_LABEL}{required_text}"
     )
 
 def _same_resume_type_allowed(candidate_type, target_type, v5_only=False):
@@ -1754,6 +1766,16 @@ def _is_low_cost_job(job):
 def _is_llava15_reproduction_job(job):
     """LLaVA-1.5 reproduction jobs OOM on v6, so they must run only on v5."""
     return 'llava-1.5 reproduction' in str(_get_job_notes(job)).lower()
+
+def _is_laion400m_job(job):
+    """LAION-400M data is only mounted in asia-northeast1-b."""
+    return _LAION400M_TOKEN in str(_get_job_notes(job)).lower()
+
+def _required_zone_for_job(job):
+    """Return a hard zone requirement implied by job notes, if any."""
+    if _is_laion400m_job(job):
+        return _ASIA_RESERVED_ZONE
+    return None
 
 def _is_gpt_b_job(job):
     """Return True if spreadsheet/wandb notes indicate GPT-B workload."""
@@ -2093,6 +2115,7 @@ def _pick_idle_tpu(
     gpt_b_only=False,
     v5_only=False,
     allow_larger=False,
+    required_zone=None,
 ):
     """
     Pick an idle TPU that is allowed to resume the job.
@@ -2102,6 +2125,7 @@ def _pick_idle_tpu(
       - same_type_only=True: exact target_type within the original region.
       - otherwise see _is_type_allowed for checkpoint-free reruns / eval resumes.
       - LLaVA-1.5 reproduction keeps its v5-only hard constraint.
+      - LAION-400M notes force asia-northeast1-b because that is where the data exists.
 
     Region rules:
       - Pass 1: same type + same zone.
@@ -2145,6 +2169,7 @@ def _pick_idle_tpu(
             and n not in blocked_tpus
             and n not in process_blocked_tpus
             and is_resume_queue_allowed_zone(z)
+            and (required_zone is None or z == required_zone)
         ],
         key=lambda t: _tpu_size_sort_key(t[0], t[1], gpt_b_only=gpt_b_only)
     )
@@ -2212,6 +2237,7 @@ def _pick_any_idle_tpu(
     low_cost=False,
     gpt_b_only=False,
     v5_only=False,
+    required_zone=None,
 ):
     """为新 job 选一张空闲 TPU（不要求 resume 同型号）。
 
@@ -2240,6 +2266,7 @@ def _pick_any_idle_tpu(
             and n not in blocked_tpus
             and n not in process_blocked_tpus
             and is_resume_queue_allowed_zone(z)
+            and (required_zone is None or z == required_zone)
         ],
         key=lambda t: _tpu_size_sort_key(t[0], t[1], gpt_b_only=gpt_b_only)
     )
@@ -2330,12 +2357,14 @@ def _run_queued_jobs(excluded_tpus=None):
         low_cost = _is_low_cost_job(queue_job)
         gpt_b_only = _is_gpt_b_job(queue_job)
         v5_only = _is_llava15_reproduction_job(queue_job)
+        required_zone = _required_zone_for_job(queue_job)
         queue_constraints = _queue_constraint_text(
             low_cost=low_cost,
             gpt_b_only=gpt_b_only,
             v5_only=v5_only,
             preferred_type=preferred_type,
             preferred_zone=preferred_zone,
+            required_zone=required_zone,
         )
         add_MONITOR_log(f"{INFO} queue: 尝试 dir={dir_no} priority={priority}")
         if preferred_type or preferred_zone:
@@ -2351,6 +2380,8 @@ def _run_queued_jobs(excluded_tpus=None):
             add_MONITOR_log(f'{INFO} queue: dir={dir_no} 命中 GPT-B notes，选卡仅允许 v5p<=32 / v6e<=16')
         if v5_only:
             add_MONITOR_log(f'{INFO} queue: dir={dir_no} 命中 llava-1.5 reproduction，v6 会 OOM，选卡仅允许 v5/v5p-64\n')
+        if required_zone:
+            add_MONITOR_log(f'{INFO} queue: dir={dir_no} 命中 {_LAION400M_TOKEN} notes，选卡仅允许 {required_zone}\n')
         elif low_cost and not gpt_b_only:
             add_MONITOR_log(f'{INFO} queue: dir={dir_no} 命中 low-cost notes，选卡仅允许 v6e-32 / v5/v5p-64')
         _queue_reserved_aliases, queue_reserved_tpus = _queue_reserved_aliases_tpus()
@@ -2368,6 +2399,7 @@ def _run_queued_jobs(excluded_tpus=None):
                 low_cost=low_cost,
                 gpt_b_only=gpt_b_only,
                 v5_only=v5_only,
+                required_zone=required_zone,
             )
             if not picked_tpu:
                 break
@@ -2500,10 +2532,19 @@ def mainloop():
             _window = job['windows_id']
             _old_tpu = job['tpu']
             old_zone = _extract_zone(_old_tpu) or _get_job_type_zone(job)[1]
+            required_zone = _required_zone_for_job(job)
             if not is_resume_queue_allowed_zone(old_zone):
                 add_MONITOR_log(
                     f'{INFO} window {_window} 旧卡 {_old_tpu}/{old_zone} '
                     f'不在允许区域 ({RESUME_QUEUE_ALLOWED_ZONE_LABEL})，不走buffer直接resume，改为找允许区域空卡\n'
+                )
+                remove_resume_next_round(_window)
+                error_jobs['deleted'].append(job)
+                continue
+            if required_zone and old_zone != required_zone:
+                add_MONITOR_log(
+                    f'{INFO} window {_window} 命中 {_LAION400M_TOKEN} notes，旧卡 {_old_tpu}/{old_zone} '
+                    f'不在 required_zone={required_zone}，不走buffer直接resume，改为找 {required_zone} 空卡\n'
                 )
                 remove_resume_next_round(_window)
                 error_jobs['deleted'].append(job)
@@ -2630,10 +2671,18 @@ def mainloop():
                         force_deleted_jobs.append(job)
                         continue
                     old_zone = _extract_zone(_old_tpu) or _get_job_type_zone(job)[1]
+                    required_zone = _required_zone_for_job(job)
                     if not is_resume_queue_allowed_zone(old_zone):
                         add_MONITOR_log(
                             f'{INFO} window {_window} 旧卡 {_old_tpu}/{old_zone} '
                             f'不在允许区域 ({RESUME_QUEUE_ALLOWED_ZONE_LABEL})，按卡没了处理以便换到允许区域\n'
+                        )
+                        force_deleted_jobs.append(job)
+                        continue
+                    if required_zone and old_zone != required_zone:
+                        add_MONITOR_log(
+                            f'{INFO} window {_window} 命中 {_LAION400M_TOKEN} notes，旧卡 {_old_tpu}/{old_zone} '
+                            f'不在 required_zone={required_zone}，按卡没了处理以便换到 {required_zone}\n'
                         )
                         force_deleted_jobs.append(job)
                         continue
@@ -2672,6 +2721,14 @@ def mainloop():
                     add_MONITOR_log(f'{MADE} 我无法确定这个老登的卡型号和所在区域, 跳过这个老登\n')
                     remove_sqa(_window)
                     continue
+                required_zone = _required_zone_for_job(job)
+                target_zone_for_pick = required_zone or target_zone
+                if required_zone:
+                    add_MONITOR_log(
+                        f'{INFO} window {_window} 命中 {_LAION400M_TOKEN} notes，'
+                        f'resume/rerun 选卡强制 required_zone={required_zone} '
+                        f'(原logdir zone={target_zone})\n'
+                    )
 
                 actual_window, resume_action = _get_saving_window(_window)
                 superseded_by = _resume_superseded_by(_window, actual_window, jobs_by_window)
@@ -2719,7 +2776,7 @@ def mainloop():
                     )
                     add_MONITOR_log(
                         f'{INFO} window {_window} 是{phase_detail} checkpoint resume，'
-                        f'resume只允许同zone={target_zone}且同type={target_type}\n'
+                        f'resume只允许zone={target_zone_for_pick}且同type={target_type}\n'
                     )
                 elif same_type_resume:
                     add_MONITOR_log(
@@ -2743,7 +2800,7 @@ def mainloop():
                 new_tpu_name, new_tpu_zone, pick_mode, tpu_already_owned = _pick_idle_tpu(
                     idle_tpus,
                     target_type,
-                    target_zone,
+                    target_zone_for_pick,
                     low_cost=_is_low_cost_job(job),
                     same_type_only=same_type_pick,
                     same_zone_only=same_zone_pick,
@@ -2751,17 +2808,19 @@ def mainloop():
                     gpt_b_only=gpt_b_only,
                     v5_only=v5_only,
                     allow_larger=allow_larger_pick,
+                    required_zone=required_zone,
                 )
                 if not new_tpu_name:
                     resume_constraints = _resume_constraint_text(
                         target_type,
-                        target_zone,
+                        target_zone_for_pick,
                         same_zone_only=same_zone_pick,
                         same_type_only=same_type_pick,
                         low_cost=_is_low_cost_job(job),
                         gpt_b_only=gpt_b_only,
                         v5_only=v5_only,
                         allow_larger=allow_larger_pick,
+                        required_zone=required_zone,
                     )
                     add_MONITOR_log(
                         f'{MADE} 我找不到可用的 IDLE 卡(本轮已排除: {sorted(list(used_tpus_this_round))}), '

@@ -93,6 +93,25 @@ def _extract_saved_path(line):
     return match.group(1).strip().strip("'\"").rstrip(".")
 
 
+def _is_checkpoint_completion_line(line):
+    """Return true only for model checkpoint completion, not sidecar writes."""
+    lower = line.lower()
+    if "saved to" not in lower:
+        return False
+
+    # Dataloader sidecars are written before Orbax completes the checkpoint.
+    # They contain checkpoint_N in their path, so treating them as checkpoint
+    # completion would make the monitor resume from half-written checkpoints.
+    if (
+        "dataloader state" in lower
+        or "_pending_dataloader_state" in lower
+        or "/dataloader_state/" in lower
+    ):
+        return False
+
+    return "checkpoint at step" in lower or "checkpoint step" in lower
+
+
 def _normalize_checkpoint_parent(path):
     if not path:
         return None
@@ -211,7 +230,7 @@ def _scan_checkpoint_state(log_dir):
                     if step is not None:
                         latest_saving_step = step
 
-                if "saved to" in lower:
+                if _is_checkpoint_completion_line(line):
                     step = _extract_step(line)
                     saved_path = _extract_saved_path(line)
                     if step is not None:
